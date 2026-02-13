@@ -2,6 +2,28 @@
 
 AgentTown is an Expo-based, AI-ready application that runs on iOS, Android, and Web from one TypeScript codebase.
 
+## Migrated Features
+
+- Home dashboard with Town entry + WeChat-style chat list
+- Chat detail with AI actions:
+  - Reply suggestions
+  - Task extraction
+  - Brainstorm ideas
+  - Custom prompt on selected message
+- Bot configuration center:
+  - Identity/avatar setup
+  - Knowledge upload and keyword extraction
+  - Skill builder form
+  - Skill marketplace install + inspector
+  - Editable system instructions ("MyBot Brain")
+- Town map gameplay:
+  - Procedural lots/markets/trees
+  - Select lot + visit NPC
+  - In-map NPC chat modal
+- Living Room gameplay:
+  - House/interests/jobs/assets panels
+  - House type switching linked to home state
+
 ## Environment
 
 - Node.js `22.22.0` (see `.nvmrc`)
@@ -15,6 +37,18 @@ AgentTown is an Expo-based, AI-ready application that runs on iOS, Android, and 
 nvm use
 npm install
 npm run start
+```
+
+Optional env for AI:
+
+```bash
+cp .env.example .env.local
+```
+
+Then set:
+
+```bash
+EXPO_PUBLIC_GEMINI_API_KEY=your_key_here
 ```
 
 Run by platform:
