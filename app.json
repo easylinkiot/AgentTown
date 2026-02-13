@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.jason.agenttown"
+      "bundleIdentifier": "com.biceek.agenttown",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -36,6 +39,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fc70ea68-07e9-48d8-933e-6d7053ef6c26"
+      }
+    },
+    "owner": "ngudeveloper"
   }
 }
