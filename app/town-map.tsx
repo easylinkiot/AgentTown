@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
   Modal,
@@ -13,214 +13,166 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { Path, Rect } from "react-native-svg";
+import Svg, { Circle, Path, Rect } from "react-native-svg";
 
 import {
-  generateCity,
-  LotVisualType,
-  MAP_HEIGHT,
-  MAP_WIDTH,
-} from "@/src/features/townmap/generateCity";
+  CHUNK_SIZE,
+  chunkForWorldPoint,
+  coastAreaPathForSvg,
+  coastPathForSvg,
+  getChunksInRange,
+  getVisibleChunkRange,
+  HOME_POSITION,
+  LotData,
+  LOT_VIEW_LABELS,
+  MOUNTAIN_PEAKS,
+  mapMyHouseTypeToVisual,
+  RIVER_WIDTH,
+  ROAD_ROUTES,
+  riverPathForSvg,
+  routePoint,
+  WORLD_CHUNKS_X,
+  WORLD_CHUNKS_Y,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
+} from "@/src/features/townmap/world";
+import { TownHouseNode } from "@/src/components/TownHouseNode";
 import { generateGeminiText } from "@/src/lib/gemini";
-
-type RouteId = "north_ave" | "south_blvd" | "west_hwy" | "east_hwy";
+import { useAgentTown } from "@/src/state/agenttown-context";
 
 interface TownMapMessage {
   role: "user" | "model";
   text: string;
 }
 
-type RouteDef =
-  | {
-      id: RouteId;
-      type: "quadratic";
-      p0: { x: number; y: number };
-      p1: { x: number; y: number };
-      p2: { x: number; y: number };
-      svgPath: string;
-    }
-  | {
-      id: RouteId;
-      type: "line";
-      p0: { x: number; y: number };
-      p1: { x: number; y: number };
-      svgPath: string;
-    };
-
 interface MovingCar {
   id: string;
-  routeId: RouteId;
+  routeId: string;
   color: string;
   speed: number;
   delay: number;
   direction: 1 | -1;
 }
 
-const ROAD_ROUTES: RouteDef[] = [
-  {
-    id: "north_ave",
-    type: "quadratic",
-    p0: { x: -200, y: 450 },
-    p1: { x: 1200, y: 750 },
-    p2: { x: 2600, y: 450 },
-    svgPath: "M -200 450 Q 1200 750 2600 450",
-  },
-  {
-    id: "south_blvd",
-    type: "quadratic",
-    p0: { x: -200, y: 1900 },
-    p1: { x: 1200, y: 1600 },
-    p2: { x: 2600, y: 1900 },
-    svgPath: "M -200 1900 Q 1200 1600 2600 1900",
-  },
-  {
-    id: "west_hwy",
-    type: "line",
-    p0: { x: 600, y: -200 },
-    p1: { x: 600, y: 3000 },
-    svgPath: "M 600 -200 L 600 3000",
-  },
-  {
-    id: "east_hwy",
-    type: "line",
-    p0: { x: 1800, y: -200 },
-    p1: { x: 1800, y: 3000 },
-    svgPath: "M 1800 -200 L 1800 3000",
-  },
-];
-
-function quadPoint(
-  p0: { x: number; y: number },
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  t: number
-) {
-  const x =
-    (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x;
-  const y =
-    (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y;
-
-  const dx = 2 * (1 - t) * (p1.x - p0.x) + 2 * t * (p2.x - p1.x);
-  const dy = 2 * (1 - t) * (p1.y - p0.y) + 2 * t * (p2.y - p1.y);
-
-  return {
-    x,
-    y,
-    angle: (Math.atan2(dy, dx) * 180) / Math.PI,
-  };
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function routePoint(route: RouteDef, t: number) {
-  if (route.type === "quadratic") {
-    return quadPoint(route.p0, route.p1, route.p2, t);
-  }
-
-  const x = route.p0.x + (route.p1.x - route.p0.x) * t;
-  const y = route.p0.y + (route.p1.y - route.p0.y) * t;
-  const angle =
-    (Math.atan2(route.p1.y - route.p0.y, route.p1.x - route.p0.x) * 180) /
-    Math.PI;
-
-  return { x, y, angle };
-}
-
-function HouseNode({
-  type,
-  selected,
-  scale = 1,
-}: {
-  type: LotVisualType;
-  selected: boolean;
-  scale?: number;
-}) {
-  const sizeScale = selected ? scale * 1.08 : scale;
-
-  if (type === "market-stall") {
-    return (
-      <View style={[styles.marketWrap, { transform: [{ scale: sizeScale }] }]}> 
-        <View style={styles.marketAwning}>
-          <View style={[styles.awningStripe, { backgroundColor: "#ef4444" }]} />
-          <View style={[styles.awningStripe, { backgroundColor: "#fff" }]} />
-          <View style={[styles.awningStripe, { backgroundColor: "#ef4444" }]} />
-          <View style={[styles.awningStripe, { backgroundColor: "#fff" }]} />
-        </View>
-        <View style={styles.marketBody} />
-      </View>
-    );
-  }
-
-  const palette = {
-    "red-cottage": { roof: "#c92a2a", wall: "#fff7ed", door: "#78350f" },
-    "blue-villa": { roof: "#3b5bdb", wall: "#ffffff", door: "#5c4033" },
-    "dark-cabin": { roof: "#343a40", wall: "#f8f9fa", door: "#495057" },
-    "brown-manor": { roof: "#78350f", wall: "#fffbeb", door: "#451a03" },
-  }[type];
-
-  return (
-    <View style={[styles.houseWrap, { transform: [{ scale: sizeScale }] }]}> 
-      <View
-        style={[
-          styles.houseRoof,
-          {
-            borderBottomColor: palette.roof,
-          },
-        ]}
-      />
-      <View style={[styles.houseBody, { backgroundColor: palette.wall }]}> 
-        <View style={[styles.houseDoor, { backgroundColor: palette.door }]} />
-        <View style={styles.houseWindow} />
-      </View>
-      <View style={styles.houseShadow} />
-    </View>
-  );
-}
+const VIEW_TAG_COLORS: Record<string, string> = {
+  "sea-view": "rgba(37,99,235,0.15)",
+  "river-view": "rgba(14,116,144,0.15)",
+  "mountain-view": "rgba(100,116,139,0.18)",
+  "park-view": "rgba(22,163,74,0.15)",
+  "city-view": "rgba(30,41,59,0.12)",
+};
 
 export default function TownMapScreen() {
   const router = useRouter();
+  const { myHouseType } = useAgentTown();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { lots, trees } = useMemo(() => generateCity(), []);
 
-  const [selectedLotId, setSelectedLotId] = useState<string | null>(null);
-  const [scale, setScale] = useState(0.5);
+  const [selectedLot, setSelectedLot] = useState<LotData | null>(null);
+  const [scale, setScale] = useState(0.48);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<TownMapMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [clockMs, setClockMs] = useState(() => Date.now());
 
+  const [scrollX, setScrollX] = useState(0);
+  const [scrollY, setScrollY] = useState(0);
+
+  const scrollXRef = useRef(0);
+  const scrollYRef = useRef(0);
+
   const horizontalRef = useRef<ScrollView | null>(null);
   const verticalRef = useRef<ScrollView | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
   const centeredRef = useRef(false);
 
-  const selectedLot = useMemo(
-    () => lots.find((item) => item.id === selectedLotId) ?? null,
-    [lots, selectedLotId]
+  const mapWidthScaled = WORLD_WIDTH * scale;
+  const mapHeightScaled = WORLD_HEIGHT * scale;
+
+  const visibleRange = useMemo(
+    () =>
+      getVisibleChunkRange({
+        scrollX,
+        scrollY,
+        viewportWidth: windowWidth,
+        viewportHeight: windowHeight,
+        scale,
+        overscan: 1,
+      }),
+    [scrollX, scrollY, scale, windowWidth, windowHeight]
+  );
+
+  const visibleChunks = useMemo(
+    () => getChunksInRange(visibleRange),
+    [visibleRange]
+  );
+
+  const visibleLots = useMemo(
+    () => visibleChunks.flatMap((chunk) => chunk.lots),
+    [visibleChunks]
+  );
+
+  const visibleTrees = useMemo(
+    () => visibleChunks.flatMap((chunk) => chunk.trees),
+    [visibleChunks]
+  );
+
+  const routeLookup = useMemo(
+    () => new Map(ROAD_ROUTES.map((route) => [route.id, route])),
+    []
   );
 
   const cars = useMemo<MovingCar[]>(() => {
-    const colors = ["#ef4444", "#3b82f6", "#facc15", "#1f2937", "#ffffff", "#f97316"];
-    const list: MovingCar[] = [];
+    const colors = [
+      "#ef4444",
+      "#3b82f6",
+      "#facc15",
+      "#1f2937",
+      "#ffffff",
+      "#f97316",
+      "#14b8a6",
+    ];
 
-    ROAD_ROUTES.forEach((route) => {
-      const count = 5 + Math.floor(Math.random() * 4);
-      for (let idx = 0; idx < count; idx += 1) {
-        list.push({
-          id: `${route.id}-${idx}`,
+    const result: MovingCar[] = [];
+
+    ROAD_ROUTES.forEach((route, routeIndex) => {
+      const count = route.type === "line" ? 7 : 9;
+      for (let index = 0; index < count; index += 1) {
+        const serial = routeIndex * 97 + index * 31;
+        result.push({
+          id: `${route.id}_${index}`,
           routeId: route.id,
-          color: colors[Math.floor(Math.random() * colors.length)],
-          speed: 0.015 + Math.random() * 0.02,
-          delay: Math.random(),
-          direction: Math.random() > 0.5 ? 1 : -1,
+          color: colors[serial % colors.length],
+          speed: 0.008 + (serial % 7) * 0.002,
+          delay: (serial % 100) / 100,
+          direction: index % 2 === 0 ? 1 : -1,
         });
       }
     });
 
-    return list;
+    return result;
   }, []);
 
-  const mapWidthScaled = MAP_WIDTH * scale;
-  const mapHeightScaled = MAP_HEIGHT * scale;
+  const centerOnHome = useCallback(
+    (animated: boolean) => {
+      const maxX = Math.max(0, mapWidthScaled - windowWidth);
+      const maxY = Math.max(0, mapHeightScaled - windowHeight);
+      const x = clamp(HOME_POSITION.x * scale - windowWidth / 2, 0, maxX);
+      const y = clamp(HOME_POSITION.y * scale - windowHeight / 2, 0, maxY);
+
+      horizontalRef.current?.scrollTo({ x, animated });
+      verticalRef.current?.scrollTo({ y, animated });
+      scrollXRef.current = x;
+      scrollYRef.current = y;
+      setScrollX(x);
+      setScrollY(y);
+    },
+    [mapHeightScaled, mapWidthScaled, scale, windowHeight, windowWidth]
+  );
 
   useEffect(() => {
     const timer = setInterval(() => setClockMs(Date.now()), 33);
@@ -231,15 +183,45 @@ export default function TownMapScreen() {
     if (centeredRef.current) return;
 
     const timer = setTimeout(() => {
-      const x = Math.max(0, mapWidthScaled / 2 - windowWidth / 2);
-      const y = Math.max(0, mapHeightScaled / 2 - windowHeight / 2);
-      horizontalRef.current?.scrollTo({ x, animated: false });
-      verticalRef.current?.scrollTo({ y, animated: false });
+      centerOnHome(false);
       centeredRef.current = true;
     }, 40);
 
     return () => clearTimeout(timer);
-  }, [mapHeightScaled, mapWidthScaled, windowHeight, windowWidth]);
+  }, [centerOnHome]);
+
+  useEffect(() => {
+    if (!selectedLot) return;
+    const stillVisible = visibleLots.some((lot) => lot.id === selectedLot.id);
+    if (!stillVisible) {
+      setSelectedLot(null);
+    }
+  }, [selectedLot, visibleLots]);
+
+  const applyZoom = (delta: number) => {
+    const nextScale = clamp(scale + delta, 0.22, 1.35);
+    if (Math.abs(nextScale - scale) < 0.001) return;
+
+    const worldCenterX = (scrollXRef.current + windowWidth / 2) / scale;
+    const worldCenterY = (scrollYRef.current + windowHeight / 2) / scale;
+
+    const nextMaxX = Math.max(0, WORLD_WIDTH * nextScale - windowWidth);
+    const nextMaxY = Math.max(0, WORLD_HEIGHT * nextScale - windowHeight);
+
+    const nextX = clamp(worldCenterX * nextScale - windowWidth / 2, 0, nextMaxX);
+    const nextY = clamp(worldCenterY * nextScale - windowHeight / 2, 0, nextMaxY);
+
+    setScale(nextScale);
+
+    setTimeout(() => {
+      horizontalRef.current?.scrollTo({ x: nextX, animated: false });
+      verticalRef.current?.scrollTo({ y: nextY, animated: false });
+      scrollXRef.current = nextX;
+      scrollYRef.current = nextY;
+      setScrollX(nextX);
+      setScrollY(nextY);
+    }, 24);
+  };
 
   const openChat = () => {
     if (!selectedLot) return;
@@ -272,7 +254,27 @@ export default function TownMapScreen() {
     setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 40);
   };
 
-  const lotScale = Math.max(0.45, scale * 0.95);
+  const lotScale = Math.max(0.5, Math.min(1.05, scale * 0.95));
+
+  const centerWorldX = (scrollX + windowWidth / 2) / scale;
+  const centerWorldY = (scrollY + windowHeight / 2) / scale;
+  const centerChunk = chunkForWorldPoint(centerWorldX, centerWorldY);
+  const viewStats = useMemo(() => {
+    const stats: Record<string, number> = {};
+    visibleLots.forEach((lot) => {
+      if (lot.isMarket) return;
+      stats[lot.viewTag] = (stats[lot.viewTag] ?? 0) + 1;
+    });
+    return stats;
+  }, [visibleLots]);
+
+  const miniSize = 132;
+  const miniViewport = {
+    left: clamp((scrollX / scale / WORLD_WIDTH) * miniSize, 0, miniSize),
+    top: clamp((scrollY / scale / WORLD_HEIGHT) * miniSize, 0, miniSize),
+    width: clamp((windowWidth / scale / WORLD_WIDTH) * miniSize, 8, miniSize),
+    height: clamp((windowHeight / scale / WORLD_HEIGHT) * miniSize, 8, miniSize),
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -283,7 +285,7 @@ export default function TownMapScreen() {
           </Pressable>
           <View style={styles.mapPill}>
             <Ionicons name="earth" size={14} color="#16a34a" />
-            <Text style={styles.mapPillText}>Town Map</Text>
+            <Text style={styles.mapPillText}>Town World</Text>
           </View>
         </View>
 
@@ -297,52 +299,110 @@ export default function TownMapScreen() {
         </View>
       </View>
 
+      <View style={styles.worldStatus}>
+        <Text style={styles.worldStatusTitle}>No-Engine World Mode</Text>
+        <Text style={styles.worldStatusText}>
+          {`Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1} · Zoom ${Math.round(scale * 100)}%`}
+        </Text>
+        <Text style={styles.worldStatusTextMinor}>
+          {`可见房源: ${visibleLots.length} · 海景${viewStats["sea-view"] ?? 0} 河景${viewStats["river-view"] ?? 0} 山景${viewStats["mountain-view"] ?? 0}`}
+        </Text>
+      </View>
+
       <View style={styles.zoomWrap}>
-        <Pressable style={styles.zoomBtn} onPress={() => setScale((v) => Math.min(v + 0.15, 1.4))}>
+        <Pressable style={styles.zoomBtn} onPress={() => applyZoom(0.14)}>
           <Ionicons name="add" size={20} color="#374151" />
         </Pressable>
-        <Pressable style={styles.zoomBtn} onPress={() => setScale((v) => Math.max(v - 0.15, 0.22))}>
+        <Pressable style={styles.zoomBtn} onPress={() => applyZoom(-0.14)}>
           <Ionicons name="remove" size={20} color="#374151" />
+        </Pressable>
+        <Pressable style={styles.zoomBtn} onPress={() => centerOnHome(true)}>
+          <Ionicons name="navigate" size={18} color="#374151" />
         </Pressable>
       </View>
 
-      <ScrollView horizontal style={styles.outerScroll} ref={horizontalRef}>
-        <ScrollView style={styles.innerScroll} ref={verticalRef}>
+      <ScrollView
+        horizontal
+        style={styles.outerScroll}
+        ref={horizontalRef}
+        onScroll={(event) => {
+          const next = event.nativeEvent.contentOffset.x;
+          setScrollX(next);
+          scrollXRef.current = next;
+        }}
+        scrollEventThrottle={16}
+      >
+        <ScrollView
+          style={styles.innerScroll}
+          ref={verticalRef}
+          onScroll={(event) => {
+            const next = event.nativeEvent.contentOffset.y;
+            setScrollY(next);
+            scrollYRef.current = next;
+          }}
+          scrollEventThrottle={16}
+        >
           <View style={[styles.mapCanvas, { width: mapWidthScaled, height: mapHeightScaled }]}>
             <Svg
               width={mapWidthScaled}
               height={mapHeightScaled}
-              viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+              viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
               preserveAspectRatio="none"
               style={StyleSheet.absoluteFill}
             >
-              <Rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill="#7ec850" />
-
+              <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill="#7ec850" />
+              <Path d={coastAreaPathForSvg()} fill="#38bdf8" opacity={0.95} />
               <Path
-                d="M-200,1100 C400,800 800,1400 1200,1300 S1800,900 2800,1100"
-                stroke="#a5f3fc"
-                strokeWidth={450}
+                d={coastPathForSvg()}
+                stroke="#bae6fd"
+                strokeWidth={96}
                 fill="none"
                 strokeLinecap="round"
+                opacity={0.75}
+              />
+
+              {MOUNTAIN_PEAKS.map((peak, index) => (
+                <Circle
+                  key={`mountain_outer_${index}`}
+                  cx={peak.x}
+                  cy={peak.y}
+                  r={peak.radius}
+                  fill="rgba(100,116,139,0.22)"
+                />
+              ))}
+              {MOUNTAIN_PEAKS.map((peak, index) => (
+                <Circle
+                  key={`mountain_inner_${index}`}
+                  cx={peak.x}
+                  cy={peak.y}
+                  r={peak.radius * 0.62}
+                  fill="rgba(71,85,105,0.18)"
+                />
+              ))}
+
+              <Path
+                d={riverPathForSvg()}
+                stroke="#a5f3fc"
+                strokeWidth={RIVER_WIDTH + 80}
+                fill="none"
+                strokeLinecap="round"
+                opacity={0.95}
               />
               <Path
-                d="M-200,1100 C400,800 800,1400 1200,1300 S1800,900 2800,1100"
+                d={riverPathForSvg()}
                 stroke="#38bdf8"
-                strokeWidth={300}
+                strokeWidth={RIVER_WIDTH}
                 fill="none"
                 strokeLinecap="round"
                 opacity={0.92}
               />
 
-              <Rect x={550} y={900} width={100} height={600} fill="#cbd5e1" />
-              <Rect x={1750} y={950} width={100} height={500} fill="#cbd5e1" />
-
               {ROAD_ROUTES.map((route) => (
                 <Path
-                  key={`road-${route.id}`}
+                  key={`road_${route.id}`}
                   d={route.svgPath}
                   stroke="#555"
-                  strokeWidth={60}
+                  strokeWidth={58}
                   strokeLinecap="round"
                   fill="none"
                 />
@@ -350,20 +410,46 @@ export default function TownMapScreen() {
 
               {ROAD_ROUTES.map((route) => (
                 <Path
-                  key={`road-stripe-${route.id}`}
+                  key={`road_stripe_${route.id}`}
                   d={route.svgPath}
-                  stroke="#fff"
-                  strokeWidth={2.2}
-                  strokeDasharray="16 18"
+                  stroke="#ffffff"
+                  strokeWidth={2.3}
+                  strokeDasharray="17 18"
                   strokeLinecap="round"
                   fill="none"
                   opacity={0.62}
                 />
               ))}
+
+              {Array.from({ length: WORLD_CHUNKS_X + 1 }).map((_, index) => {
+                const x = index * CHUNK_SIZE;
+                return (
+                  <Path
+                    key={`grid_x_${index}`}
+                    d={`M ${x} 0 L ${x} ${WORLD_HEIGHT}`}
+                    stroke="rgba(255,255,255,0.08)"
+                    strokeWidth={2}
+                  />
+                );
+              })}
+
+              {Array.from({ length: WORLD_CHUNKS_Y + 1 }).map((_, index) => {
+                const y = index * CHUNK_SIZE;
+                return (
+                  <Path
+                    key={`grid_y_${index}`}
+                    d={`M 0 ${y} L ${WORLD_WIDTH} ${y}`}
+                    stroke="rgba(255,255,255,0.08)"
+                    strokeWidth={2}
+                  />
+                );
+              })}
             </Svg>
 
             {cars.map((car) => {
-              const route = ROAD_ROUTES.find((item) => item.id === car.routeId)!;
+              const route = routeLookup.get(car.routeId);
+              if (!route) return null;
+
               const elapsed = (clockMs / 1000) * car.speed + car.delay;
               const baseProgress = ((elapsed % 1) + 1) % 1;
               const t = car.direction === 1 ? baseProgress : 1 - baseProgress;
@@ -397,9 +483,9 @@ export default function TownMapScreen() {
               );
             })}
 
-            {trees.map((tree, idx) => (
+            {visibleTrees.map((tree, index) => (
               <View
-                key={`tree-${idx}`}
+                key={`tree_${index}_${Math.round(tree.x)}_${Math.round(tree.y)}`}
                 style={[
                   styles.treeWrap,
                   {
@@ -415,8 +501,8 @@ export default function TownMapScreen() {
               </View>
             ))}
 
-            {lots.map((lot) => {
-              const selected = lot.id === selectedLotId;
+            {visibleLots.map((lot) => {
+              const selected = lot.id === selectedLot?.id;
               return (
                 <Pressable
                   key={lot.id}
@@ -427,7 +513,7 @@ export default function TownMapScreen() {
                       top: lot.y * scale,
                     },
                   ]}
-                  onPress={() => setSelectedLotId(lot.id)}
+                  onPress={() => setSelectedLot(lot)}
                 >
                   {selected ? (
                     <View style={styles.avatarBubble}>
@@ -435,29 +521,108 @@ export default function TownMapScreen() {
                       <View>
                         <Text style={styles.avatarBubbleName}>{lot.label}</Text>
                         <Text style={styles.avatarBubbleRole}>{lot.npc.role}</Text>
+                        {!lot.isMarket ? (
+                          <View
+                            style={[
+                              styles.avatarBubbleViewTag,
+                              { backgroundColor: VIEW_TAG_COLORS[lot.viewTag] ?? "rgba(0,0,0,0.12)" },
+                            ]}
+                          >
+                            <Text style={styles.avatarBubbleViewTagText}>
+                              {LOT_VIEW_LABELS[lot.viewTag]}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     </View>
                   ) : !lot.isMarket ? (
-                    <View style={styles.labelPill}>
-                      <Text style={styles.labelPillText}>{lot.label}</Text>
-                    </View>
+                    <>
+                      <View style={styles.labelPill}>
+                        <Text style={styles.labelPillText}>{lot.label}</Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.viewTagPill,
+                          { backgroundColor: VIEW_TAG_COLORS[lot.viewTag] ?? "rgba(0,0,0,0.12)" },
+                        ]}
+                      >
+                        <Text style={styles.viewTagPillText}>{LOT_VIEW_LABELS[lot.viewTag]}</Text>
+                      </View>
+                    </>
                   ) : null}
 
-                  <HouseNode type={lot.visualType} selected={selected} scale={lotScale} />
+                  <TownHouseNode type={lot.visualType} selected={selected} scale={lotScale} />
                 </Pressable>
               );
             })}
 
-            <View style={[styles.myHomeMarker, { left: 2000 * scale, top: 1800 * scale }]}>
+            <View
+              style={[
+                styles.myHomeMarker,
+                { left: HOME_POSITION.x * scale, top: HOME_POSITION.y * scale },
+              ]}
+            >
               <View style={styles.myHomePill}>
                 <Ionicons name="home" size={10} color="#3b82f6" />
                 <Text style={styles.myHomeText}>My Home</Text>
               </View>
-              <HouseNode type="brown-manor" selected={false} scale={lotScale} />
+              <TownHouseNode
+                type={mapMyHouseTypeToVisual(myHouseType)}
+                selected={false}
+                scale={lotScale}
+              />
             </View>
           </View>
         </ScrollView>
       </ScrollView>
+
+      <View style={styles.miniMapWrap} pointerEvents="none">
+        <View style={styles.miniMapCard}>
+          <View style={[styles.miniMap, { width: miniSize, height: miniSize }]}>
+            {visibleChunks.map((chunk) => {
+              const chunkWidth = miniSize / WORLD_CHUNKS_X;
+              const chunkHeight = miniSize / WORLD_CHUNKS_Y;
+              return (
+                <View
+                  key={`mini_chunk_${chunk.key}`}
+                  style={[
+                    styles.miniChunk,
+                    {
+                      left: chunk.chunkX * chunkWidth,
+                      top: chunk.chunkY * chunkHeight,
+                      width: chunkWidth,
+                      height: chunkHeight,
+                    },
+                  ]}
+                />
+              );
+            })}
+
+            <View
+              style={[
+                styles.miniViewport,
+                {
+                  left: miniViewport.left,
+                  top: miniViewport.top,
+                  width: miniViewport.width,
+                  height: miniViewport.height,
+                },
+              ]}
+            />
+
+            <View
+              style={[
+                styles.miniHomeDot,
+                {
+                  left: (HOME_POSITION.x / WORLD_WIDTH) * miniSize - 3,
+                  top: (HOME_POSITION.y / WORLD_HEIGHT) * miniSize - 3,
+                },
+              ]}
+            />
+          </View>
+          <Text style={styles.miniMapText}>{`${WORLD_WIDTH}x${WORLD_HEIGHT} world`}</Text>
+        </View>
+      </View>
 
       {selectedLot ? (
         <View style={styles.visitWrap}>
@@ -499,9 +664,9 @@ export default function TownMapScreen() {
               contentContainerStyle={styles.chatMessagesContent}
               ref={chatScrollRef}
             >
-              {chatMessages.map((msg, idx) => (
+              {chatMessages.map((msg, index) => (
                 <View
-                  key={`${msg.role}-${idx}`}
+                  key={`${msg.role}_${index}`}
                   style={[
                     styles.chatRow,
                     msg.role === "user" ? styles.chatRowMe : styles.chatRowBot,
@@ -510,9 +675,7 @@ export default function TownMapScreen() {
                   <View
                     style={[
                       styles.chatBubble,
-                      msg.role === "user"
-                        ? styles.chatBubbleMe
-                        : styles.chatBubbleBot,
+                      msg.role === "user" ? styles.chatBubbleMe : styles.chatBubbleBot,
                     ]}
                   >
                     <Text style={styles.chatBubbleText}>{msg.text}</Text>
@@ -600,6 +763,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#111827",
+  },
+  worldStatus: {
+    position: "absolute",
+    top: 66,
+    left: 12,
+    right: 12,
+    zIndex: 19,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: "rgba(15, 23, 42, 0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  worldStatusTitle: {
+    color: "#f8fafc",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  worldStatusText: {
+    marginTop: 2,
+    color: "#e2e8f0",
+    fontSize: 10,
+  },
+  worldStatusTextMinor: {
+    marginTop: 2,
+    color: "#cbd5e1",
+    fontSize: 10,
   },
   zoomWrap: {
     position: "absolute",
@@ -697,7 +888,7 @@ const styles = StyleSheet.create({
   },
   labelPill: {
     position: "absolute",
-    bottom: 46,
+    bottom: 56,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -707,6 +898,20 @@ const styles = StyleSheet.create({
   },
   labelPillText: {
     fontSize: 9,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  viewTagPill: {
+    position: "absolute",
+    bottom: 42,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  viewTagPillText: {
+    fontSize: 8,
     fontWeight: "700",
     color: "#111827",
   },
@@ -722,7 +927,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    minWidth: 108,
+    minWidth: 124,
   },
   avatarBubbleImage: {
     width: 24,
@@ -737,71 +942,21 @@ const styles = StyleSheet.create({
   },
   avatarBubbleRole: {
     fontSize: 9,
-    color: "#2563eb",
+    color: "#475569",
   },
-  houseWrap: {
-    alignItems: "center",
-  },
-  houseRoof: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 18,
-    borderRightWidth: 18,
-    borderBottomWidth: 22,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-  },
-  houseBody: {
-    width: 28,
-    height: 24,
-    marginTop: -1,
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingBottom: 1,
-  },
-  houseDoor: {
-    width: 10,
-    height: 13,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-  },
-  houseWindow: {
-    position: "absolute",
-    top: 5,
-    right: 4,
-    width: 6,
-    height: 6,
-    borderWidth: 0.5,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#bae6fd",
-  },
-  houseShadow: {
-    width: 34,
-    height: 4,
+  avatarBubbleViewTag: {
+    marginTop: 3,
+    alignSelf: "flex-start",
     borderRadius: 999,
-    marginTop: 2,
-    backgroundColor: "rgba(0,0,0,0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
   },
-  marketWrap: {
-    alignItems: "center",
-  },
-  marketAwning: {
-    width: 32,
-    height: 12,
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 6,
-    overflow: "hidden",
-    flexDirection: "row",
-  },
-  awningStripe: {
-    flex: 1,
-  },
-  marketBody: {
-    width: 26,
-    height: 16,
-    backgroundColor: "#fcd34d",
-    borderBottomLeftRadius: 3,
-    borderBottomRightRadius: 3,
+  avatarBubbleViewTagText: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: "#0f172a",
   },
   myHomeMarker: {
     position: "absolute",
@@ -822,6 +977,50 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: "#1f2937",
+  },
+  miniMapWrap: {
+    position: "absolute",
+    right: 12,
+    bottom: 150,
+    zIndex: 21,
+  },
+  miniMapCard: {
+    borderRadius: 14,
+    padding: 8,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
+    alignItems: "center",
+  },
+  miniMap: {
+    borderRadius: 8,
+    backgroundColor: "#89ce5f",
+    overflow: "hidden",
+  },
+  miniChunk: {
+    position: "absolute",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.26)",
+    backgroundColor: "rgba(17,24,39,0.08)",
+  },
+  miniViewport: {
+    position: "absolute",
+    borderWidth: 1,
+    borderColor: "#111827",
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  miniHomeDot: {
+    position: "absolute",
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#ef4444",
+  },
+  miniMapText: {
+    marginTop: 6,
+    fontSize: 10,
+    color: "#374151",
+    fontWeight: "700",
   },
   visitWrap: {
     position: "absolute",

@@ -24,6 +24,102 @@ AgentTown is an Expo-based, AI-ready application that runs on iOS, Android, and 
   - House/interests/jobs/assets panels
   - House type switching linked to home state
 
+## World Strategy (No-Engine First)
+
+Date: 2026-02-13
+
+### Quick conclusion
+
+- **Phase 1:** keep everything in `Expo + React Native`, no Unity/Unreal.
+- Build a real world feeling with:
+  - large map dimensions
+  - chunk-based streaming/rendering
+  - moving vehicles/NPC markers
+  - task/chat interactions linked to world points
+- **Phase 2 (optional):** only introduce Unity/Unreal if we hit clear limits (performance, 3D fidelity, advanced physics, large multiplayer concurrency).
+
+### Why no engine now
+
+1. Fastest path to iOS + Android + Web parity.
+2. Lowest integration/ops complexity while gameplay loop is still changing quickly.
+3. We can still ship meaningful world scale and motion in RN with chunk loading + SVG/canvas-style rendering.
+4. We avoid premature architecture lock before core retention metrics are validated.
+
+## Hybrid Architecture (Current Plan)
+
+### 1) Client architecture
+
+- `Expo App Shell (React Native + Expo Router)`
+  - Login / profile / social chat / task center / bot config / notifications
+  - AI agent UX and orchestration entry points
+- `World Runtime (No-engine renderer inside RN)`
+  - Chunked map generation and lazy render
+  - Road network + moving vehicles
+  - Lot/NPC interactions and in-map chat
+- `State + Bridge layer`
+  - Shared state contracts for world events, tasks, rewards, and AI actions
+
+### 2) Web architecture
+
+- `Web Shell`: Expo web app handles product pages and AI workflows.
+- `World Route`: same RN world logic runs on web (no separate engine runtime yet).
+- `Fallback`: quality presets for low-end browsers/devices.
+
+### 3) Backend architecture
+
+- `API Gateway / BFF`: auth, user profile, permissions, session
+- `World Service`: chunk metadata, POI/NPC definitions, spawn rules, map versioning
+- `Realtime Service`: presence, events, lightweight multiplayer sync
+- `Task/Quest Service`: mission graph, progression, rewards
+- `Agent Orchestrator`: LLM tools, memory, planning/execution, moderation/guardrails
+- `Economy Service`: inventory/assets/currency
+- `Data Stack`: Postgres + Redis + object storage + analytics pipeline
+
+### 4) AI-driven development pipeline (Mac-friendly)
+
+- `Coding Agent`: implements tasks from issue specs
+- `Test Agent`: runs unit/integration/e2e + visual snapshots
+- `Review Agent`: static analysis, regression checks, API/schema diff checks
+- `CI`: GitHub Actions gates merge with required checks
+- `Delivery`: EAS (mobile) + web CI deploy
+
+### 5) Monorepo layout (recommended)
+
+```text
+AgentTown/
+  apps/
+    shell-expo/           # current Expo app + world runtime
+  packages/
+    shared-types/         # DTO/event contracts
+    world-runtime/        # chunk gen, route gen, map simulation
+    agent-sdk/            # AI agent client + tool contracts
+  services/
+    api-gateway/
+    world-service/
+    realtime-service/
+    task-service/
+    agent-orchestrator/
+  infra/
+    terraform/
+    github-actions/
+```
+
+### 6) Delivery roadmap
+
+1. **Phase A (done/in-progress):** large world map, chunk loading, moving cars, zoom/pan.
+2. **Phase B:** pathfinding + dynamic NPC states + event triggers by location.
+3. **Phase C:** realtime presence + shared world events.
+4. **Phase D:** if needed, migrate world runtime to Unity/Unreal behind the same backend contracts.
+
+## Decision References
+
+- Expo universal app workflow and platforms: https://docs.expo.dev/
+- Expo custom native code + dev builds + CNG: https://docs.expo.dev/workflow/customizing/
+- React Native performance overview: https://reactnative.dev/docs/performance
+- React Native SVG: https://github.com/software-mansion/react-native-svg
+- Unity as a Library (future option): https://docs.unity3d.com/Manual/UnityasaLibrary.html
+- Unreal World Partition (future option): https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
+
 ## Environment
 
 - Node.js `22.22.0` (see `.nvmrc`)
