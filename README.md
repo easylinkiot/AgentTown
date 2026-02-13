@@ -172,16 +172,58 @@ npm run build:web
 4. CI runs checks (`typecheck`, `lint`, `test`, `web build`).
 5. Merge only when checks pass.
 
-## Mobile Build Pipeline
+## iOS Deployment (Fastlane, No EAS Submit)
 
-`eas.json` is included for `development`, `preview`, and `production` profiles.
+This project now supports iOS deployment with Fastlane so you can build and upload TestFlight builds without EAS Submit.
 
-Example commands:
+### 1) One-time setup
 
 ```bash
-npx eas-cli login
-npx eas-cli build --platform all --profile preview
-npx eas-cli build --platform all --profile production
+cp .env.fastlane.example .env.fastlane
 ```
 
-To automate EAS in GitHub Actions later, add `EXPO_TOKEN` in repository secrets.
+Fill required values in `.env.fastlane`:
+
+```bash
+ASC_KEY_ID=...
+ASC_ISSUER_ID=...
+ASC_KEY_BASE64=... # base64 of your .p8 key content
+IOS_BUNDLE_ID=com.biceek.agenttown
+APPLE_TEAM_ID=V3DJD6YM5U
+```
+
+Also ensure full Xcode is selected:
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+### 2) Prepare native iOS project
+
+```bash
+npm run fastlane:prepare:ios
+```
+
+### 3) Build IPA locally
+
+```bash
+npm run fastlane:build:ios
+```
+
+Output IPA path:
+
+```text
+artifacts/ios/AgentTown-<build_number>.ipa
+```
+
+### 4) Upload to TestFlight
+
+```bash
+npm run fastlane:deploy:ios
+```
+
+Optional lane parameters:
+
+```bash
+fastlane ios deploy_testflight --env fastlane changelog:"Internal QA build" groups:"Team (Expo)"
+```

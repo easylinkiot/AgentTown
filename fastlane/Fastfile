@@ -1,0 +1,154 @@
+# frozen_string_literal: true
+
+require "json"
+require "shellwords"
+
+default_platform(:ios)
+
+PROJECT_ROOT = File.expand_path("..", __dir__)
+
+def run_in_project_root(command)
+  sh("cd #{Shellwords.escape(PROJECT_ROOT)} && #{command}")
+end
+
+def ensure_ios_project!
+  return if Dir.exist?(File.join(PROJECT_ROOT, "ios"))
+
+  UI.important("ios/ not found, running Expo prebuild for iOS...")
+  run_in_project_root("CI=1 npx expo prebuild --platform ios")
+end
+
+def workspace_path!
+  workspace = Dir[File.join(PROJECT_ROOT, "ios/*.xcworkspace")].first
+  UI.user_error!("No iOS workspace found under ios/.") if workspace.to_s.empty?
+  workspace
+end
+
+def xcodeproj_path!
+  project = Dir[File.join(PROJECT_ROOT, "ios/*.xcodeproj")].first
+  UI.user_error!("No iOS project found under ios/.") if project.to_s.empty?
+  project
+end
+
+def resolve_scheme(workspace)
+  return ENV["IOS_SCHEME"] unless ENV["IOS_SCHEME"].to_s.empty?
+
+  raw = sh("xcodebuild -list -json -workspace #{Shellwords.escape(workspace)}", log: false)
+  parsed = JSON.parse(raw)
+  schemes = parsed.dig("workspace", "schemes") || []
+  scheme = schemes.find { |name| name.downcase.include?("agenttown") } || schemes.first
+
+  UI.user_error!("Unable to detect an iOS scheme in #{workspace}. Set IOS_SCHEME manually.") if scheme.to_s.empty?
+  scheme
+end
+
+def parse_groups(value)
+  return nil if value.to_s.strip.empty?
+  value.split(",").map(&:strip).reject(&:empty?)
+end
+
+def ensure_full_xcode_selected!
+  selected = sh("xcode-select -p", log: false).strip
+  return unless selected.include?("CommandLineTools")
+
+  UI.user_error!(
+    "xcode-select is pointing to CommandLineTools (#{selected}). " \
+    "Switch to full Xcode: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  )
+end
+
+def asc_api_key!
+  key_id = ENV["ASC_KEY_ID"]
+  issuer_id = ENV["ASC_ISSUER_ID"]
+  key_content = ENV["ASC_KEY_BASE64"]
+
+  UI.user_error!("Missing ASC_KEY_ID") if key_id.to_s.empty?
+  UI.user_error!("Missing ASC_ISSUER_ID") if issuer_id.to_s.empty?
+  UI.user_error!("Missing ASC_KEY_BASE64") if key_content.to_s.empty?
+
+  app_store_connect_api_key(
+    key_id: key_id,
+    issuer_id: issuer_id,
+    key_content: key_content,
+    is_key_content_base64: true,
+    duration: 1200
+  )
+end
+
+platform :ios do
+  desc "Generate iOS native project from Expo config and install CocoaPods"
+  lane :prepare do
+    ensure_ios_project!
+    run_in_project_root("cd ios && pod install")
+  end
+
+  desc "Build an App Store IPA locally"
+  lane :build_release do |options|
+    ensure_full_xcode_selected!
+    ensure_ios_project!
+    run_in_project_root("cd ios && pod install")
+
+    workspace = workspace_path!
+    project = xcodeproj_path!
+    scheme = options[:scheme] || resolve_scheme(workspace)
+    build_number = options[:build_number] || ENV["IOS_BUILD_NUMBER"] || Time.now.utc.strftime("%Y%m%d%H%M")
+
+    increment_build_number(
+      xcodeproj: project,
+      build_number: build_number
+    )
+
+    build_options = {
+      workspace: workspace,
+      scheme: scheme,
+      clean: true,
+      export_method: "app-store",
+      output_directory: File.join(PROJECT_ROOT, "artifacts/ios"),
+      output_name: "AgentTown-#{build_number}.ipa",
+      export_options: {
+        signingStyle: "automatic"
+      }
+    }
+
+    unless ENV["APPLE_TEAM_ID"].to_s.empty?
+      build_options[:export_team_id] = ENV["APPLE_TEAM_ID"]
+      build_options[:xcargs] = "DEVELOPMENT_TEAM=#{ENV['APPLE_TEAM_ID']}"
+    end
+
+    build_app(build_options)
+
+    UI.success("IPA generated at #{lane_context[SharedValues::IPA_OUTPUT_PATH]}")
+  end
+
+  desc "Build and upload AgentTown to TestFlight (Fastlane only, no EAS Submit)"
+  lane :deploy_testflight do |options|
+    api_key = asc_api_key!
+    app_identifier = ENV["IOS_BUNDLE_ID"] || "com.biceek.agenttown"
+
+    ipa_path = options[:ipa] || ENV["IOS_IPA_PATH"]
+    if ipa_path.to_s.empty?
+      build_release(
+        scheme: options[:scheme],
+        build_number: options[:build_number]
+      )
+      ipa_path = lane_context[SharedValues::IPA_OUTPUT_PATH]
+    end
+
+    upload_options = {
+      api_key: api_key,
+      app_identifier: app_identifier,
+      ipa: ipa_path,
+      skip_waiting_for_build_processing: options[:wait].to_s == "true" ? false : true
+    }
+
+    changelog = options[:changelog] || ENV["TESTFLIGHT_CHANGELOG"]
+    upload_options[:changelog] = changelog unless changelog.to_s.empty?
+
+    groups = options[:groups]
+    groups = parse_groups(groups) if groups.is_a?(String)
+    groups ||= parse_groups(ENV["TESTFLIGHT_GROUPS"])
+    upload_options[:groups] = groups if groups&.any?
+
+    upload_to_testflight(upload_options)
+  end
+end

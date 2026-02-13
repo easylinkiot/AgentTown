@@ -14,7 +14,10 @@
     "test:ci": "jest --ci --runInBand --watchAll=false",
     "doctor": "expo doctor",
     "build:web": "expo export --platform web",
-    "check": "npm run typecheck && npm run lint && npm run test:ci"
+    "check": "npm run typecheck && npm run lint && npm run test:ci",
+    "fastlane:prepare:ios": "fastlane ios prepare --env fastlane",
+    "fastlane:build:ios": "fastlane ios build_release --env fastlane",
+    "fastlane:deploy:ios": "fastlane ios deploy_testflight --env fastlane"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
