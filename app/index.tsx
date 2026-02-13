@@ -25,7 +25,6 @@ import {
   getRectAroundPoint,
   getWorldContentInRect,
   HOME_POSITION,
-  LOT_VIEW_LABELS,
   MOUNTAIN_PEAKS,
   mapMyHouseTypeToVisual,
   RIVER_WIDTH,
@@ -51,14 +50,6 @@ const SCENE_SCALE = 0.2;
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
-
-const VIEW_TAG_COLORS: Record<string, string> = {
-  "sea-view": "rgba(37,99,235,0.16)",
-  "river-view": "rgba(14,116,144,0.16)",
-  "mountain-view": "rgba(100,116,139,0.2)",
-  "park-view": "rgba(22,163,74,0.16)",
-  "city-view": "rgba(30,41,59,0.14)",
-};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -393,16 +384,6 @@ export default function HomeScreen() {
                 ]}
                 onPress={() => router.push("/town-map")}
               >
-                {!lot.isMarket ? (
-                  <View
-                    style={[
-                      styles.sceneViewTag,
-                      { backgroundColor: VIEW_TAG_COLORS[lot.viewTag] ?? "rgba(0,0,0,0.12)" },
-                    ]}
-                  >
-                    <Text style={styles.sceneViewTagText}>{LOT_VIEW_LABELS[lot.viewTag]}</Text>
-                  </View>
-                ) : null}
                 <TownHouseNode type={lot.visualType} scale={0.92} />
               </Pressable>
             ))}
@@ -689,20 +670,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     zIndex: 3,
     alignItems: "center",
-  },
-  sceneViewTag: {
-    position: "absolute",
-    bottom: 42,
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.45)",
-  },
-  sceneViewTagText: {
-    fontSize: 8,
-    fontWeight: "700",
-    color: "#0f172a",
   },
   centerHomeWrap: {
     position: "absolute",

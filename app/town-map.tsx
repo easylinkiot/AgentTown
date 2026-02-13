@@ -24,7 +24,6 @@ import {
   getVisibleChunkRange,
   HOME_POSITION,
   LotData,
-  LOT_VIEW_LABELS,
   MOUNTAIN_PEAKS,
   mapMyHouseTypeToVisual,
   RIVER_WIDTH,
@@ -57,14 +56,6 @@ interface MovingCar {
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
-
-const VIEW_TAG_COLORS: Record<string, string> = {
-  "sea-view": "rgba(37,99,235,0.15)",
-  "river-view": "rgba(14,116,144,0.15)",
-  "mountain-view": "rgba(100,116,139,0.18)",
-  "park-view": "rgba(22,163,74,0.15)",
-  "city-view": "rgba(30,41,59,0.12)",
-};
 
 export default function TownMapScreen() {
   const router = useRouter();
@@ -259,14 +250,6 @@ export default function TownMapScreen() {
   const centerWorldX = (scrollX + windowWidth / 2) / scale;
   const centerWorldY = (scrollY + windowHeight / 2) / scale;
   const centerChunk = chunkForWorldPoint(centerWorldX, centerWorldY);
-  const viewStats = useMemo(() => {
-    const stats: Record<string, number> = {};
-    visibleLots.forEach((lot) => {
-      if (lot.isMarket) return;
-      stats[lot.viewTag] = (stats[lot.viewTag] ?? 0) + 1;
-    });
-    return stats;
-  }, [visibleLots]);
 
   const miniSize = 132;
   const miniViewport = {
@@ -305,7 +288,7 @@ export default function TownMapScreen() {
           {`Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1} · Zoom ${Math.round(scale * 100)}%`}
         </Text>
         <Text style={styles.worldStatusTextMinor}>
-          {`可见房源: ${visibleLots.length} · 海景${viewStats["sea-view"] ?? 0} 河景${viewStats["river-view"] ?? 0} 山景${viewStats["mountain-view"] ?? 0}`}
+          {`可见房源: ${visibleLots.length}`}
         </Text>
       </View>
 
@@ -521,32 +504,12 @@ export default function TownMapScreen() {
                       <View>
                         <Text style={styles.avatarBubbleName}>{lot.label}</Text>
                         <Text style={styles.avatarBubbleRole}>{lot.npc.role}</Text>
-                        {!lot.isMarket ? (
-                          <View
-                            style={[
-                              styles.avatarBubbleViewTag,
-                              { backgroundColor: VIEW_TAG_COLORS[lot.viewTag] ?? "rgba(0,0,0,0.12)" },
-                            ]}
-                          >
-                            <Text style={styles.avatarBubbleViewTagText}>
-                              {LOT_VIEW_LABELS[lot.viewTag]}
-                            </Text>
-                          </View>
-                        ) : null}
                       </View>
                     </View>
                   ) : !lot.isMarket ? (
                     <>
                       <View style={styles.labelPill}>
                         <Text style={styles.labelPillText}>{lot.label}</Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.viewTagPill,
-                          { backgroundColor: VIEW_TAG_COLORS[lot.viewTag] ?? "rgba(0,0,0,0.12)" },
-                        ]}
-                      >
-                        <Text style={styles.viewTagPillText}>{LOT_VIEW_LABELS[lot.viewTag]}</Text>
                       </View>
                     </>
                   ) : null}
@@ -901,20 +864,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
-  viewTagPill: {
-    position: "absolute",
-    bottom: 42,
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-  },
-  viewTagPillText: {
-    fontSize: 8,
-    fontWeight: "700",
-    color: "#111827",
-  },
   avatarBubble: {
     position: "absolute",
     bottom: 46,
@@ -943,20 +892,6 @@ const styles = StyleSheet.create({
   avatarBubbleRole: {
     fontSize: 9,
     color: "#475569",
-  },
-  avatarBubbleViewTag: {
-    marginTop: 3,
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-  },
-  avatarBubbleViewTagText: {
-    fontSize: 8,
-    fontWeight: "700",
-    color: "#0f172a",
   },
   myHomeMarker: {
     position: "absolute",
