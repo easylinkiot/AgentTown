@@ -1,14 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { TaskItem } from "@/src/types";
 
-export function TaskWidget({ tasks }: { tasks: TaskItem[] }) {
+export function TaskWidget({
+  tasks,
+  containerStyle,
+}: {
+  tasks: TaskItem[];
+  containerStyle?: StyleProp<ViewStyle>;
+}) {
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, containerStyle]}>
       <View style={[styles.card, !expanded && styles.cardCollapsed]}>
         <Pressable style={styles.header} onPress={() => setExpanded((v) => !v)}>
           <View style={styles.headerLeft}>
@@ -57,7 +63,7 @@ const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
     right: 12,
-    top: 220,
+    bottom: 24,
     zIndex: 20,
   },
   card: {

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
   Modal,
@@ -10,8 +10,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
+import Svg, { Path, Rect } from "react-native-svg";
 
 import {
   generateCity,
@@ -21,17 +23,121 @@ import {
 } from "@/src/features/townmap/generateCity";
 import { generateGeminiText } from "@/src/lib/gemini";
 
+type RouteId = "north_ave" | "south_blvd" | "west_hwy" | "east_hwy";
+
 interface TownMapMessage {
   role: "user" | "model";
   text: string;
 }
 
-function HouseNode({ type, selected, scale = 1 }: { type: LotVisualType; selected: boolean; scale?: number }) {
+type RouteDef =
+  | {
+      id: RouteId;
+      type: "quadratic";
+      p0: { x: number; y: number };
+      p1: { x: number; y: number };
+      p2: { x: number; y: number };
+      svgPath: string;
+    }
+  | {
+      id: RouteId;
+      type: "line";
+      p0: { x: number; y: number };
+      p1: { x: number; y: number };
+      svgPath: string;
+    };
+
+interface MovingCar {
+  id: string;
+  routeId: RouteId;
+  color: string;
+  speed: number;
+  delay: number;
+  direction: 1 | -1;
+}
+
+const ROAD_ROUTES: RouteDef[] = [
+  {
+    id: "north_ave",
+    type: "quadratic",
+    p0: { x: -200, y: 450 },
+    p1: { x: 1200, y: 750 },
+    p2: { x: 2600, y: 450 },
+    svgPath: "M -200 450 Q 1200 750 2600 450",
+  },
+  {
+    id: "south_blvd",
+    type: "quadratic",
+    p0: { x: -200, y: 1900 },
+    p1: { x: 1200, y: 1600 },
+    p2: { x: 2600, y: 1900 },
+    svgPath: "M -200 1900 Q 1200 1600 2600 1900",
+  },
+  {
+    id: "west_hwy",
+    type: "line",
+    p0: { x: 600, y: -200 },
+    p1: { x: 600, y: 3000 },
+    svgPath: "M 600 -200 L 600 3000",
+  },
+  {
+    id: "east_hwy",
+    type: "line",
+    p0: { x: 1800, y: -200 },
+    p1: { x: 1800, y: 3000 },
+    svgPath: "M 1800 -200 L 1800 3000",
+  },
+];
+
+function quadPoint(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  t: number
+) {
+  const x =
+    (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x;
+  const y =
+    (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y;
+
+  const dx = 2 * (1 - t) * (p1.x - p0.x) + 2 * t * (p2.x - p1.x);
+  const dy = 2 * (1 - t) * (p1.y - p0.y) + 2 * t * (p2.y - p1.y);
+
+  return {
+    x,
+    y,
+    angle: (Math.atan2(dy, dx) * 180) / Math.PI,
+  };
+}
+
+function routePoint(route: RouteDef, t: number) {
+  if (route.type === "quadratic") {
+    return quadPoint(route.p0, route.p1, route.p2, t);
+  }
+
+  const x = route.p0.x + (route.p1.x - route.p0.x) * t;
+  const y = route.p0.y + (route.p1.y - route.p0.y) * t;
+  const angle =
+    (Math.atan2(route.p1.y - route.p0.y, route.p1.x - route.p0.x) * 180) /
+    Math.PI;
+
+  return { x, y, angle };
+}
+
+function HouseNode({
+  type,
+  selected,
+  scale = 1,
+}: {
+  type: LotVisualType;
+  selected: boolean;
+  scale?: number;
+}) {
   const sizeScale = selected ? scale * 1.08 : scale;
 
   if (type === "market-stall") {
     return (
-      <View style={[styles.marketWrap, { transform: [{ scale: sizeScale }] }]}>
+      <View style={[styles.marketWrap, { transform: [{ scale: sizeScale }] }]}> 
         <View style={styles.marketAwning}>
           <View style={[styles.awningStripe, { backgroundColor: "#ef4444" }]} />
           <View style={[styles.awningStripe, { backgroundColor: "#fff" }]} />
@@ -51,7 +157,7 @@ function HouseNode({ type, selected, scale = 1 }: { type: LotVisualType; selecte
   }[type];
 
   return (
-    <View style={[styles.houseWrap, { transform: [{ scale: sizeScale }] }]}>
+    <View style={[styles.houseWrap, { transform: [{ scale: sizeScale }] }]}> 
       <View
         style={[
           styles.houseRoof,
@@ -60,8 +166,9 @@ function HouseNode({ type, selected, scale = 1 }: { type: LotVisualType; selecte
           },
         ]}
       />
-      <View style={[styles.houseBody, { backgroundColor: palette.wall }]}>
+      <View style={[styles.houseBody, { backgroundColor: palette.wall }]}> 
         <View style={[styles.houseDoor, { backgroundColor: palette.door }]} />
+        <View style={styles.houseWindow} />
       </View>
       <View style={styles.houseShadow} />
     </View>
@@ -70,21 +177,69 @@ function HouseNode({ type, selected, scale = 1 }: { type: LotVisualType; selecte
 
 export default function TownMapScreen() {
   const router = useRouter();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { lots, trees } = useMemo(() => generateCity(), []);
+
   const [selectedLotId, setSelectedLotId] = useState<string | null>(null);
-  const [scale, setScale] = useState(0.55);
+  const [scale, setScale] = useState(0.5);
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<TownMapMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
+  const [clockMs, setClockMs] = useState(() => Date.now());
+
+  const horizontalRef = useRef<ScrollView | null>(null);
+  const verticalRef = useRef<ScrollView | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
+  const centeredRef = useRef(false);
 
   const selectedLot = useMemo(
     () => lots.find((item) => item.id === selectedLotId) ?? null,
     [lots, selectedLotId]
   );
 
+  const cars = useMemo<MovingCar[]>(() => {
+    const colors = ["#ef4444", "#3b82f6", "#facc15", "#1f2937", "#ffffff", "#f97316"];
+    const list: MovingCar[] = [];
+
+    ROAD_ROUTES.forEach((route) => {
+      const count = 5 + Math.floor(Math.random() * 4);
+      for (let idx = 0; idx < count; idx += 1) {
+        list.push({
+          id: `${route.id}-${idx}`,
+          routeId: route.id,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          speed: 0.015 + Math.random() * 0.02,
+          delay: Math.random(),
+          direction: Math.random() > 0.5 ? 1 : -1,
+        });
+      }
+    });
+
+    return list;
+  }, []);
+
   const mapWidthScaled = MAP_WIDTH * scale;
   const mapHeightScaled = MAP_HEIGHT * scale;
+
+  useEffect(() => {
+    const timer = setInterval(() => setClockMs(Date.now()), 33);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (centeredRef.current) return;
+
+    const timer = setTimeout(() => {
+      const x = Math.max(0, mapWidthScaled / 2 - windowWidth / 2);
+      const y = Math.max(0, mapHeightScaled / 2 - windowHeight / 2);
+      horizontalRef.current?.scrollTo({ x, animated: false });
+      verticalRef.current?.scrollTo({ y, animated: false });
+      centeredRef.current = true;
+    }, 40);
+
+    return () => clearTimeout(timer);
+  }, [mapHeightScaled, mapWidthScaled, windowHeight, windowWidth]);
 
   const openChat = () => {
     if (!selectedLot) return;
@@ -114,8 +269,10 @@ export default function TownMapScreen() {
       },
     ]);
 
-    setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 30);
+    setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 40);
   };
+
+  const lotScale = Math.max(0.45, scale * 0.95);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -125,63 +282,137 @@ export default function TownMapScreen() {
             <Ionicons name="chevron-back" size={24} color="#fff" />
           </Pressable>
           <View style={styles.mapPill}>
-            <Ionicons name="earth" size={14} color="#15803d" />
+            <Ionicons name="earth" size={14} color="#16a34a" />
             <Text style={styles.mapPillText}>Town Map</Text>
           </View>
         </View>
 
         <View style={styles.headerRight}>
           <View style={styles.headerDarkCircle}>
-            <Ionicons name="pin" size={16} color="#fff" />
+            <Ionicons name="location-outline" size={17} color="#fff" />
           </View>
           <View style={styles.headerDarkCircle}>
-            <Ionicons name="person" size={16} color="#fff" />
+            <Ionicons name="person-outline" size={17} color="#fff" />
           </View>
         </View>
       </View>
 
       <View style={styles.zoomWrap}>
-        <Pressable style={styles.zoomBtn} onPress={() => setScale((v) => Math.min(v + 0.1, 1.25))}>
-          <Ionicons name="add" size={18} color="#374151" />
+        <Pressable style={styles.zoomBtn} onPress={() => setScale((v) => Math.min(v + 0.15, 1.4))}>
+          <Ionicons name="add" size={20} color="#374151" />
         </Pressable>
-        <Pressable style={styles.zoomBtn} onPress={() => setScale((v) => Math.max(v - 0.1, 0.25))}>
-          <Ionicons name="remove" size={18} color="#374151" />
+        <Pressable style={styles.zoomBtn} onPress={() => setScale((v) => Math.max(v - 0.15, 0.22))}>
+          <Ionicons name="remove" size={20} color="#374151" />
         </Pressable>
       </View>
 
-      <ScrollView horizontal style={styles.outerScroll} contentContainerStyle={{ flexGrow: 1 }}>
-        <ScrollView style={styles.innerScroll} contentContainerStyle={{ flexGrow: 1 }}>
+      <ScrollView horizontal style={styles.outerScroll} ref={horizontalRef}>
+        <ScrollView style={styles.innerScroll} ref={verticalRef}>
           <View style={[styles.mapCanvas, { width: mapWidthScaled, height: mapHeightScaled }]}>
-            <View
-              style={[
-                styles.river,
-                {
-                  left: 200 * scale,
-                  top: 920 * scale,
-                  width: 2000 * scale,
-                  height: 360 * scale,
-                  borderRadius: 180 * scale,
-                },
-              ]}
-            />
+            <Svg
+              width={mapWidthScaled}
+              height={mapHeightScaled}
+              viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+              preserveAspectRatio="none"
+              style={StyleSheet.absoluteFill}
+            >
+              <Rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill="#7ec850" />
 
-            <View style={[styles.roadVertical, { left: 600 * scale, height: mapHeightScaled }]} />
-            <View style={[styles.roadVertical, { left: 1800 * scale, height: mapHeightScaled }]} />
-            <View style={[styles.roadHorizontal, { top: 500 * scale, width: mapWidthScaled }]} />
-            <View style={[styles.roadHorizontal, { top: 1800 * scale, width: mapWidthScaled }]} />
+              <Path
+                d="M-200,1100 C400,800 800,1400 1200,1300 S1800,900 2800,1100"
+                stroke="#a5f3fc"
+                strokeWidth={450}
+                fill="none"
+                strokeLinecap="round"
+              />
+              <Path
+                d="M-200,1100 C400,800 800,1400 1200,1300 S1800,900 2800,1100"
+                stroke="#38bdf8"
+                strokeWidth={300}
+                fill="none"
+                strokeLinecap="round"
+                opacity={0.92}
+              />
+
+              <Rect x={550} y={900} width={100} height={600} fill="#cbd5e1" />
+              <Rect x={1750} y={950} width={100} height={500} fill="#cbd5e1" />
+
+              {ROAD_ROUTES.map((route) => (
+                <Path
+                  key={`road-${route.id}`}
+                  d={route.svgPath}
+                  stroke="#555"
+                  strokeWidth={60}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              ))}
+
+              {ROAD_ROUTES.map((route) => (
+                <Path
+                  key={`road-stripe-${route.id}`}
+                  d={route.svgPath}
+                  stroke="#fff"
+                  strokeWidth={2.2}
+                  strokeDasharray="16 18"
+                  strokeLinecap="round"
+                  fill="none"
+                  opacity={0.62}
+                />
+              ))}
+            </Svg>
+
+            {cars.map((car) => {
+              const route = ROAD_ROUTES.find((item) => item.id === car.routeId)!;
+              const elapsed = (clockMs / 1000) * car.speed + car.delay;
+              const baseProgress = ((elapsed % 1) + 1) % 1;
+              const t = car.direction === 1 ? baseProgress : 1 - baseProgress;
+              const point = routePoint(route, t);
+              const angle = car.direction === 1 ? point.angle : point.angle + 180;
+
+              return (
+                <View
+                  key={car.id}
+                  pointerEvents="none"
+                  style={[
+                    styles.carWrap,
+                    {
+                      left: point.x * scale,
+                      top: point.y * scale,
+                      transform: [
+                        { translateX: -6 },
+                        { translateY: -4 },
+                        { rotate: `${angle}deg` },
+                        { scale: Math.max(0.6, scale) },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={[styles.carBody, { backgroundColor: car.color }]}>
+                    <View style={styles.carGlass} />
+                    <View style={styles.wheelLeft} />
+                    <View style={styles.wheelRight} />
+                  </View>
+                </View>
+              );
+            })}
 
             {trees.map((tree, idx) => (
               <View
                 key={`tree-${idx}`}
                 style={[
-                  styles.tree,
+                  styles.treeWrap,
                   {
                     left: tree.x * scale,
                     top: tree.y * scale,
                     transform: [{ scale: tree.scale * scale }],
                   },
                 ]}
-              />
+              >
+                <View style={styles.treeLeaf} />
+                <View style={styles.treeTrunk} />
+                <View style={styles.treeShadow} />
+              </View>
             ))}
 
             {lots.map((lot) => {
@@ -212,7 +443,7 @@ export default function TownMapScreen() {
                     </View>
                   ) : null}
 
-                  <HouseNode type={lot.visualType} selected={selected} scale={Math.max(0.8, scale)} />
+                  <HouseNode type={lot.visualType} selected={selected} scale={lotScale} />
                 </Pressable>
               );
             })}
@@ -222,7 +453,7 @@ export default function TownMapScreen() {
                 <Ionicons name="home" size={10} color="#3b82f6" />
                 <Text style={styles.myHomeText}>My Home</Text>
               </View>
-              <HouseNode type="brown-manor" selected={false} scale={Math.max(0.8, scale)} />
+              <HouseNode type="brown-manor" selected={false} scale={lotScale} />
             </View>
           </View>
         </ScrollView>
@@ -237,7 +468,12 @@ export default function TownMapScreen() {
         </View>
       ) : null}
 
-      <Modal visible={isChatOpen} animationType="slide" transparent onRequestClose={() => setIsChatOpen(false)}>
+      <Modal
+        visible={isChatOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsChatOpen(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.chatSheet}>
             <View style={styles.chatHeader}>
@@ -250,7 +486,10 @@ export default function TownMapScreen() {
                   <Text style={styles.chatRole}>{selectedLot?.npc.role ?? "Role"}</Text>
                 </View>
               </View>
-              <Pressable style={styles.headerCircleWhite} onPress={() => setIsChatOpen(false)}>
+              <Pressable
+                style={styles.headerCircleWhite}
+                onPress={() => setIsChatOpen(false)}
+              >
                 <Ionicons name="close" size={18} color="#374151" />
               </Pressable>
             </View>
@@ -263,12 +502,17 @@ export default function TownMapScreen() {
               {chatMessages.map((msg, idx) => (
                 <View
                   key={`${msg.role}-${idx}`}
-                  style={[styles.chatRow, msg.role === "user" ? styles.chatRowMe : styles.chatRowBot]}
+                  style={[
+                    styles.chatRow,
+                    msg.role === "user" ? styles.chatRowMe : styles.chatRowBot,
+                  ]}
                 >
                   <View
                     style={[
                       styles.chatBubble,
-                      msg.role === "user" ? styles.chatBubbleMe : styles.chatBubbleBot,
+                      msg.role === "user"
+                        ? styles.chatBubbleMe
+                        : styles.chatBubbleBot,
                     ]}
                   >
                     <Text style={styles.chatBubbleText}>{msg.text}</Text>
@@ -324,22 +568,22 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
+  },
+  headerDarkCircle: {
     width: 40,
     height: 40,
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.35)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
-  },
-  headerDarkCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(17,24,39,0.35)",
+    backgroundColor: "rgba(17,24,39,0.2)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
   },
@@ -347,13 +591,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.95)",
+    backgroundColor: "rgba(255,255,255,0.93)",
   },
   mapPillText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "700",
     color: "#111827",
   },
@@ -365,9 +609,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   zoomBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.92)",
@@ -383,44 +627,83 @@ const styles = StyleSheet.create({
   mapCanvas: {
     backgroundColor: "#7ec850",
   },
-  river: {
+  carWrap: {
     position: "absolute",
-    backgroundColor: "rgba(56,189,248,0.75)",
-    transform: [{ rotate: "-8deg" }],
+    zIndex: 12,
   },
-  roadVertical: {
-    position: "absolute",
-    width: 38,
-    backgroundColor: "#4b5563",
-    opacity: 0.9,
+  carBody: {
+    width: 12,
+    height: 8,
+    borderRadius: 2,
+    borderWidth: 0.5,
+    borderColor: "rgba(0,0,0,0.15)",
   },
-  roadHorizontal: {
+  carGlass: {
     position: "absolute",
-    height: 38,
-    backgroundColor: "#4b5563",
-    opacity: 0.9,
+    left: 2,
+    right: 2,
+    top: 1,
+    height: 3,
+    borderRadius: 1,
+    backgroundColor: "rgba(147,197,253,0.6)",
   },
-  tree: {
+  wheelLeft: {
     position: "absolute",
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#16a34a",
-    opacity: 0.85,
+    left: -1,
+    bottom: -1,
+    width: 2,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#111827",
+  },
+  wheelRight: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 2,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#111827",
+  },
+  treeWrap: {
+    position: "absolute",
+    alignItems: "center",
+    zIndex: 8,
+  },
+  treeLeaf: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#23aa46",
+    marginBottom: -12,
+  },
+  treeTrunk: {
+    width: 10,
+    height: 20,
+    borderRadius: 3,
+    backgroundColor: "#8a5a44",
+  },
+  treeShadow: {
+    width: 30,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.15)",
+    marginTop: 2,
   },
   lotWrap: {
     position: "absolute",
     alignItems: "center",
+    zIndex: 14,
   },
   labelPill: {
     position: "absolute",
-    bottom: 42,
+    bottom: 46,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    backgroundColor: "rgba(255,255,255,0.75)",
+    backgroundColor: "rgba(255,255,255,0.7)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.6)",
+    borderColor: "rgba(255,255,255,0.5)",
   },
   labelPillText: {
     fontSize: 9,
@@ -429,7 +712,7 @@ const styles = StyleSheet.create({
   },
   avatarBubble: {
     position: "absolute",
-    bottom: 44,
+    bottom: 46,
     borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.95)",
     borderWidth: 1,
@@ -482,6 +765,16 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 3,
     borderTopRightRadius: 3,
   },
+  houseWindow: {
+    position: "absolute",
+    top: 5,
+    right: 4,
+    width: 6,
+    height: 6,
+    borderWidth: 0.5,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#bae6fd",
+  },
   houseShadow: {
     width: 34,
     height: 4,
@@ -513,6 +806,7 @@ const styles = StyleSheet.create({
   myHomeMarker: {
     position: "absolute",
     alignItems: "center",
+    zIndex: 15,
   },
   myHomePill: {
     flexDirection: "row",
@@ -535,9 +829,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: "center",
+    zIndex: 20,
   },
   visitBtn: {
-    minHeight: 44,
+    minHeight: 46,
     borderRadius: 999,
     backgroundColor: "#111827",
     paddingHorizontal: 18,

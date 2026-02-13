@@ -14,6 +14,6 @@ module.exports = [
     },
   },
   {
-    ignores: ["dist/**", "web-build/**"],
+    ignores: [".expo/**", "dist/**", "web-build/**"],
   },
 ];
