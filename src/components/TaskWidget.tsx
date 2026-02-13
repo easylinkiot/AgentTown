@@ -64,7 +64,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 12,
     bottom: 24,
-    zIndex: 20,
+    zIndex: 12,
   },
   card: {
     width: 170,

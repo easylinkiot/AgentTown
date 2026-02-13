@@ -8,6 +8,10 @@ export interface ChatThread {
   isVoiceCall?: boolean;
   isSystem?: boolean;
   highlight?: boolean;
+  isGroup?: boolean;
+  memberCount?: number;
+  phoneNumber?: string;
+  supportsVideo?: boolean;
 }
 
 export type TaskPriority = "High" | "Medium" | "Low";
@@ -30,7 +34,13 @@ export interface BotConfig {
   knowledgeKeywords: string[];
 }
 
-export type ConversationType = "text" | "voice" | "reply" | "summary";
+export type ConversationType =
+  | "text"
+  | "voice"
+  | "reply"
+  | "summary"
+  | "image"
+  | "system";
 
 export interface ConversationMessage {
   id: string;
@@ -42,6 +52,8 @@ export interface ConversationMessage {
   time?: string;
   voiceDuration?: string;
   replyContext?: string;
+  imageUri?: string;
+  imageName?: string;
 }
 
 export interface AiContextState {

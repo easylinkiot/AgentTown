@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ChatThread } from "@/src/types";
@@ -20,9 +21,17 @@ export function ChatListItem({ chat, onPress }: ChatListItemProps) {
       </View>
       <View style={styles.body}>
         <View style={styles.rowTop}>
-          <Text style={styles.name} numberOfLines={1}>
-            {chat.name}
-          </Text>
+          <View style={styles.nameWrap}>
+            {chat.isGroup ? (
+              <Ionicons name="people" size={14} color="#64748b" />
+            ) : null}
+            <Text style={styles.name} numberOfLines={1}>
+              {chat.name}
+            </Text>
+            {chat.isGroup && chat.memberCount ? (
+              <Text style={styles.memberCount}>{chat.memberCount}</Text>
+            ) : null}
+          </View>
           <Text style={styles.time}>{chat.time}</Text>
         </View>
         <Text style={[styles.message, chat.highlight && styles.highlight]} numberOfLines={1}>
@@ -82,11 +91,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  name: {
+  nameWrap: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  name: {
     fontSize: 15,
     fontWeight: "700",
     color: "#111827",
+    maxWidth: "84%",
+  },
+  memberCount: {
+    fontSize: 10,
+    color: "#64748b",
+    fontWeight: "600",
   },
   time: {
     fontSize: 11,

@@ -10,6 +10,9 @@ export const CHAT_DATA: ChatThread[] = [
     time: "3:30 AM",
     highlight: true,
     unreadCount: 2,
+    isGroup: true,
+    memberCount: 14,
+    supportsVideo: true,
   },
   {
     id: "2",
@@ -18,6 +21,9 @@ export const CHAT_DATA: ChatThread[] = [
       "https://img.freepik.com/free-psd/3d-illustration-person-with-sunglasses_23-2149436188.jpg?w=200",
     message: "@Jason We should align on the prototype first",
     time: "8:17 AM",
+    isGroup: true,
+    memberCount: 6,
+    supportsVideo: true,
   },
   {
     id: "3",
@@ -28,6 +34,8 @@ export const CHAT_DATA: ChatThread[] = [
     time: "8:13 AM",
     unreadCount: 8,
     isSystem: true,
+    isGroup: true,
+    memberCount: 9,
   },
   {
     id: "4",
@@ -37,6 +45,8 @@ export const CHAT_DATA: ChatThread[] = [
     message: "[Voice Call]",
     time: "8:07 AM",
     isVoiceCall: true,
+    phoneNumber: "+1 415-888-2389",
+    supportsVideo: true,
   },
   {
     id: "5",
@@ -53,6 +63,9 @@ export const CHAT_DATA: ChatThread[] = [
       "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671140.jpg?w=200",
     message: "yy: Let's sync up tomorrow morning before submission...",
     time: "6:35 AM",
+    isGroup: true,
+    memberCount: 8,
+    supportsVideo: true,
   },
   {
     id: "7",
@@ -61,6 +74,8 @@ export const CHAT_DATA: ChatThread[] = [
       "https://img.freepik.com/free-psd/3d-rendering-avatar_23-2150833560.jpg?w=200",
     message: "Okay, sounds good.",
     time: "6:12 AM",
+    phoneNumber: "+1 415-888-2256",
+    supportsVideo: true,
   },
   {
     id: "8",
@@ -69,6 +84,9 @@ export const CHAT_DATA: ChatThread[] = [
       "https://img.freepik.com/free-psd/3d-rendering-avatar_23-2150833536.jpg?w=200",
     message: "Meeting notes attached.",
     time: "Yesterday",
+    isGroup: true,
+    memberCount: 11,
+    supportsVideo: true,
   },
   {
     id: "9",
@@ -77,6 +95,9 @@ export const CHAT_DATA: ChatThread[] = [
       "https://img.freepik.com/free-psd/3d-illustration-person-with-sunglasses_23-2149436180.jpg?w=200",
     message: "New campaign assets are ready for review.",
     time: "Yesterday",
+    isGroup: true,
+    memberCount: 10,
+    supportsVideo: true,
   },
 ];
 

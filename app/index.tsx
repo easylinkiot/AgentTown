@@ -1,13 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   FlatList,
   Image,
+  PanResponder,
   Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
@@ -60,8 +63,16 @@ const VIEW_TAG_COLORS: Record<string, string> = {
 export default function HomeScreen() {
   const router = useRouter();
   const { botConfig, tasks, myHouseType } = useAgentTown();
+  const { height: windowHeight } = useWindowDimensions();
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [sceneSize, setSceneSize] = useState({ width: 360, height: 360 });
+  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+
+  const chatSheetHeight = Math.max(320, Math.round(windowHeight * 0.5));
+  const chatSheetPeek = 68;
+  const maxSheetTranslate = Math.max(0, chatSheetHeight - chatSheetPeek);
+  const chatSheetTranslateY = useRef(new Animated.Value(0)).current;
+  const chatSheetDragStart = useRef(0);
 
   const routeLookup = useMemo(
     () => new Map(ROAD_ROUTES.map((route) => [route.id, route])),
@@ -147,6 +158,67 @@ export default function HomeScreen() {
       y: HOME_POSITION.y * SCENE_SCALE + worldOffset.top,
     }),
     [worldOffset.left, worldOffset.top]
+  );
+
+  const taskWidgetBottom = useMemo(() => {
+    const desiredBottom = isChatCollapsed ? chatSheetPeek + 18 : chatSheetHeight + 16;
+    const maxBottomInsideScene = Math.max(94, sceneSize.height - 210);
+    return Math.min(desiredBottom, maxBottomInsideScene);
+  }, [chatSheetHeight, chatSheetPeek, isChatCollapsed, sceneSize.height]);
+
+  const taskWidgetOverlayStyle = useMemo(
+    () => ({
+      right: 14,
+      bottom: taskWidgetBottom,
+      zIndex: 12,
+    }),
+    [taskWidgetBottom]
+  );
+
+  const animateChatSheet = useCallback(
+    (collapsed: boolean) => {
+      Animated.spring(chatSheetTranslateY, {
+        toValue: collapsed ? maxSheetTranslate : 0,
+        useNativeDriver: true,
+        damping: 18,
+        stiffness: 180,
+        mass: 0.8,
+      }).start();
+    },
+    [chatSheetTranslateY, maxSheetTranslate]
+  );
+
+  useEffect(() => {
+    animateChatSheet(isChatCollapsed);
+  }, [animateChatSheet, isChatCollapsed]);
+
+  useEffect(() => {
+    chatSheetTranslateY.stopAnimation((value) => {
+      const safeValue = clamp(value, 0, maxSheetTranslate);
+      chatSheetTranslateY.setValue(isChatCollapsed ? maxSheetTranslate : safeValue);
+    });
+  }, [chatSheetTranslateY, isChatCollapsed, maxSheetTranslate]);
+
+  const chatSheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 4,
+        onPanResponderGrant: () => {
+          chatSheetTranslateY.stopAnimation((value) => {
+            chatSheetDragStart.current = value;
+          });
+        },
+        onPanResponderMove: (_, gesture) => {
+          const next = clamp(chatSheetDragStart.current + gesture.dy, 0, maxSheetTranslate);
+          chatSheetTranslateY.setValue(next);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const next = clamp(chatSheetDragStart.current + gesture.dy, 0, maxSheetTranslate);
+          const shouldCollapse = gesture.vy > 0.35 || next > maxSheetTranslate * 0.45;
+          setIsChatCollapsed(shouldCollapse);
+        },
+      }),
+    [chatSheetTranslateY, maxSheetTranslate]
   );
 
   return (
@@ -389,12 +461,35 @@ export default function HomeScreen() {
             <View style={styles.onlineDotMarker} />
           </Pressable>
 
-          <TaskWidget tasks={tasks} containerStyle={styles.taskWidgetAtTop} />
+          <TaskWidget tasks={tasks} containerStyle={taskWidgetOverlayStyle} />
         </View>
       </View>
 
-      <View style={styles.chatSheet}>
-        <View style={styles.chatHandle} />
+      <Animated.View
+        style={[
+          styles.chatSheet,
+          {
+            height: chatSheetHeight,
+            transform: [{ translateY: chatSheetTranslateY }],
+          },
+        ]}
+      >
+        <Pressable
+          style={styles.chatSheetHeader}
+          onPress={() => setIsChatCollapsed((prev) => !prev)}
+          {...chatSheetPanResponder.panHandlers}
+        >
+          <View style={styles.chatHandle} />
+          <Text style={styles.chatHeaderTitle}>
+            {isChatCollapsed ? `Chats (${CHAT_DATA.length})` : "Chats"}
+          </Text>
+          <Ionicons
+            name={isChatCollapsed ? "chevron-up" : "chevron-down"}
+            size={18}
+            color="#64748b"
+          />
+        </Pressable>
+
         <FlatList
           data={CHAT_DATA}
           keyExtractor={(item) => item.id}
@@ -410,8 +505,9 @@ export default function HomeScreen() {
             />
           )}
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.chatListContent}
         />
-      </View>
+      </Animated.View>
 
       <Pressable style={styles.fab}>
         <Text style={styles.fabText}>+</Text>
@@ -426,9 +522,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#0b1220",
   },
   topSection: {
-    height: "55%",
+    flex: 1,
     paddingHorizontal: 8,
     paddingTop: 8,
+    paddingBottom: 8,
   },
   townBg: {
     flex: 1,
@@ -651,13 +748,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#fff",
   },
-  taskWidgetAtTop: {
-    right: 14,
-    bottom: 78,
-  },
   chatSheet: {
-    flex: 1,
-    marginTop: -16,
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 40,
+    elevation: 40,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     backgroundColor: "rgba(255,255,255,0.88)",
@@ -665,19 +762,37 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.6)",
   },
+  chatSheetHeader: {
+    position: "relative",
+    zIndex: 2,
+    height: 56,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.06)",
+  },
   chatHandle: {
     width: 40,
     height: 5,
     borderRadius: 99,
     alignSelf: "center",
-    marginTop: 10,
-    marginBottom: 4,
     backgroundColor: "#9ca3af",
+  },
+  chatHeaderTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  chatListContent: {
+    paddingBottom: 80,
   },
   fab: {
     position: "absolute",
     right: 24,
     bottom: 26,
+    zIndex: 30,
     width: 56,
     height: 56,
     borderRadius: 28,

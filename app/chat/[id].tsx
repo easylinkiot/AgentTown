@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -24,11 +26,37 @@ import { generateGeminiJson, generateGeminiText } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { AiContextState, ConversationMessage, TaskItem } from "@/src/types";
 
+interface PickedImageAsset {
+  uri: string;
+  name: string;
+}
+
+const GROUP_MEMBER_CANDIDATES = [
+  "Alice",
+  "Mia",
+  "Logan",
+  "Noah",
+  "Sarah",
+  "Tony",
+  "Rina",
+];
+
 function toHistory(messages: ConversationMessage[]) {
-  return messages.slice(-10).map((msg) => ({
-    role: msg.isMe ? ("user" as const) : ("model" as const),
-    text: `${msg.senderName ? `${msg.senderName}: ` : ""}${msg.content}`,
-  }));
+  return messages.slice(-10).map((msg) => {
+    const normalizedText =
+      msg.type === "image"
+        ? `[image] ${msg.content || msg.imageName || "photo"}`
+        : msg.type === "voice"
+          ? `[voice] ${msg.content || "voice message"}`
+          : msg.type === "system"
+            ? `[system] ${msg.content}`
+            : msg.content;
+
+    return {
+      role: msg.isMe ? ("user" as const) : ("model" as const),
+      text: `${msg.senderName ? `${msg.senderName}: ` : ""}${normalizedText}`,
+    };
+  });
 }
 
 export default function ChatDetailScreen() {
@@ -38,6 +66,7 @@ export default function ChatDetailScreen() {
 
   const { botConfig, addTask } = useAgentTown();
   const thread = useMemo(() => resolveChatThread(chatId, botConfig), [botConfig, chatId]);
+  const isGroupChat = Boolean(thread.isGroup || chatId.startsWith("group_"));
 
   const [messages, setMessages] = useState<ConversationMessage[]>(() =>
     getInitialConversation(chatId, thread)
@@ -48,6 +77,12 @@ export default function ChatDetailScreen() {
   const [addedTaskIndexes, setAddedTaskIndexes] = useState<Set<number>>(new Set());
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiContext, setAiContext] = useState<AiContextState>({ mode: "idle", data: null });
+  const [attachmentPanelVisible, setAttachmentPanelVisible] = useState(false);
+  const [pendingImage, setPendingImage] = useState<PickedImageAsset | null>(null);
+  const [groupMemberCount, setGroupMemberCount] = useState(
+    thread.memberCount ?? (isGroupChat ? 6 : 2)
+  );
+  const [inviteCursor, setInviteCursor] = useState(0);
   const scrollRef = useRef<ScrollView | null>(null);
 
   useEffect(() => {
@@ -56,24 +91,42 @@ export default function ChatDetailScreen() {
     setCustomPrompt("");
     setAiContext({ mode: "idle", data: null });
     setAddedTaskIndexes(new Set());
-  }, [chatId, thread]);
+    setAttachmentPanelVisible(false);
+    setPendingImage(null);
+    setGroupMemberCount(thread.memberCount ?? (isGroupChat ? 6 : 2));
+  }, [chatId, isGroupChat, thread]);
 
   useEffect(() => {
     setTimeout(() => {
       scrollRef.current?.scrollToEnd({ animated: true });
     }, 40);
-  }, [isAiThinking, messages.length]);
+  }, [isAiThinking, messages.length, pendingImage]);
 
   const systemInstruction =
     chatId === "mybot"
       ? botConfig.systemInstruction
-      : `You are participating in a group chat named "${thread.name}". Reply naturally as a helpful colleague. Keep it brief.`;
+      : `You are participating in ${isGroupChat ? "a group chat" : "a private chat"} named "${thread.name}". Reply naturally as a helpful colleague. Keep it brief.`;
+
+  const appendSystemMessage = (content: string) => {
+    const systemMessage: ConversationMessage = {
+      id: `${Date.now()}-system-${Math.random().toString(16).slice(2, 6)}`,
+      senderName: "System",
+      senderAvatar: DEFAULT_MYBOT_AVATAR,
+      content,
+      type: "system",
+      isMe: false,
+      time: formatNowTime(),
+    };
+
+    setMessages((prev) => [...prev, systemMessage]);
+  };
 
   const handleSend = async () => {
     const text = inputValue.trim();
     if (!text) return;
 
     setInputValue("");
+    setAttachmentPanelVisible(false);
 
     const userMessage: ConversationMessage = {
       id: `${Date.now()}`,
@@ -87,9 +140,8 @@ export default function ChatDetailScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setIsAiThinking(true);
 
-    const prompt = `User message: ${text}`;
     const reply = await generateGeminiText({
-      prompt,
+      prompt: `User message: ${text}`,
       systemInstruction,
       history: toHistory([...messages, userMessage]),
     });
@@ -106,6 +158,105 @@ export default function ChatDetailScreen() {
 
     setMessages((prev) => [...prev, aiMessage]);
     setIsAiThinking(false);
+  };
+
+  const sendImageMessage = async () => {
+    if (!pendingImage) return;
+
+    const caption = inputValue.trim();
+    setInputValue("");
+    setAttachmentPanelVisible(false);
+
+    const userImageMessage: ConversationMessage = {
+      id: `${Date.now()}-img`,
+      senderAvatar: botConfig.avatar || DEFAULT_MYBOT_AVATAR,
+      content: caption || pendingImage.name,
+      type: "image",
+      imageUri: pendingImage.uri,
+      imageName: pendingImage.name,
+      isMe: true,
+      time: formatNowTime(),
+    };
+
+    setPendingImage(null);
+    setMessages((prev) => [...prev, userImageMessage]);
+    setIsAiThinking(true);
+
+    const reply = await generateGeminiText({
+      prompt: caption
+        ? `User sent an image with caption: ${caption}. Reply briefly.`
+        : `User sent an image named ${pendingImage.name}. Reply briefly.`,
+      systemInstruction,
+      history: toHistory([...messages, userImageMessage]),
+    });
+
+    const aiMessage: ConversationMessage = {
+      id: `${Date.now()}-ai-img`,
+      senderName: thread.name,
+      senderAvatar: thread.avatar,
+      content: reply ?? "图片收到了，我会结合内容继续处理。",
+      type: "text",
+      isMe: false,
+      time: formatNowTime(),
+    };
+
+    setMessages((prev) => [...prev, aiMessage]);
+    setIsAiThinking(false);
+  };
+
+  const openImagePicker = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/*"],
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset?.uri) return;
+
+      setPendingImage({
+        uri: asset.uri,
+        name: asset.name || "photo",
+      });
+      setAttachmentPanelVisible(false);
+    } catch {
+      appendSystemMessage("选择图片失败，请稍后重试。");
+    }
+  };
+
+  const startVoiceCall = () => {
+    appendSystemMessage(`Voice call started with ${thread.name} (demo mode).`);
+  };
+
+  const startVideoCall = () => {
+    appendSystemMessage(`Video call started with ${thread.name} (demo mode).`);
+  };
+
+  const addMemberToGroup = () => {
+    if (!isGroupChat) return;
+
+    const member = GROUP_MEMBER_CANDIDATES[inviteCursor % GROUP_MEMBER_CANDIDATES.length];
+    setInviteCursor((prev) => prev + 1);
+    setGroupMemberCount((prev) => prev + 1);
+    appendSystemMessage(`${member} joined the group.`);
+  };
+
+  const openMoreActions = () => {
+    if (isGroupChat) {
+      Alert.alert("Group Actions", "Add one mock member to this group?", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Add Member", onPress: addMemberToGroup },
+      ]);
+      return;
+    }
+
+    Alert.alert("Chat Actions", "Open call options in this chat?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Voice Call", onPress: startVoiceCall },
+      { text: "Video Call", onPress: startVideoCall },
+    ]);
   };
 
   const runReplySuggestions = async (msg: ConversationMessage) => {
@@ -205,17 +356,59 @@ export default function ChatDetailScreen() {
           <Pressable style={styles.headerIconBtn} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={24} color="#111827" />
           </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {thread.name}
-          </Text>
-          <View style={styles.headerIconBtn}>
-            <Ionicons name="ellipsis-horizontal" size={18} color="#111827" />
+
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {thread.name}
+            </Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {isGroupChat
+                ? `${groupMemberCount} members · Group chat`
+                : thread.phoneNumber || "Direct chat"}
+            </Text>
+          </View>
+
+          <View style={styles.headerActionGroup}>
+            <Pressable style={styles.headerMiniBtn} onPress={startVoiceCall}>
+              <Ionicons name="call-outline" size={18} color="#111827" />
+            </Pressable>
+            <Pressable
+              style={styles.headerMiniBtn}
+              onPress={startVideoCall}
+              disabled={thread.supportsVideo === false}
+            >
+              <Ionicons
+                name="videocam-outline"
+                size={18}
+                color={thread.supportsVideo === false ? "#9ca3af" : "#111827"}
+              />
+            </Pressable>
+            <Pressable style={styles.headerMiniBtn} onPress={openMoreActions}>
+              <Ionicons name="ellipsis-horizontal" size={18} color="#111827" />
+            </Pressable>
           </View>
         </View>
 
-        <ScrollView ref={scrollRef} style={styles.messageList} contentContainerStyle={styles.messageContent}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.messageList}
+          contentContainerStyle={styles.messageContent}
+        >
           {messages.map((msg, index) => {
             const showTime = msg.time && (index === 0 || messages[index - 1].time !== msg.time);
+            const canOpenAiPanel =
+              msg.type === "text" || msg.type === "reply" || msg.type === "summary";
+
+            if (msg.type === "system") {
+              return (
+                <View key={msg.id}>
+                  {showTime ? <Text style={styles.timeText}>{msg.time}</Text> : null}
+                  <View style={styles.systemRow}>
+                    <Text style={styles.systemText}>{msg.content}</Text>
+                  </View>
+                </View>
+              );
+            }
 
             return (
               <View key={msg.id}>
@@ -229,16 +422,33 @@ export default function ChatDetailScreen() {
                     ) : null}
 
                     <Pressable
+                      disabled={!canOpenAiPanel}
                       onPress={() =>
-                        setActiveMessageId((prev) => (prev === msg.id ? null : msg.id))
+                        canOpenAiPanel
+                          ? setActiveMessageId((prev) => (prev === msg.id ? null : msg.id))
+                          : undefined
                       }
-                      style={[styles.bubble, msg.isMe ? styles.bubbleMe : styles.bubbleOther]}
+                      style={[
+                        styles.bubble,
+                        msg.isMe ? styles.bubbleMe : styles.bubbleOther,
+                        !canOpenAiPanel && styles.bubblePassive,
+                      ]}
                     >
                       {msg.type === "voice" ? (
                         <Text style={styles.bubbleText}>Voice · {msg.voiceDuration ?? "--"}</Text>
+                      ) : msg.type === "image" && msg.imageUri ? (
+                        <View style={styles.imageBubbleWrap}>
+                          <Image source={{ uri: msg.imageUri }} style={styles.imageBubble} />
+                          {msg.content ? (
+                            <Text style={styles.imageCaption} numberOfLines={2}>
+                              {msg.content}
+                            </Text>
+                          ) : null}
+                        </View>
                       ) : (
                         <Text style={styles.bubbleText}>{msg.content}</Text>
                       )}
+
                       {msg.type === "reply" && msg.replyContext ? (
                         <View style={styles.replyContextWrap}>
                           <Text style={styles.replyContext}>{msg.replyContext}</Text>
@@ -248,7 +458,7 @@ export default function ChatDetailScreen() {
                   </View>
                 </View>
 
-                {activeMessageId === msg.id ? (
+                {activeMessageId === msg.id && canOpenAiPanel ? (
                   <View style={styles.aiPanel}>
                     <View style={styles.aiInputRow}>
                       <Ionicons name="sparkles" size={14} color="#2563eb" />
@@ -262,7 +472,10 @@ export default function ChatDetailScreen() {
                       <Pressable
                         onPress={() => runCustomPrompt(msg)}
                         disabled={!customPrompt.trim()}
-                        style={[styles.sendMiniBtn, !customPrompt.trim() && styles.sendMiniBtnDisabled]}
+                        style={[
+                          styles.sendMiniBtn,
+                          !customPrompt.trim() && styles.sendMiniBtnDisabled,
+                        ]}
                       >
                         <Ionicons name="arrow-up" size={12} color="white" />
                       </Pressable>
@@ -312,10 +525,15 @@ export default function ChatDetailScreen() {
                                   <View style={styles.taskTopRow}>
                                     <Text style={styles.taskTitle}>{task.title}</Text>
                                     <Pressable
-                                      style={[styles.taskActionBtn, added && styles.taskActionBtnDone]}
+                                      style={[
+                                        styles.taskActionBtn,
+                                        added && styles.taskActionBtnDone,
+                                      ]}
                                       onPress={() => !added && addToTask(task, idx)}
                                     >
-                                      <Text style={styles.taskActionText}>{added ? "Added" : "Add"}</Text>
+                                      <Text style={styles.taskActionText}>
+                                        {added ? "Added" : "Add"}
+                                      </Text>
                                     </Pressable>
                                   </View>
                                   <Text style={styles.taskMeta}>
@@ -356,19 +574,91 @@ export default function ChatDetailScreen() {
           ) : null}
         </ScrollView>
 
+        {pendingImage ? (
+          <View style={styles.pendingImageWrap}>
+            <Image source={{ uri: pendingImage.uri }} style={styles.pendingImagePreview} />
+            <View style={styles.pendingImageMeta}>
+              <Text style={styles.pendingImageTitle} numberOfLines={1}>
+                {pendingImage.name}
+              </Text>
+              <Text style={styles.pendingImageHint}>Add a caption, then send</Text>
+            </View>
+            <Pressable style={styles.pendingImageCloseBtn} onPress={() => setPendingImage(null)}>
+              <Ionicons name="close" size={18} color="#4b5563" />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {attachmentPanelVisible ? (
+          <View style={styles.attachPanel}>
+            <Pressable style={styles.attachItem} onPress={openImagePicker}>
+              <View style={styles.attachIconBubble}>
+                <Ionicons name="images-outline" size={18} color="#111827" />
+              </View>
+              <Text style={styles.attachText}>Photo</Text>
+            </Pressable>
+            <Pressable
+              style={styles.attachItem}
+              onPress={() => {
+                setAttachmentPanelVisible(false);
+                appendSystemMessage("Camera capture is coming soon.");
+              }}
+            >
+              <View style={styles.attachIconBubble}>
+                <Ionicons name="camera-outline" size={18} color="#111827" />
+              </View>
+              <Text style={styles.attachText}>Camera</Text>
+            </Pressable>
+            <Pressable
+              style={styles.attachItem}
+              onPress={() => {
+                setAttachmentPanelVisible(false);
+                startVoiceCall();
+              }}
+            >
+              <View style={styles.attachIconBubble}>
+                <Ionicons name="call-outline" size={18} color="#111827" />
+              </View>
+              <Text style={styles.attachText}>Call</Text>
+            </Pressable>
+            <Pressable
+              style={styles.attachItem}
+              onPress={() => {
+                setAttachmentPanelVisible(false);
+                startVideoCall();
+              }}
+            >
+              <View style={styles.attachIconBubble}>
+                <Ionicons name="videocam-outline" size={18} color="#111827" />
+              </View>
+              <Text style={styles.attachText}>Video</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <View style={styles.inputBar}>
-          <Pressable style={styles.iconBtn}>
-            <Ionicons name="add" size={22} color="#374151" />
+          <Pressable
+            style={styles.iconBtn}
+            onPress={() => setAttachmentPanelVisible((prev) => !prev)}
+          >
+            <Ionicons
+              name={attachmentPanelVisible ? "close" : "add"}
+              size={22}
+              color="#374151"
+            />
           </Pressable>
           <TextInput
             style={styles.mainInput}
             value={inputValue}
             onChangeText={setInputValue}
-            placeholder="Type a message"
-            onSubmitEditing={handleSend}
+            placeholder={pendingImage ? "Add image caption" : "Type a message"}
+            onSubmitEditing={() => (pendingImage ? sendImageMessage() : handleSend())}
           />
-          <Pressable style={styles.sendBtn} onPress={handleSend}>
-            <Ionicons name="send" size={18} color="white" />
+          <Pressable
+            style={styles.sendBtn}
+            onPress={() => (pendingImage ? sendImageMessage() : handleSend())}
+          >
+            <Ionicons name={pendingImage ? "image" : "send"} size={18} color="white" />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -385,7 +675,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    height: 52,
+    minHeight: 56,
     paddingHorizontal: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#e5e7eb",
@@ -393,6 +683,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#ededed",
+    gap: 6,
   },
   headerIconBtn: {
     width: 34,
@@ -401,13 +692,34 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: {
+  headerCenter: {
     flex: 1,
-    fontSize: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: {
+    fontSize: 16,
     fontWeight: "700",
     textAlign: "center",
     color: "#111827",
-    marginHorizontal: 6,
+    maxWidth: "100%",
+  },
+  headerSubtitle: {
+    marginTop: 1,
+    fontSize: 10,
+    color: "#6b7280",
+  },
+  headerActionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  headerMiniBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
   },
   messageList: {
     flex: 1,
@@ -422,6 +734,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#9ca3af",
     marginVertical: 4,
+  },
+  systemRow: {
+    alignItems: "center",
+    marginVertical: 4,
+  },
+  systemText: {
+    fontSize: 11,
+    color: "#475569",
+    backgroundColor: "rgba(255,255,255,0.72)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
   },
   rowWrap: {
     flexDirection: "row",
@@ -463,10 +787,27 @@ const styles = StyleSheet.create({
   bubbleMe: {
     backgroundColor: "#95EC69",
   },
+  bubblePassive: {
+    opacity: 0.96,
+  },
   bubbleText: {
     fontSize: 14,
     color: "#111827",
     lineHeight: 20,
+  },
+  imageBubbleWrap: {
+    gap: 6,
+  },
+  imageBubble: {
+    width: 180,
+    height: 180,
+    borderRadius: 10,
+    backgroundColor: "#d1d5db",
+  },
+  imageCaption: {
+    fontSize: 12,
+    color: "#1f2937",
+    lineHeight: 17,
   },
   replyContextWrap: {
     marginTop: 8,
@@ -614,6 +955,74 @@ const styles = StyleSheet.create({
   typingRow: {
     marginLeft: 44,
     marginTop: 4,
+  },
+  pendingImageWrap: {
+    marginHorizontal: 10,
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    backgroundColor: "#f9fafb",
+    padding: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  pendingImagePreview: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: "#d1d5db",
+  },
+  pendingImageMeta: {
+    flex: 1,
+  },
+  pendingImageTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  pendingImageHint: {
+    marginTop: 2,
+    fontSize: 11,
+    color: "#6b7280",
+  },
+  pendingImageCloseBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e5e7eb",
+  },
+  attachPanel: {
+    marginHorizontal: 10,
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#f8fafc",
+    padding: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  attachItem: {
+    alignItems: "center",
+    gap: 6,
+    width: "24%",
+  },
+  attachIconBubble: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e2e8f0",
+  },
+  attachText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#334155",
   },
   inputBar: {
     minHeight: 56,
