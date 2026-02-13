@@ -194,15 +194,15 @@ export default function HomeScreen() {
 
   useEffect(() => {
     chatSheetTranslateY.stopAnimation((value) => {
-      const safeValue = clamp(value, 0, maxSheetTranslate);
-      chatSheetTranslateY.setValue(isChatCollapsed ? maxSheetTranslate : safeValue);
+      chatSheetTranslateY.setValue(clamp(value, 0, maxSheetTranslate));
     });
-  }, [chatSheetTranslateY, isChatCollapsed, maxSheetTranslate]);
+  }, [chatSheetTranslateY, maxSheetTranslate]);
 
   const chatSheetPanResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 4,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dy) > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.15,
         onPanResponderGrant: () => {
           chatSheetTranslateY.stopAnimation((value) => {
             chatSheetDragStart.current = value;
@@ -213,6 +213,9 @@ export default function HomeScreen() {
           chatSheetTranslateY.setValue(next);
         },
         onPanResponderRelease: (_, gesture) => {
+          if (Math.abs(gesture.dy) < 8 && Math.abs(gesture.vy) < 0.14) {
+            return;
+          }
           const next = clamp(chatSheetDragStart.current + gesture.dy, 0, maxSheetTranslate);
           const shouldCollapse = gesture.vy > 0.35 || next > maxSheetTranslate * 0.45;
           setIsChatCollapsed(shouldCollapse);
