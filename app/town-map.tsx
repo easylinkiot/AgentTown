@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Image,
   Modal,
+  PixelRatio,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -63,8 +65,11 @@ export default function TownMapScreen() {
   const { myHouseType } = useAgentTown();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const isAndroid = Platform.OS === "android";
 
   const [selectedLot, setSelectedLot] = useState<LotData | null>(null);
+
+  const maxScale = 1.35;
   const [scale, setScale] = useState(0.48);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -192,7 +197,7 @@ export default function TownMapScreen() {
   }, [selectedLot, visibleLots]);
 
   const applyZoom = (delta: number) => {
-    const nextScale = clamp(scale + delta, 0.22, 1.35);
+    const nextScale = clamp(scale + delta, 0.12, maxScale);
     if (Math.abs(nextScale - scale) < 0.001) return;
 
     const worldCenterX = (scrollXRef.current + windowWidth / 2) / scale;
@@ -215,6 +220,10 @@ export default function TownMapScreen() {
       setScrollY(nextY);
     }, 24);
   };
+
+  useEffect(() => {
+    setScale((prev) => clamp(prev, 0.12, maxScale));
+  }, [maxScale]);
 
   const openChat = () => {
     if (!selectedLot) return;
@@ -260,6 +269,12 @@ export default function TownMapScreen() {
     width: clamp((windowWidth / scale / WORLD_WIDTH) * miniSize, 8, miniSize),
     height: clamp((windowHeight / scale / WORLD_HEIGHT) * miniSize, 8, miniSize),
   };
+
+  const svgDownsample = isAndroid ? Math.max(1, PixelRatio.get()) : 1;
+  const svgWidth = mapWidthScaled / svgDownsample;
+  const svgHeight = mapHeightScaled / svgDownsample;
+  const svgTranslateX = (svgWidth * (svgDownsample - 1)) / 2;
+  const svgTranslateY = (svgHeight * (svgDownsample - 1)) / 2;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -329,11 +344,20 @@ export default function TownMapScreen() {
         >
           <View style={[styles.mapCanvas, { width: mapWidthScaled, height: mapHeightScaled }]}>
             <Svg
-              width={mapWidthScaled}
-              height={mapHeightScaled}
+              width={svgWidth}
+              height={svgHeight}
               viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
               preserveAspectRatio="none"
-              style={StyleSheet.absoluteFill}
+              style={[
+                styles.mapBackgroundSvg,
+                isAndroid && {
+                  transform: [
+                    { translateX: svgTranslateX },
+                    { translateY: svgTranslateY },
+                    { scale: svgDownsample },
+                  ],
+                },
+              ]}
             >
               <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill="#7ec850" />
               <Path d={coastAreaPathForSvg()} fill="#38bdf8" opacity={0.95} />
@@ -784,6 +808,11 @@ const styles = StyleSheet.create({
   },
   mapCanvas: {
     backgroundColor: "#7ec850",
+  },
+  mapBackgroundSvg: {
+    position: "absolute",
+    left: 0,
+    top: 0,
   },
   carWrap: {
     position: "absolute",
