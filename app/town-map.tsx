@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   CHUNK_SIZE,
@@ -61,6 +62,7 @@ export default function TownMapScreen() {
   const router = useRouter();
   const { myHouseType } = useAgentTown();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const [selectedLot, setSelectedLot] = useState<LotData | null>(null);
   const [scale, setScale] = useState(0.48);
@@ -261,7 +263,7 @@ export default function TownMapScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.mapHeader}>
+      <View style={[styles.mapHeader, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
         <View style={styles.headerLeft}>
           <Pressable style={styles.headerCircle} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={24} color="#fff" />
@@ -282,7 +284,7 @@ export default function TownMapScreen() {
         </View>
       </View>
 
-      <View style={styles.worldStatus}>
+      <View style={[styles.worldStatus, { top: insets.top + 66 }]}>
         <Text style={styles.worldStatusTitle}>No-Engine World Mode</Text>
         <Text style={styles.worldStatusText}>
           {`Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1} · Zoom ${Math.round(scale * 100)}%`}
@@ -292,7 +294,7 @@ export default function TownMapScreen() {
         </Text>
       </View>
 
-      <View style={styles.zoomWrap}>
+      <View style={[styles.zoomWrap, { bottom: Math.max(140, insets.bottom + 96) }]}>
         <Pressable style={styles.zoomBtn} onPress={() => applyZoom(0.14)}>
           <Ionicons name="add" size={20} color="#374151" />
         </Pressable>
@@ -677,11 +679,11 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+    elevation: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 12,
-    paddingTop: 8,
   },
   headerLeft: {
     flexDirection: "row",
@@ -733,6 +735,7 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     zIndex: 19,
+    elevation: 19,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -760,6 +763,7 @@ const styles = StyleSheet.create({
     left: 10,
     bottom: 140,
     zIndex: 20,
+    elevation: 20,
     gap: 8,
   },
   zoomBtn: {
