@@ -46,6 +46,7 @@ interface MovingCar {
 }
 
 const SCENE_SCALE = 0.2;
+const MAP_VERTICAL_LIFT_RATIO = 0.15;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -143,12 +144,20 @@ export default function HomeScreen() {
     [worldRect.minX, worldRect.minY]
   );
 
-  const homeLocal = useMemo(
+  const worldLayerStyle = useMemo(() => {
+    const lift = Math.min(130, Math.round(sceneSize.height * MAP_VERTICAL_LIFT_RATIO));
+    return {
+      ...worldOffset,
+      top: worldOffset.top - lift,
+    };
+  }, [sceneSize.height, worldOffset]);
+
+  const homeAnchor = useMemo(
     () => ({
-      x: HOME_POSITION.x * SCENE_SCALE + worldOffset.left,
-      y: HOME_POSITION.y * SCENE_SCALE + worldOffset.top,
+      x: sceneSize.width / 2,
+      y: Math.max(106, sceneSize.height * 0.27),
     }),
-    [worldOffset.left, worldOffset.top]
+    [sceneSize.height, sceneSize.width]
   );
 
   const taskWidgetBottom = useMemo(() => {
@@ -236,10 +245,10 @@ export default function HomeScreen() {
             }
           }}
         >
-          <View style={[styles.sceneWorldLayer, worldOffset]}>
+          <View style={[styles.sceneWorldLayer, worldLayerStyle]}>
             <Svg
-              width={worldOffset.width}
-              height={worldOffset.height}
+              width={worldLayerStyle.width}
+              height={worldLayerStyle.height}
               viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
               preserveAspectRatio="none"
               style={StyleSheet.absoluteFill}
@@ -419,8 +428,8 @@ export default function HomeScreen() {
             style={[
               styles.centerHomeWrap,
               {
-                left: clamp(homeLocal.x - 28, 24, Math.max(24, sceneSize.width - 120)),
-                top: clamp(homeLocal.y - 58, 90, Math.max(90, sceneSize.height - 140)),
+                left: clamp(homeAnchor.x - 56, 20, Math.max(20, sceneSize.width - 116)),
+                top: clamp(homeAnchor.y - 58, 88, Math.max(88, sceneSize.height * 0.5 - 130)),
               },
             ]}
           >
@@ -435,8 +444,8 @@ export default function HomeScreen() {
             style={[
               styles.avatarMarker,
               {
-                left: clamp(homeLocal.x + 10, 18, Math.max(18, sceneSize.width - 58)),
-                top: clamp(homeLocal.y - 2, 88, Math.max(88, sceneSize.height - 58)),
+                left: clamp(homeAnchor.x - 22, 18, Math.max(18, sceneSize.width - 58)),
+                top: clamp(homeAnchor.y + 22, 88, Math.max(88, sceneSize.height * 0.5 - 58)),
               },
             ]}
             onPress={() => router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })}
@@ -503,30 +512,28 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#0b1220",
+    backgroundColor: "#7ec850",
   },
   topSection: {
     flex: 1,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
   },
   townBg: {
     flex: 1,
     overflow: "hidden",
-    borderRadius: 34,
     backgroundColor: "#7ec850",
   },
   sceneWorldLayer: {
     position: "absolute",
   },
   topBar: {
-    marginTop: 10,
-    marginHorizontal: 14,
+    position: "absolute",
+    top: 12,
+    left: 14,
+    right: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    zIndex: 6,
+    zIndex: 30,
   },
   avatarButton: {
     width: 44,
@@ -584,8 +591,8 @@ const styles = StyleSheet.create({
   previewMeta: {
     position: "absolute",
     left: 14,
-    top: 66,
-    zIndex: 7,
+    top: 70,
+    zIndex: 20,
     borderRadius: 9,
     paddingHorizontal: 8,
     paddingVertical: 5,

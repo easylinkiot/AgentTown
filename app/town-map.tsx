@@ -76,6 +76,7 @@ export default function TownMapScreen() {
   const [chatMessages, setChatMessages] = useState<TownMapMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [clockMs, setClockMs] = useState(() => Date.now());
+  const [showWorldScale, setShowWorldScale] = useState(false);
 
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
@@ -261,6 +262,7 @@ export default function TownMapScreen() {
   const centerWorldX = (scrollX + windowWidth / 2) / scale;
   const centerWorldY = (scrollY + windowHeight / 2) / scale;
   const centerChunk = chunkForWorldPoint(centerWorldX, centerWorldY);
+  const zoomControlsBottom = Math.max(140, insets.bottom + 96);
 
   const miniSize = 132;
   const miniViewport = {
@@ -302,19 +304,31 @@ export default function TownMapScreen() {
       <View style={[styles.worldStatus, { top: insets.top + 66 }]}>
         <Text style={styles.worldStatusTitle}>No-Engine World Mode</Text>
         <Text style={styles.worldStatusText}>
-          {`Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1} · Zoom ${Math.round(scale * 100)}%`}
+          {`Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1}`}
         </Text>
         <Text style={styles.worldStatusTextMinor}>
           {`可见房源: ${visibleLots.length}`}
         </Text>
       </View>
 
-      <View style={[styles.zoomWrap, { bottom: Math.max(140, insets.bottom + 96) }]}>
+      <View style={[styles.zoomWrap, { bottom: zoomControlsBottom }]}>
+        {showWorldScale ? (
+          <View style={styles.scaleInfoPill}>
+            <Text style={styles.scaleInfoText}>{`${WORLD_WIDTH} x ${WORLD_HEIGHT}`}</Text>
+          </View>
+        ) : null}
         <Pressable style={styles.zoomBtn} onPress={() => applyZoom(0.14)}>
           <Ionicons name="add" size={20} color="#374151" />
         </Pressable>
         <Pressable style={styles.zoomBtn} onPress={() => applyZoom(-0.14)}>
           <Ionicons name="remove" size={20} color="#374151" />
+        </Pressable>
+        <Pressable style={styles.zoomBtn} onPress={() => setShowWorldScale((prev) => !prev)}>
+          <Ionicons
+            name={showWorldScale ? "close-outline" : "search-outline"}
+            size={18}
+            color="#374151"
+          />
         </Pressable>
         <Pressable style={styles.zoomBtn} onPress={() => centerOnHome(true)}>
           <Ionicons name="navigate" size={18} color="#374151" />
@@ -565,53 +579,54 @@ export default function TownMapScreen() {
         </ScrollView>
       </ScrollView>
 
-      <View style={styles.miniMapWrap} pointerEvents="none">
-        <View style={styles.miniMapCard}>
-          <View style={[styles.miniMap, { width: miniSize, height: miniSize }]}>
-            {visibleChunks.map((chunk) => {
-              const chunkWidth = miniSize / WORLD_CHUNKS_X;
-              const chunkHeight = miniSize / WORLD_CHUNKS_Y;
-              return (
-                <View
-                  key={`mini_chunk_${chunk.key}`}
-                  style={[
-                    styles.miniChunk,
-                    {
-                      left: chunk.chunkX * chunkWidth,
-                      top: chunk.chunkY * chunkHeight,
-                      width: chunkWidth,
-                      height: chunkHeight,
-                    },
-                  ]}
-                />
-              );
-            })}
+      {showWorldScale ? (
+        <View style={styles.miniMapWrap} pointerEvents="none">
+          <View style={styles.miniMapCard}>
+            <View style={[styles.miniMap, { width: miniSize, height: miniSize }]}>
+              {visibleChunks.map((chunk) => {
+                const chunkWidth = miniSize / WORLD_CHUNKS_X;
+                const chunkHeight = miniSize / WORLD_CHUNKS_Y;
+                return (
+                  <View
+                    key={`mini_chunk_${chunk.key}`}
+                    style={[
+                      styles.miniChunk,
+                      {
+                        left: chunk.chunkX * chunkWidth,
+                        top: chunk.chunkY * chunkHeight,
+                        width: chunkWidth,
+                        height: chunkHeight,
+                      },
+                    ]}
+                  />
+                );
+              })}
 
-            <View
-              style={[
-                styles.miniViewport,
-                {
-                  left: miniViewport.left,
-                  top: miniViewport.top,
-                  width: miniViewport.width,
-                  height: miniViewport.height,
-                },
-              ]}
-            />
+              <View
+                style={[
+                  styles.miniViewport,
+                  {
+                    left: miniViewport.left,
+                    top: miniViewport.top,
+                    width: miniViewport.width,
+                    height: miniViewport.height,
+                  },
+                ]}
+              />
 
-            <View
-              style={[
-                styles.miniHomeDot,
-                {
-                  left: (HOME_POSITION.x / WORLD_WIDTH) * miniSize - 3,
-                  top: (HOME_POSITION.y / WORLD_HEIGHT) * miniSize - 3,
-                },
-              ]}
-            />
+              <View
+                style={[
+                  styles.miniHomeDot,
+                  {
+                    left: (HOME_POSITION.x / WORLD_WIDTH) * miniSize - 3,
+                    top: (HOME_POSITION.y / WORLD_HEIGHT) * miniSize - 3,
+                  },
+                ]}
+              />
+            </View>
           </View>
-          <Text style={styles.miniMapText}>{`${WORLD_WIDTH}x${WORLD_HEIGHT} world`}</Text>
         </View>
-      </View>
+      ) : null}
 
       {selectedLot ? (
         <View style={styles.visitWrap}>
@@ -789,6 +804,21 @@ const styles = StyleSheet.create({
     zIndex: 20,
     elevation: 20,
     gap: 8,
+  },
+  scaleInfoPill: {
+    minWidth: 94,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,255,255,0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.7)",
+    alignItems: "center",
+  },
+  scaleInfoText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#1f2937",
   },
   zoomBtn: {
     width: 44,
@@ -983,12 +1013,6 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: "#ef4444",
-  },
-  miniMapText: {
-    marginTop: 6,
-    fontSize: 10,
-    color: "#374151",
-    fontWeight: "700",
   },
   visitWrap: {
     position: "absolute",
