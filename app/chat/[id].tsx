@@ -22,6 +22,7 @@ import {
   getInitialConversation,
   resolveChatThread,
 } from "@/src/features/chat/chat-helpers";
+import { tx } from "@/src/i18n/translate";
 import { generateGeminiJson, generateGeminiText } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { AiContextState, ConversationMessage, TaskItem } from "@/src/types";
@@ -72,7 +73,8 @@ export default function ChatDetailScreen() {
   }>();
   const chatId = String(params.id || "");
 
-  const { botConfig, addTask } = useAgentTown();
+  const { botConfig, addTask, language } = useAgentTown();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   const thread = useMemo(() => {
     const routeName = typeof params.name === "string" ? params.name : "";
     const routeAvatar = typeof params.avatar === "string" ? params.avatar : "";
@@ -84,10 +86,10 @@ export default function ChatDetailScreen() {
           : undefined;
       return {
         id: chatId,
-        name: routeName || "Unknown Chat",
+        name: routeName || (language === "zh" ? "未知聊天" : "Unknown Chat"),
         avatar: routeAvatar || DEFAULT_MYBOT_AVATAR,
         message: "",
-        time: "Now",
+        time: language === "zh" ? "现在" : "Now",
         isGroup: params.isGroup === "true",
         memberCount: Number.isFinite(parsedMemberCount) ? parsedMemberCount : undefined,
         phoneNumber:
@@ -99,7 +101,7 @@ export default function ChatDetailScreen() {
     }
 
     return resolveChatThread(chatId, botConfig);
-  }, [botConfig, chatId, params.avatar, params.isGroup, params.memberCount, params.name, params.phoneNumber, params.supportsVideo]);
+  }, [botConfig, chatId, language, params.avatar, params.isGroup, params.memberCount, params.name, params.phoneNumber, params.supportsVideo]);
   const isGroupChat = Boolean(thread.isGroup || chatId.startsWith("group_"));
 
   const [messages, setMessages] = useState<ConversationMessage[]>(() =>
@@ -144,7 +146,7 @@ export default function ChatDetailScreen() {
   const appendSystemMessage = (content: string) => {
     const systemMessage: ConversationMessage = {
       id: `${Date.now()}-system-${Math.random().toString(16).slice(2, 6)}`,
-      senderName: "System",
+      senderName: tr("系统", "System"),
       senderAvatar: DEFAULT_MYBOT_AVATAR,
       content,
       type: "system",
@@ -184,7 +186,7 @@ export default function ChatDetailScreen() {
       id: `${Date.now()}-ai`,
       senderName: thread.name,
       senderAvatar: thread.avatar,
-      content: reply ?? "我先记下了，稍后给你完整答复。",
+      content: reply ?? tr("我先记下了，稍后给你完整答复。", "Noted. I will get back with a full response shortly."),
       type: "text",
       isMe: false,
       time: formatNowTime(),
@@ -228,7 +230,7 @@ export default function ChatDetailScreen() {
       id: `${Date.now()}-ai-img`,
       senderName: thread.name,
       senderAvatar: thread.avatar,
-      content: reply ?? "图片收到了，我会结合内容继续处理。",
+      content: reply ?? tr("图片收到了，我会结合内容继续处理。", "Image received. I will process it with context."),
       type: "text",
       isMe: false,
       time: formatNowTime(),
@@ -256,16 +258,24 @@ export default function ChatDetailScreen() {
       });
       setAttachmentPanelVisible(false);
     } catch {
-      appendSystemMessage("选择图片失败，请稍后重试。");
+      appendSystemMessage(tr("选择图片失败，请稍后重试。", "Failed to pick image. Please try again."));
     }
   };
 
   const startVoiceCall = () => {
-    appendSystemMessage(`Voice call started with ${thread.name} (demo mode).`);
+    appendSystemMessage(
+      language === "zh"
+        ? `已与 ${thread.name} 发起语音通话（演示模式）。`
+        : `Voice call started with ${thread.name} (demo mode).`
+    );
   };
 
   const startVideoCall = () => {
-    appendSystemMessage(`Video call started with ${thread.name} (demo mode).`);
+    appendSystemMessage(
+      language === "zh"
+        ? `已与 ${thread.name} 发起视频通话（演示模式）。`
+        : `Video call started with ${thread.name} (demo mode).`
+    );
   };
 
   const addMemberToGroup = () => {
@@ -274,29 +284,34 @@ export default function ChatDetailScreen() {
     const member = GROUP_MEMBER_CANDIDATES[inviteCursor % GROUP_MEMBER_CANDIDATES.length];
     setInviteCursor((prev) => prev + 1);
     setGroupMemberCount((prev) => prev + 1);
-    appendSystemMessage(`${member} joined the group.`);
+    appendSystemMessage(
+      language === "zh" ? `${member} 已加入群聊。` : `${member} joined the group.`
+    );
   };
 
   const openMoreActions = () => {
     if (isGroupChat) {
-      Alert.alert("Group Actions", "Add one mock member to this group?", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Add Member", onPress: addMemberToGroup },
+      Alert.alert(tr("群聊操作", "Group Actions"), tr("是否添加一个模拟成员到该群？", "Add one mock member to this group?"), [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        { text: tr("添加成员", "Add Member"), onPress: addMemberToGroup },
       ]);
       return;
     }
 
-    Alert.alert("Chat Actions", "Open call options in this chat?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Voice Call", onPress: startVoiceCall },
-      { text: "Video Call", onPress: startVideoCall },
+    Alert.alert(tr("聊天操作", "Chat Actions"), tr("在此聊天中打开通话选项？", "Open call options in this chat?"), [
+      { text: tr("取消", "Cancel"), style: "cancel" },
+      { text: tr("语音通话", "Voice Call"), onPress: startVoiceCall },
+      { text: tr("视频通话", "Video Call"), onPress: startVideoCall },
     ]);
   };
 
   const runReplySuggestions = async (msg: ConversationMessage) => {
     setAiContext({ mode: "loading", data: null });
 
-    const fallback = ["收到，我来处理", "好的，稍后给你结果", "明白，我马上推进"];
+    const fallback =
+      language === "zh"
+        ? ["收到，我来处理", "好的，稍后给你结果", "明白，我马上推进"]
+        : ["Got it, I will handle it.", "Okay, I will send updates shortly.", "Understood, I will move it forward now."];
     const data = await generateGeminiJson<string[]>(
       `Context chat history:\n${messages
         .slice(-6)
@@ -337,9 +352,9 @@ export default function ChatDetailScreen() {
     setAiContext({ mode: "loading", data: null });
 
     const fallback = [
-      "先明确目标与验收标准",
-      "列出 3 个可执行的短期动作",
-      "同步相关成员并设定截止时间",
+      tr("先明确目标与验收标准", "Clarify the target and acceptance criteria first."),
+      tr("列出 3 个可执行的短期动作", "List 3 short-term executable actions."),
+      tr("同步相关成员并设定截止时间", "Align owners and set clear deadlines."),
     ];
 
     const data = await generateGeminiJson<string[]>(
@@ -367,7 +382,7 @@ export default function ChatDetailScreen() {
 
     setAiContext({
       mode: "custom",
-      data: text ?? "当前无法访问 AI，请检查 EXPO_PUBLIC_GEMINI_API_KEY。",
+      data: text ?? tr("当前无法访问 AI，请检查 EXPO_PUBLIC_GEMINI_API_KEY。", "AI is unavailable now. Please check EXPO_PUBLIC_GEMINI_API_KEY."),
     });
   };
 
@@ -397,8 +412,10 @@ export default function ChatDetailScreen() {
             </Text>
             <Text style={styles.headerSubtitle} numberOfLines={1}>
               {isGroupChat
-                ? `${groupMemberCount} members · Group chat`
-                : thread.phoneNumber || "Direct chat"}
+                ? language === "zh"
+                  ? `${groupMemberCount} 人 · 群聊`
+                  : `${groupMemberCount} members · Group chat`
+                : thread.phoneNumber || tr("私聊", "Direct chat")}
             </Text>
           </View>
 
@@ -469,7 +486,9 @@ export default function ChatDetailScreen() {
                       ]}
                     >
                       {msg.type === "voice" ? (
-                        <Text style={styles.bubbleText}>Voice · {msg.voiceDuration ?? "--"}</Text>
+                        <Text style={styles.bubbleText}>
+                          {tr("语音", "Voice")} · {msg.voiceDuration ?? "--"}
+                        </Text>
                       ) : msg.type === "image" && msg.imageUri ? (
                         <View style={styles.imageBubbleWrap}>
                           <Image source={{ uri: msg.imageUri }} style={styles.imageBubble} />
@@ -500,7 +519,7 @@ export default function ChatDetailScreen() {
                         style={styles.aiInput}
                         value={customPrompt}
                         onChangeText={setCustomPrompt}
-                        placeholder="Ask AI..."
+                        placeholder={tr("向 AI 提问...", "Ask AI...")}
                         onSubmitEditing={() => runCustomPrompt(msg)}
                       />
                       <Pressable
@@ -517,20 +536,20 @@ export default function ChatDetailScreen() {
 
                     <View style={styles.aiActions}>
                       <Pressable style={styles.aiChip} onPress={() => runReplySuggestions(msg)}>
-                        <Text style={styles.aiChipText}>Reply</Text>
+                        <Text style={styles.aiChipText}>{tr("回复", "Reply")}</Text>
                       </Pressable>
                       <Pressable style={styles.aiChip} onPress={() => runTaskExtraction(msg)}>
-                        <Text style={styles.aiChipText}>Task</Text>
+                        <Text style={styles.aiChipText}>{tr("任务", "Task")}</Text>
                       </Pressable>
                       <Pressable style={styles.aiChip} onPress={() => runBrainstorm(msg)}>
-                        <Text style={styles.aiChipText}>Ideas</Text>
+                        <Text style={styles.aiChipText}>{tr("想法", "Ideas")}</Text>
                       </Pressable>
                     </View>
 
                     {aiContext.mode !== "idle" ? (
                       <View style={styles.aiResultWrap}>
                         {aiContext.mode === "loading" ? (
-                          <Text style={styles.aiMuted}>Thinking...</Text>
+                          <Text style={styles.aiMuted}>{tr("思考中...", "Thinking...")}</Text>
                         ) : null}
 
                         {aiContext.mode === "reply" && Array.isArray(aiContext.data) ? (
@@ -566,7 +585,7 @@ export default function ChatDetailScreen() {
                                       onPress={() => !added && addToTask(task, idx)}
                                     >
                                       <Text style={styles.taskActionText}>
-                                        {added ? "Added" : "Add"}
+                                        {added ? tr("已添加", "Added") : tr("添加", "Add")}
                                       </Text>
                                     </Pressable>
                                   </View>
@@ -603,7 +622,9 @@ export default function ChatDetailScreen() {
 
           {isAiThinking ? (
             <View style={styles.typingRow}>
-              <Text style={styles.aiMuted}>{thread.name} is typing...</Text>
+              <Text style={styles.aiMuted}>
+                {language === "zh" ? `${thread.name} 输入中...` : `${thread.name} is typing...`}
+              </Text>
             </View>
           ) : null}
         </ScrollView>
@@ -615,7 +636,9 @@ export default function ChatDetailScreen() {
               <Text style={styles.pendingImageTitle} numberOfLines={1}>
                 {pendingImage.name}
               </Text>
-              <Text style={styles.pendingImageHint}>Add a caption, then send</Text>
+              <Text style={styles.pendingImageHint}>
+                {tr("添加描述后发送", "Add a caption, then send")}
+              </Text>
             </View>
             <Pressable style={styles.pendingImageCloseBtn} onPress={() => setPendingImage(null)}>
               <Ionicons name="close" size={18} color="#4b5563" />
@@ -629,19 +652,21 @@ export default function ChatDetailScreen() {
               <View style={styles.attachIconBubble}>
                 <Ionicons name="images-outline" size={18} color="#111827" />
               </View>
-              <Text style={styles.attachText}>Photo</Text>
+              <Text style={styles.attachText}>{tr("相册", "Photo")}</Text>
             </Pressable>
             <Pressable
               style={styles.attachItem}
               onPress={() => {
                 setAttachmentPanelVisible(false);
-                appendSystemMessage("Camera capture is coming soon.");
+                appendSystemMessage(
+                  tr("拍照功能即将上线。", "Camera capture is coming soon.")
+                );
               }}
             >
               <View style={styles.attachIconBubble}>
                 <Ionicons name="camera-outline" size={18} color="#111827" />
               </View>
-              <Text style={styles.attachText}>Camera</Text>
+              <Text style={styles.attachText}>{tr("相机", "Camera")}</Text>
             </Pressable>
             <Pressable
               style={styles.attachItem}
@@ -653,7 +678,7 @@ export default function ChatDetailScreen() {
               <View style={styles.attachIconBubble}>
                 <Ionicons name="call-outline" size={18} color="#111827" />
               </View>
-              <Text style={styles.attachText}>Call</Text>
+              <Text style={styles.attachText}>{tr("通话", "Call")}</Text>
             </Pressable>
             <Pressable
               style={styles.attachItem}
@@ -665,7 +690,7 @@ export default function ChatDetailScreen() {
               <View style={styles.attachIconBubble}>
                 <Ionicons name="videocam-outline" size={18} color="#111827" />
               </View>
-              <Text style={styles.attachText}>Video</Text>
+              <Text style={styles.attachText}>{tr("视频", "Video")}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -685,7 +710,7 @@ export default function ChatDetailScreen() {
             style={styles.mainInput}
             value={inputValue}
             onChangeText={setInputValue}
-            placeholder={pendingImage ? "Add image caption" : "Type a message"}
+            placeholder={pendingImage ? tr("添加图片描述", "Add image caption") : tr("输入消息", "Type a message")}
             onSubmitEditing={() => (pendingImage ? sendImageMessage() : handleSend())}
           />
           <Pressable

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,8 +12,9 @@ import {
   View,
 } from "react-native";
 
+import { tx } from "@/src/i18n/translate";
 import { generateGeminiJson } from "@/src/lib/gemini";
-import { TaskItem } from "@/src/types";
+import { AppLanguage, TaskItem, UiTheme } from "@/src/types";
 
 interface QuickAction {
   id: string;
@@ -51,6 +52,7 @@ interface MiniAppCard {
   type: MiniAppType;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
+  shortcutId?: string;
   description: string;
   heroImage: string;
   newsItems?: NewsItem[];
@@ -63,10 +65,15 @@ interface MiniAppCard {
   priceItems?: PriceItem[];
 }
 
+let persistedInstalledApps: MiniAppCard[] = [];
+
 interface MiniAppDockProps {
   accentColor: string;
+  theme?: UiTheme;
+  language?: AppLanguage;
   onOpenChat: () => void;
   tasks: TaskItem[];
+  onTaskPanelVisibilityChange?: (visible: boolean) => void;
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
@@ -203,6 +210,128 @@ const GENERATOR_EXAMPLES: GeneratorExample[] = [
   },
 ];
 
+function quickActionLabel(id: string, language: AppLanguage) {
+  const zhMap: Record<string, string> = {
+    focus: "关注",
+    price: "比价",
+    words: "单词",
+    tasks: "待办",
+    food: "点餐",
+    calendar: "日程",
+  };
+  const enMap: Record<string, string> = {
+    focus: "News",
+    price: "Price",
+    words: "Words",
+    tasks: "Tasks",
+    food: "Food",
+    calendar: "Calendar",
+  };
+  return language === "zh" ? zhMap[id] || id : enMap[id] || id;
+}
+
+function quickActionPrompt(id: string, language: AppLanguage) {
+  if (language === "zh") {
+    return QUICK_ACTIONS.find((item) => item.id === id)?.prompt || "";
+  }
+  const enMap: Record<string, string> = {
+    focus:
+      "Generate a news mini app that collects trending AI stories from Reddit, GitHub, and top US/China tech media every 2 hours.",
+    price:
+      "Generate a price tracker mini app that watches favorite brands and reports the lowest available prices.",
+    words:
+      "Generate a daily vocabulary mini app with pronunciation, definition, and spaced learning cards.",
+    tasks:
+      "Generate an Eisenhower matrix mini app that ranks tasks by urgency and importance.",
+    food:
+      "Generate a dining booking mini app that monitors table availability and allows one-tap reservation.",
+    calendar:
+      "Generate a social calendar mini app that extracts invitations and creates smart reminders.",
+  };
+  return enMap[id] || "";
+}
+
+function quickActionAppColor(id: string) {
+  const map: Record<string, string> = {
+    focus: "#3b82f6",
+    price: "#f97316",
+    words: "#8b5cf6",
+    tasks: "#22c55e",
+    food: "#ef4444",
+    calendar: "#06b6d4",
+  };
+  return map[id] || "#3b82f6";
+}
+
+function exampleTitle(item: GeneratorExample, language: AppLanguage) {
+  if (language === "zh") return item.title;
+  const map: Record<string, string> = {
+    news: "Morning Brief",
+    "chat-summary": "Chat Digest",
+    mail: "Inbox Digest",
+    "follow-up": "Follow-up Radar",
+    words: "Word of the Day",
+    milestone: "Milestone Timer",
+    security: "Vehicle Guard",
+    home: "Smart Home",
+    price: "Price Hunter",
+    foodbook: "Restaurant Book",
+    fitness: "Fitness Tracker",
+    sync: "Cross-platform Sync",
+  };
+  return map[item.id] || item.title;
+}
+
+function exampleDesc(item: GeneratorExample, language: AppLanguage) {
+  if (language === "zh") return item.desc;
+  const map: Record<string, string> = {
+    news: "Collect top AI headlines from key sources every morning.",
+    "chat-summary": "Summarize recent group discussion and extract action items.",
+    mail: "Turn unread emails into structured actionable cards.",
+    "follow-up": "Find important threads with no reply after 3+ days.",
+    words: "Generate daily vocabulary cards with pronunciation and examples.",
+    milestone: "Show delivery countdown and schedule risk at a glance.",
+    security: "Trigger location + alert flow on unauthorized movement.",
+    home: "Control lights, curtains and AC via one natural-language command.",
+    price: "Track favorite products and detect new lowest prices.",
+    foodbook: "Monitor table availability and reserve instantly.",
+    fitness: "Sync activity and output calorie + diet guidance.",
+    sync: "Merge tasks from notes, chats and cloud apps into one board.",
+  };
+  return map[item.id] || item.desc;
+}
+
+function examplePrompt(item: GeneratorExample, language: AppLanguage) {
+  if (language === "zh") return item.prompt;
+  const map: Record<string, string> = {
+    news:
+      "Build a morning brief mini app that summarizes top AI stories from Reddit, TechCrunch and major media every day at 8 AM.",
+    "chat-summary":
+      "Build a chat digest mini app that summarizes the last 2 hours of group discussion and extracts owners + tasks.",
+    mail:
+      "Build an inbox digest mini app that summarizes unread emails into who/what/action/deadline cards.",
+    "follow-up":
+      "Build a follow-up mini app that highlights important threads with no reply for more than 3 days.",
+    words:
+      "Build a daily vocabulary mini app with pronunciation, definition, and example sentence.",
+    milestone:
+      "Build a milestone countdown mini app to show days-to-delivery and schedule risk.",
+    security:
+      "Build a vehicle guard mini app that triggers location and alert actions on unauthorized movement.",
+    home:
+      "Build a smart-home mini app that adjusts lighting, curtains and AC from one voice command.",
+    price:
+      "Build a price-hunter mini app that monitors favorite products and alerts the new lowest price.",
+    foodbook:
+      "Build a dining booking mini app that watches seat availability and reserves with one tap.",
+    fitness:
+      "Build a fitness mini app that syncs workout data and outputs calorie + meal recommendations.",
+    sync:
+      "Build a cross-platform sync mini app that merges todos from chat, notes and cloud apps.",
+  };
+  return map[item.id] || item.prompt;
+}
+
 function inferType(prompt: string): MiniAppType {
   const q = prompt.toLowerCase();
   if (q.includes("单词") || q.includes("词汇") || q.includes("flash") || q.includes("学习")) {
@@ -307,6 +436,18 @@ function buildFallbackCard(prompt: string): MiniAppCard {
         summary: "多模态交互体验成为产品落地关键方向。",
       },
     ],
+  };
+}
+
+function buildQuickActionApp(action: QuickAction, language: AppLanguage): MiniAppCard {
+  const fallback = buildFallbackCard(quickActionPrompt(action.id, language));
+  return {
+    ...fallback,
+    id: `quick_${action.id}`,
+    title: quickActionLabel(action.id, language),
+    icon: action.icon,
+    color: quickActionAppColor(action.id),
+    shortcutId: action.id,
   };
 }
 
@@ -526,23 +667,37 @@ function AppPreviewCard({ app }: { app: MiniAppCard }) {
   );
 }
 
-function buildRunSummary(app: MiniAppCard) {
+function buildRunSummary(app: MiniAppCard, language: AppLanguage) {
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   if (app.type === "news_feed") {
-    const headline = app.newsItems?.[0]?.title ?? "已生成新闻卡片";
-    return `[${app.title}] 已运行，当前头条：${headline}`;
+    const headline = app.newsItems?.[0]?.title ?? tr("已生成新闻卡片", "News card generated");
+    return language === "zh"
+      ? `[${app.title}] 已运行，当前头条：${headline}`
+      : `[${app.title}] Ran successfully. Top headline: ${headline}`;
   }
   if (app.type === "flashcard") {
     const word = app.flashcard?.word ?? "Word";
-    return `[${app.title}] 已运行，今日学习词：${word}`;
+    return language === "zh"
+      ? `[${app.title}] 已运行，今日学习词：${word}`
+      : `[${app.title}] Ran successfully. Today's word: ${word}`;
   }
   const topDeal = app.priceItems?.[0];
   if (topDeal) {
-    return `[${app.title}] 已运行，最低价：${topDeal.product} ¥${topDeal.price}`;
+    return language === "zh"
+      ? `[${app.title}] 已运行，最低价：${topDeal.product} ¥${topDeal.price}`
+      : `[${app.title}] Ran successfully. Lowest price: ${topDeal.product} ¥${topDeal.price}`;
   }
-  return `[${app.title}] 已运行`;
+  return language === "zh" ? `[${app.title}] 已运行` : `[${app.title}] Ran successfully`;
 }
 
-function MiniAppRuntime({ app }: { app: MiniAppCard }) {
+function MiniAppRuntime({
+  app,
+  language,
+}: {
+  app: MiniAppCard;
+  language: AppLanguage;
+}) {
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   return (
     <View style={styles.runtimeCard}>
       <View style={styles.runtimeHead}>
@@ -553,7 +708,7 @@ function MiniAppRuntime({ app }: { app: MiniAppCard }) {
           <Text style={styles.runtimeTitle} numberOfLines={1}>
             {app.title}
           </Text>
-          <Text style={styles.runtimeSub}>AI 生成应用 · 运行态</Text>
+          <Text style={styles.runtimeSub}>{tr("AI 生成应用 · 运行态", "AI app · Runtime")}</Text>
         </View>
       </View>
 
@@ -617,21 +772,50 @@ function MiniAppRuntime({ app }: { app: MiniAppCard }) {
   );
 }
 
-export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps) {
+export function MiniAppDock({
+  accentColor,
+  onOpenChat,
+  tasks,
+  theme = "classic",
+  language = "zh",
+  onTaskPanelVisibilityChange,
+}: MiniAppDockProps) {
+  const isNeo = theme === "neo";
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   const [expanded, setExpanded] = useState(true);
   const [showCreator, setShowCreator] = useState(false);
   const [promptInput, setPromptInput] = useState(QUICK_ACTIONS[0].prompt);
   const [isGenerating, setIsGenerating] = useState(false);
   const [draftApp, setDraftApp] = useState<MiniAppCard | null>(null);
-  const [installedApps, setInstalledApps] = useState<MiniAppCard[]>([]);
+  const [installedApps, setInstalledApps] = useState<MiniAppCard[]>(() => persistedInstalledApps);
   const [showTasks, setShowTasks] = useState(false);
   const [activeRuntimeApp, setActiveRuntimeApp] = useState<MiniAppCard | null>(null);
   const [previewMode, setPreviewMode] = useState<"new" | "installed">("new");
+  const [showManager, setShowManager] = useState(false);
 
-  const selectedCountText = useMemo(() => {
-    if (installedApps.length === 0) return "Create App";
-    return installedApps[0].title;
+  useEffect(() => {
+    if (installedApps.length > 0) return;
+    const seeded = QUICK_ACTIONS.map((action) => buildQuickActionApp(action, language));
+    setInstalledApps(seeded);
+  }, [installedApps.length, language]);
+
+  useEffect(() => {
+    persistedInstalledApps = installedApps;
   }, [installedApps]);
+
+  useEffect(() => {
+    onTaskPanelVisibilityChange?.(showTasks);
+  }, [onTaskPanelVisibilityChange, showTasks]);
+
+  const selectedCountText = language === "zh" ? "创建应用" : "Create App";
+  const createSubText =
+    installedApps.length === 0
+      ? language === "zh"
+        ? "描述即可生成"
+        : "Describe to generate"
+      : language === "zh"
+        ? `已就绪 ${installedApps.length} 个应用`
+        : `${installedApps.length} apps ready`;
 
   const openCreator = (initialPrompt?: string) => {
     setPreviewMode("new");
@@ -650,13 +834,65 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
   };
 
   const openInstalledRuntime = (app: MiniAppCard) => {
+    if (app.shortcutId === "tasks") {
+      setShowTasks((prev) => !prev);
+      return;
+    }
     setActiveRuntimeApp(app);
+  };
+
+  const moveInstalledApp = (fromIndex: number, toIndex: number) => {
+    setInstalledApps((prev) => {
+      if (
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex >= prev.length ||
+        fromIndex === toIndex
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const renameInstalledApp = (id: string, nextTitle: string) => {
+    setInstalledApps((prev) =>
+      prev.map((app) => {
+        if (app.id !== id) return app;
+        const title = nextTitle.trim().slice(0, 24);
+        return { ...app, title: title || app.title };
+      })
+    );
+  };
+
+  const deleteInstalledApp = (id: string) => {
+    setInstalledApps((prev) => prev.filter((app) => app.id !== id));
+    if (activeRuntimeApp?.id === id) {
+      setActiveRuntimeApp(null);
+    }
+    if (draftApp?.id === id) {
+      setDraftApp(null);
+      setPreviewMode("new");
+    }
+    const deletingTasksShortcut = installedApps.some(
+      (app) => app.id === id && app.shortcutId === "tasks"
+    );
+    if (deletingTasksShortcut) {
+      setShowTasks(false);
+    }
   };
 
   const handleGenerate = async () => {
     const raw = promptInput.trim();
     if (!raw) {
-      Alert.alert("提示词为空", "请先输入你要生成的 Mini App 需求。");
+      Alert.alert(
+        tr("提示词为空", "Prompt is empty"),
+        tr("请先输入你要生成的 Mini App 需求。", "Please describe the mini app you want to generate.")
+      );
       return;
     }
 
@@ -666,7 +902,7 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
       setDraftApp(app);
       setPreviewMode("new");
     } catch {
-      Alert.alert("生成失败", "已切换到本地模板，请稍后重试。", [
+      Alert.alert(tr("生成失败", "Generation failed"), tr("已切换到本地模板，请稍后重试。", "Switched to fallback template. Please try again."), [
         {
           text: "OK",
           onPress: () => setDraftApp(buildFallbackCard(raw)),
@@ -686,17 +922,20 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
 
   const handleRuntimeWriteback = () => {
     if (!activeRuntimeApp) return;
-    const summary = buildRunSummary(activeRuntimeApp);
+    const summary = buildRunSummary(activeRuntimeApp, language);
     setActiveRuntimeApp(null);
-    Alert.alert("回写摘要已生成", summary, [
-      { text: "Close", style: "cancel" },
-      { text: "Open Chat", onPress: onOpenChat },
+    Alert.alert(tr("回写摘要已生成", "Summary generated"), summary, [
+      { text: tr("关闭", "Close"), style: "cancel" },
+      { text: tr("打开聊天", "Open Chat"), onPress: onOpenChat },
     ]);
   };
 
   if (!expanded) {
     return (
-      <Pressable style={styles.minButton} onPress={() => setExpanded(true)}>
+      <Pressable
+        style={[styles.minButton, !isNeo && styles.minButtonClassic]}
+        onPress={() => setExpanded(true)}
+      >
         <Ionicons name="grid-outline" size={22} color="white" />
       </Pressable>
     );
@@ -704,23 +943,31 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
 
   return (
     <>
-      <View style={styles.container}>
+      <View style={[styles.container, !isNeo && styles.containerClassic]}>
         <View style={styles.rowTop}>
-          <Pressable style={styles.createButton} onPress={() => openCreator()}>
-            <View style={styles.createIconWrap}>
+          <Pressable style={[styles.createButton, !isNeo && styles.createButtonClassic]} onPress={() => openCreator()}>
+            <View style={[styles.createIconWrap, !isNeo && styles.createIconWrapClassic]}>
               <Ionicons name="add" size={20} color="white" />
             </View>
             <View style={styles.createTextWrap}>
-              <Text style={styles.createTitle}>{selectedCountText}</Text>
-              <Text style={styles.createSub}>Describe to generate</Text>
+              <Text style={[styles.createTitle, !isNeo && styles.createTitleClassic]}>
+                {selectedCountText}
+              </Text>
+              <Text style={[styles.createSub, !isNeo && styles.createSubClassic]}>
+                {createSubText}
+              </Text>
             </View>
-            <View style={styles.createArrowWrap}>
-              <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.85)" />
+            <View style={[styles.createArrowWrap, !isNeo && styles.createArrowWrapClassic]}>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color={isNeo ? "rgba(255,255,255,0.85)" : "#334155"}
+              />
             </View>
           </Pressable>
 
-          <Pressable style={styles.minusButton} onPress={() => setExpanded(false)}>
-            <Ionicons name="remove" size={22} color="rgba(255,255,255,0.8)" />
+          <Pressable style={[styles.minusButton, !isNeo && styles.minusButtonClassic]} onPress={() => setExpanded(false)}>
+            <Ionicons name="remove" size={22} color={isNeo ? "rgba(255,255,255,0.8)" : "#334155"} />
           </Pressable>
         </View>
 
@@ -729,43 +976,19 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.actionRow}
         >
-          {QUICK_ACTIONS.map((item) => (
-            <Pressable
-              key={item.id}
-              style={styles.actionCard}
-              onPress={() => {
-                if (item.id === "tasks") {
-                  setShowTasks((prev) => !prev);
-                  return;
-                }
-                openCreator(item.prompt);
-              }}
-            >
-              <View
-                style={[
-                  styles.actionIconWrap,
-                  item.id === "tasks" && showTasks
-                    ? styles.actionIconWrapActive
-                    : null,
-                ]}
-              >
-                <Ionicons name={item.icon} size={15} color="white" />
-              </View>
-              <Text style={styles.actionLabel}>{item.label}</Text>
-            </Pressable>
-          ))}
-
           {installedApps.map((app) => (
             <Pressable
               key={app.id}
-              style={styles.actionCard}
+              style={[styles.actionCard, !isNeo && styles.actionCardClassic]}
               onPress={() => openInstalledRuntime(app)}
-              onLongPress={() => openInstalledApp(app)}
+              onLongPress={() =>
+                app.shortcutId ? openCreator(quickActionPrompt(app.shortcutId, language)) : openInstalledApp(app)
+              }
             >
               <View style={[styles.actionIconWrap, { backgroundColor: app.color }]}>
                 <Ionicons name={app.icon} size={14} color="white" />
               </View>
-              <Text style={styles.actionLabel} numberOfLines={1}>
+              <Text style={[styles.actionLabel, !isNeo && styles.actionLabelClassic]} numberOfLines={1}>
                 {app.title}
               </Text>
             </Pressable>
@@ -773,9 +996,11 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
         </ScrollView>
 
         {showTasks ? (
-          <View style={styles.taskPanel}>
+          <View style={[styles.taskPanel, !isNeo && styles.taskPanelClassic]}>
             <View style={styles.taskPanelHead}>
-              <Text style={styles.taskPanelTitle}>Active Tasks</Text>
+              <Text style={[styles.taskPanelTitle, !isNeo && styles.taskPanelTitleClassic]}>
+                {tr("活跃任务", "Active Tasks")}
+              </Text>
               <Text style={styles.taskPanelCount}>{tasks.length}</Text>
             </View>
             {tasks.length > 0 ? (
@@ -792,8 +1017,11 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
                       <Text style={styles.taskName} numberOfLines={1}>
                         {task.title}
                       </Text>
-                      <Text style={styles.taskMeta} numberOfLines={1}>
-                        {task.assignee} · {task.priority}
+                      <Text style={[styles.taskMeta, !isNeo && styles.taskMetaClassic]} numberOfLines={1}>
+                        {task.assignee} ·{" "}
+                        {language === "zh"
+                          ? { High: "高", Medium: "中", Low: "低" }[task.priority]
+                          : task.priority}
                       </Text>
                     </View>
                     <Ionicons name="checkmark-circle-outline" size={16} color="#94a3b8" />
@@ -801,7 +1029,9 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
                 ))}
               </View>
             ) : (
-              <Text style={styles.taskEmpty}>No active tasks</Text>
+              <Text style={[styles.taskEmpty, !isNeo && styles.taskEmptyClassic]}>
+                {tr("暂无活跃任务", "No active tasks")}
+              </Text>
             )}
           </View>
         ) : null}
@@ -810,15 +1040,33 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
           <View style={styles.generatedCard}>
             <Text style={styles.generatedCardTitle}>{installedApps[0].title}</Text>
             <Text style={styles.generatedCardText} numberOfLines={2}>
-              {`已安装，点击可再次打开；点击“运行并回写”把摘要写回聊天流。`}
+              {tr(
+                "已安装，点击可再次打开；点击“运行并回写”把摘要写回聊天流。",
+                "Installed. Tap to open again; tap run to write a summary back to chat."
+              )}
             </Text>
-            <Pressable
-              style={[styles.runButton, { backgroundColor: accentColor }]}
-              onPress={() => openInstalledRuntime(installedApps[0])}
-            >
-              <Ionicons name="play" size={14} color="white" />
-              <Text style={styles.runButtonText}>运行并回写</Text>
-            </Pressable>
+            <View style={styles.generatedActions}>
+              <Pressable
+                style={[styles.runButton, { backgroundColor: accentColor }]}
+                onPress={() => openInstalledRuntime(installedApps[0])}
+              >
+                <Ionicons name="play" size={14} color="white" />
+                <Text style={styles.runButtonText}>{tr("运行并回写", "Run & Writeback")}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.manageButton, !isNeo && styles.manageButtonClassic]}
+                onPress={() => setShowManager(true)}
+              >
+                <Ionicons
+                  name="settings-outline"
+                  size={14}
+                  color={isNeo ? "rgba(226,232,240,0.9)" : "#334155"}
+                />
+                <Text style={[styles.manageButtonText, !isNeo && styles.manageButtonTextClassic]}>
+                  {tr("管理应用", "Manage Apps")}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
       </View>
@@ -830,106 +1078,123 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
         onRequestClose={() => setShowCreator(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, !isNeo && styles.modalCardClassic]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleWrap}>
                 <View style={styles.sparkBadge}>
                   <Ionicons name="sparkles" size={14} color="white" />
                 </View>
-                <Text style={styles.modalTitle}>生成此 Mini App 的提示词</Text>
+                <Text style={[styles.modalTitle, !isNeo && styles.modalTitleClassic]}>
+                  {tr("生成此 Mini App 的提示词", "Prompt for this Mini App")}
+                </Text>
               </View>
               <Pressable onPress={() => setShowCreator(false)} style={styles.modalCloseBtn}>
-                <Ionicons name="close" size={20} color="rgba(255,255,255,0.8)" />
+                <Ionicons name="close" size={20} color={isNeo ? "rgba(255,255,255,0.8)" : "#475569"} />
               </Pressable>
             </View>
 
-            <View style={styles.promptWrap}>
+            <View style={[styles.promptWrap, !isNeo && styles.promptWrapClassic]}>
               <View style={styles.promptBadgeRow}>
                 <Ionicons name="sparkles-outline" size={12} color="#60a5fa" />
                 <Text style={styles.promptBadgeText}>AI GENERATOR</Text>
               </View>
 
               <TextInput
-                style={styles.promptInput}
-                placeholder="描述你想创建的应用功能..."
-                placeholderTextColor="rgba(203,213,225,0.55)"
+                style={[styles.promptInput, !isNeo && styles.promptInputClassic]}
+                placeholder={tr("描述你想创建的应用功能...", "Describe the app you want to create...")}
+                placeholderTextColor={isNeo ? "rgba(203,213,225,0.55)" : "#94a3b8"}
                 multiline
                 value={promptInput}
                 onChangeText={setPromptInput}
               />
 
-              <Pressable style={styles.generateArrowBtn} onPress={handleGenerate} disabled={isGenerating}>
+              <Pressable
+                style={[styles.generateArrowBtn, !isNeo && styles.generateArrowBtnClassic]}
+                onPress={handleGenerate}
+                disabled={isGenerating}
+              >
                 {isGenerating ? (
-                  <ActivityIndicator size="small" color="white" />
+                  <ActivityIndicator size="small" color={isNeo ? "white" : "#0f172a"} />
                 ) : (
-                  <Ionicons name="arrow-up" size={16} color="white" />
+                  <Ionicons name="arrow-up" size={16} color={isNeo ? "white" : "#0f172a"} />
                 )}
               </Pressable>
             </View>
 
-            {draftApp ? (
-              <View style={styles.installRow}>
-                <View style={styles.readyLabelWrap}>
-                  <Ionicons
-                    name={previewMode === "installed" ? "checkmark-circle" : "checkmark"}
-                    size={14}
-                    color="#22c55e"
-                  />
-                  <Text style={styles.readyLabel}>
-                    {previewMode === "installed" ? "INSTALLED" : "READY TO INSTALL"}
-                  </Text>
-                </View>
+            <ScrollView
+              style={styles.creatorBodyScroll}
+              contentContainerStyle={styles.creatorBodyScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {draftApp ? (
+                <>
+                  <View style={styles.installRow}>
+                    <View style={styles.readyLabelWrap}>
+                      <Ionicons
+                        name={previewMode === "installed" ? "checkmark-circle" : "checkmark"}
+                        size={14}
+                        color="#22c55e"
+                      />
+                      <Text style={[styles.readyLabel, !isNeo && styles.readyLabelClassic]}>
+                        {previewMode === "installed"
+                          ? tr("已安装", "INSTALLED")
+                          : tr("准备安装", "READY TO INSTALL")}
+                      </Text>
+                    </View>
 
-                {previewMode === "new" ? (
-                  <View style={styles.installActions}>
-                    <Pressable onPress={() => setDraftApp(null)}>
-                      <Text style={styles.discardText}>Discard</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.addAppBtn, { backgroundColor: "#f8fafc" }]}
-                      onPress={handleInstallDraft}
-                    >
-                      <Ionicons name="download-outline" size={14} color="#111827" />
-                      <Text style={styles.addAppBtnText}>Add App</Text>
-                    </Pressable>
-                  </View>
-                ) : (
-                  <Pressable
-                    style={[styles.runButtonInline, { backgroundColor: accentColor }]}
-                    onPress={() => draftApp && openInstalledRuntime(draftApp)}
-                  >
-                    <Ionicons name="play" size={13} color="white" />
-                    <Text style={styles.runInlineText}>Run in Chat</Text>
-                  </Pressable>
-                )}
-              </View>
-            ) : (
-              <>
-                <Text style={styles.examplesTitle}>TRY THESE EXAMPLES</Text>
-                <View style={styles.examplesGrid}>
-                  {GENERATOR_EXAMPLES.map((item) => (
-                    <Pressable
-                      key={`example_${item.id}`}
-                      style={styles.exampleCard}
-                      onPress={() => setPromptInput(item.prompt)}
-                    >
-                      <View style={styles.exampleIconWrap}>
-                        <Ionicons name={item.icon} size={14} color="white" />
+                    {previewMode === "new" ? (
+                      <View style={styles.installActions}>
+                        <Pressable onPress={() => setDraftApp(null)}>
+                          <Text style={[styles.discardText, !isNeo && styles.discardTextClassic]}>
+                            {tr("放弃", "Discard")}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.addAppBtn, { backgroundColor: "#f8fafc" }]}
+                          onPress={handleInstallDraft}
+                        >
+                          <Ionicons name="download-outline" size={14} color="#111827" />
+                          <Text style={styles.addAppBtnText}>{tr("添加应用", "Add App")}</Text>
+                        </Pressable>
                       </View>
-                      <Text style={styles.exampleTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.exampleDesc} numberOfLines={3}>
-                        {item.desc}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </>
-            )}
-
-            <ScrollView style={styles.previewScroll} showsVerticalScrollIndicator={false}>
-              {draftApp ? <AppPreviewCard app={draftApp} /> : null}
+                    ) : (
+                      <Pressable
+                        style={[styles.runButtonInline, { backgroundColor: accentColor }]}
+                        onPress={() => draftApp && openInstalledRuntime(draftApp)}
+                      >
+                        <Ionicons name="play" size={13} color="white" />
+                        <Text style={styles.runInlineText}>{tr("在聊天中运行", "Run in Chat")}</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  <AppPreviewCard app={draftApp} />
+                </>
+              ) : (
+                <>
+                  <Text style={[styles.examplesTitle, !isNeo && styles.examplesTitleClassic]}>
+                    {tr("试试这些示例", "TRY THESE EXAMPLES")}
+                  </Text>
+                  <View style={styles.examplesGrid}>
+                    {GENERATOR_EXAMPLES.map((item) => (
+                      <Pressable
+                        key={`example_${item.id}`}
+                        style={[styles.exampleCard, !isNeo && styles.exampleCardClassic]}
+                        onPress={() => setPromptInput(examplePrompt(item, language))}
+                      >
+                        <View style={[styles.exampleIconWrap, !isNeo && styles.exampleIconWrapClassic]}>
+                          <Ionicons name={item.icon} size={14} color="white" />
+                        </View>
+                        <Text style={[styles.exampleTitle, !isNeo && styles.exampleTitleClassic]} numberOfLines={1}>
+                          {exampleTitle(item, language)}
+                        </Text>
+                        <Text style={[styles.exampleDesc, !isNeo && styles.exampleDescClassic]} numberOfLines={3}>
+                          {exampleDesc(item, language)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -958,15 +1223,103 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
               </Pressable>
             </View>
 
-            {activeRuntimeApp ? <MiniAppRuntime app={activeRuntimeApp} /> : null}
+            {activeRuntimeApp ? <MiniAppRuntime app={activeRuntimeApp} language={language} /> : null}
 
             <Pressable
               style={[styles.runtimeFooterBtn, { backgroundColor: accentColor }]}
               onPress={handleRuntimeWriteback}
             >
               <Ionicons name="return-up-forward-outline" size={14} color="white" />
-              <Text style={styles.runtimeFooterBtnText}>回写摘要到聊天</Text>
+              <Text style={styles.runtimeFooterBtnText}>{tr("回写摘要到聊天", "Write summary to chat")}</Text>
             </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showManager}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowManager(false)}
+      >
+        <View style={styles.managerOverlay}>
+          <View style={[styles.managerCard, !isNeo && styles.managerCardClassic]}>
+            <View style={styles.managerHeader}>
+              <View>
+                <Text style={[styles.managerTitle, !isNeo && styles.managerTitleClassic]}>
+                  {tr("已安装应用", "Installed Apps")}
+                </Text>
+                <Text style={[styles.managerSub, !isNeo && styles.managerSubClassic]}>
+                  {tr("重命名、排序或删除", "Rename, reorder, or delete")}
+                </Text>
+              </View>
+              <Pressable style={styles.managerClose} onPress={() => setShowManager(false)}>
+                <Ionicons name="close" size={18} color={isNeo ? "#cbd5e1" : "#475569"} />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.managerList} showsVerticalScrollIndicator={false}>
+              {installedApps.map((app, idx) => (
+                <View key={`manager_${app.id}`} style={[styles.managerRow, !isNeo && styles.managerRowClassic]}>
+                  <View style={[styles.managerAppIcon, { backgroundColor: app.color }]}>
+                    <Ionicons name={app.icon} size={14} color="white" />
+                  </View>
+                  <TextInput
+                    style={[styles.managerInput, !isNeo && styles.managerInputClassic]}
+                    value={app.title}
+                    onChangeText={(next) => renameInstalledApp(app.id, next)}
+                    maxLength={24}
+                    placeholder={tr("应用名称", "App title")}
+                    placeholderTextColor={isNeo ? "rgba(148,163,184,0.8)" : "#94a3b8"}
+                  />
+                  <View style={styles.managerActionGroup}>
+                    <Pressable
+                      style={[styles.managerActionBtn, !isNeo && styles.managerActionBtnClassic]}
+                      onPress={() => moveInstalledApp(idx, idx - 1)}
+                      disabled={idx === 0}
+                    >
+                      <Ionicons
+                        name="chevron-up"
+                        size={14}
+                        color={
+                          idx === 0 ? (isNeo ? "rgba(100,116,139,0.6)" : "#cbd5e1") : isNeo ? "#cbd5e1" : "#475569"
+                        }
+                      />
+                    </Pressable>
+                    <Pressable
+                      style={[styles.managerActionBtn, !isNeo && styles.managerActionBtnClassic]}
+                      onPress={() => moveInstalledApp(idx, idx + 1)}
+                      disabled={idx === installedApps.length - 1}
+                    >
+                      <Ionicons
+                        name="chevron-down"
+                        size={14}
+                        color={
+                          idx === installedApps.length - 1
+                            ? isNeo
+                              ? "rgba(100,116,139,0.6)"
+                              : "#cbd5e1"
+                            : isNeo
+                              ? "#cbd5e1"
+                              : "#475569"
+                        }
+                      />
+                    </Pressable>
+                    <Pressable
+                      style={[styles.managerActionBtn, styles.managerDeleteBtn]}
+                      onPress={() => deleteInstalledApp(app.id)}
+                    >
+                      <Ionicons name="trash-outline" size={13} color="white" />
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+              {installedApps.length === 0 ? (
+                <Text style={[styles.managerEmpty, !isNeo && styles.managerEmptyClassic]}>
+                  {tr("还没有已安装应用", "No installed apps yet")}
+                </Text>
+              ) : null}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -976,12 +1329,20 @@ export function MiniAppDock({ accentColor, onOpenChat, tasks }: MiniAppDockProps
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 32,
+    borderRadius: 34,
     padding: 12,
-    backgroundColor: "rgba(26,30,40,0.75)",
+    backgroundColor: "rgba(31,31,47,0.78)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.1)",
     gap: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  containerClassic: {
+    backgroundColor: "rgba(255,255,255,0.93)",
+    borderColor: "rgba(255,255,255,0.8)",
   },
   rowTop: {
     flexDirection: "row",
@@ -992,21 +1353,30 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 64,
     borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.09)",
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
+  createButtonClassic: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#dbeafe",
+  },
   createIconWrap: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  createIconWrapClassic: {
+    backgroundColor: "#22c55e",
   },
   createTextWrap: {
     flex: 1,
@@ -1017,27 +1387,40 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#f8fafc",
   },
+  createTitleClassic: {
+    color: "#0f172a",
+  },
   createSub: {
     fontSize: 11,
-    color: "rgba(226,232,240,0.72)",
+    color: "rgba(226,232,240,0.7)",
+  },
+  createSubClassic: {
+    color: "#64748b",
   },
   createArrowWrap: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.1)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  createArrowWrapClassic: {
+    backgroundColor: "#e2e8f0",
   },
   minusButton: {
     width: 64,
     height: 64,
     borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.09)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  minusButtonClassic: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#dbeafe",
   },
   actionRow: {
     gap: 8,
@@ -1047,21 +1430,28 @@ const styles = StyleSheet.create({
     width: 82,
     height: 78,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.045)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.09)",
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
     paddingHorizontal: 4,
   },
+  actionCardClassic: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#dbeafe",
+  },
   actionIconWrap: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.13)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  actionIconWrapClassic: {
+    backgroundColor: "#22c55e",
   },
   actionIconWrapActive: {
     backgroundColor: "rgba(34,197,94,0.55)",
@@ -1071,6 +1461,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#f8fafc",
   },
+  actionLabelClassic: {
+    color: "#0f172a",
+  },
   taskPanel: {
     borderRadius: 20,
     borderWidth: 1,
@@ -1079,6 +1472,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 9,
     gap: 8,
+  },
+  taskPanelClassic: {
+    borderColor: "#dbeafe",
+    backgroundColor: "#f8fafc",
   },
   taskPanelHead: {
     flexDirection: "row",
@@ -1090,6 +1487,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 0.5,
+  },
+  taskPanelTitleClassic: {
+    color: "#0f172a",
   },
   taskPanelCount: {
     minWidth: 20,
@@ -1140,9 +1540,15 @@ const styles = StyleSheet.create({
     color: "rgba(203,213,225,0.68)",
     fontSize: 10,
   },
+  taskMetaClassic: {
+    color: "#64748b",
+  },
   taskEmpty: {
     color: "rgba(203,213,225,0.6)",
     fontSize: 11,
+  },
+  taskEmptyClassic: {
+    color: "#64748b",
   },
   generatedCard: {
     borderRadius: 20,
@@ -1162,6 +1568,12 @@ const styles = StyleSheet.create({
     color: "#334155",
     lineHeight: 16,
   },
+  generatedActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
   runButton: {
     alignSelf: "flex-start",
     minHeight: 34,
@@ -1176,6 +1588,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  manageButton: {
+    minHeight: 34,
+    borderRadius: 99,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.35)",
+    backgroundColor: "rgba(15,23,42,0.42)",
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  manageButtonClassic: {
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f8fafc",
+  },
+  manageButtonText: {
+    color: "rgba(226,232,240,0.9)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  manageButtonTextClassic: {
+    color: "#334155",
+  },
   minButton: {
     width: 60,
     height: 60,
@@ -1185,6 +1620,10 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  minButtonClassic: {
+    backgroundColor: "#22c55e",
+    borderColor: "rgba(255,255,255,0.75)",
   },
   modalOverlay: {
     flex: 1,
@@ -1201,6 +1640,11 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
     padding: 14,
     maxHeight: "92%",
+    overflow: "hidden",
+  },
+  modalCardClassic: {
+    backgroundColor: "rgba(255,255,255,0.98)",
+    borderColor: "#dbeafe",
   },
   modalHeader: {
     flexDirection: "row",
@@ -1226,6 +1670,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#f8fafc",
   },
+  modalTitleClassic: {
+    color: "#0f172a",
+  },
   modalCloseBtn: {
     width: 30,
     height: 30,
@@ -1243,6 +1690,10 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     position: "relative",
     marginBottom: 12,
+  },
+  promptWrapClassic: {
+    borderColor: "#cbd5e1",
+    backgroundColor: "white",
   },
   promptBadgeRow: {
     flexDirection: "row",
@@ -1263,6 +1714,9 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
     paddingRight: 56,
   },
+  promptInputClassic: {
+    color: "#0f172a",
+  },
   generateArrowBtn: {
     position: "absolute",
     right: 12,
@@ -1273,6 +1727,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.14)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  generateArrowBtnClassic: {
+    backgroundColor: "#e2e8f0",
   },
   installRow: {
     minHeight: 40,
@@ -1292,6 +1749,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.4,
   },
+  readyLabelClassic: {
+    color: "#334155",
+  },
   installActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -1300,6 +1760,9 @@ const styles = StyleSheet.create({
   discardText: {
     color: "rgba(226,232,240,0.72)",
     fontSize: 14,
+  },
+  discardTextClassic: {
+    color: "#64748b",
   },
   addAppBtn: {
     minHeight: 32,
@@ -1334,11 +1797,13 @@ const styles = StyleSheet.create({
     color: "rgba(226,232,240,0.7)",
     marginBottom: 10,
   },
+  examplesTitleClassic: {
+    color: "#64748b",
+  },
   examplesGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginBottom: 14,
   },
   exampleCard: {
     width: "48%",
@@ -1351,6 +1816,10 @@ const styles = StyleSheet.create({
     gap: 8,
     justifyContent: "flex-start",
   },
+  exampleCardClassic: {
+    borderColor: "#dbeafe",
+    backgroundColor: "#f8fafc",
+  },
   exampleIconWrap: {
     width: 26,
     height: 26,
@@ -1359,10 +1828,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  exampleIconWrapClassic: {
+    backgroundColor: "#22c55e",
+  },
   exampleTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#f8fafc",
+  },
+  exampleTitleClassic: {
+    color: "#0f172a",
   },
   exampleDesc: {
     marginTop: 2,
@@ -1370,8 +1845,16 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: "rgba(203,213,225,0.74)",
   },
-  previewScroll: {
-    maxHeight: 420,
+  exampleDescClassic: {
+    color: "#64748b",
+  },
+  creatorBodyScroll: {
+    flex: 1,
+    minHeight: 80,
+  },
+  creatorBodyScrollContent: {
+    paddingBottom: 12,
+    gap: 12,
   },
   previewCard: {
     borderRadius: 26,
@@ -1689,5 +2172,126 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 13,
     fontWeight: "700",
+  },
+  managerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2,6,23,0.72)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+  },
+  managerCard: {
+    width: "100%",
+    maxWidth: 480,
+    maxHeight: "78%",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.26)",
+    backgroundColor: "rgba(15,23,42,0.92)",
+    padding: 12,
+    gap: 10,
+  },
+  managerCardClassic: {
+    borderColor: "#dbeafe",
+    backgroundColor: "rgba(255,255,255,0.98)",
+  },
+  managerHeader: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  managerTitle: {
+    color: "#f8fafc",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  managerTitleClassic: {
+    color: "#0f172a",
+  },
+  managerSub: {
+    color: "rgba(148,163,184,0.88)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  managerSubClassic: {
+    color: "#64748b",
+  },
+  managerClose: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  managerList: {
+    flexGrow: 0,
+  },
+  managerRow: {
+    minHeight: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.24)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    marginBottom: 8,
+    gap: 8,
+  },
+  managerRowClassic: {
+    borderColor: "#dbeafe",
+    backgroundColor: "#f8fafc",
+  },
+  managerAppIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  managerInput: {
+    flex: 1,
+    color: "#f8fafc",
+    fontSize: 14,
+    fontWeight: "700",
+    paddingVertical: 0,
+  },
+  managerInputClassic: {
+    color: "#0f172a",
+  },
+  managerActionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  managerActionBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.4)",
+    backgroundColor: "rgba(15,23,42,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  managerActionBtnClassic: {
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f1f5f9",
+  },
+  managerDeleteBtn: {
+    borderColor: "transparent",
+    backgroundColor: "#ef4444",
+  },
+  managerEmpty: {
+    textAlign: "center",
+    color: "rgba(148,163,184,0.88)",
+    fontSize: 13,
+    paddingVertical: 10,
+  },
+  managerEmptyClassic: {
+    color: "#64748b",
   },
 });

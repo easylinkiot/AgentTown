@@ -13,6 +13,7 @@ import {
 
 import { HousePreview } from "@/src/components/HousePreview";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { tx } from "@/src/i18n/translate";
 
 type PanelType = "house" | "interests" | "jobs" | "assets" | null;
 
@@ -46,53 +47,57 @@ function AppTile({
 
 export default function LivingRoomScreen() {
   const router = useRouter();
-  const { myHouseType, updateHouseType } = useAgentTown();
+  const { myHouseType, updateHouseType, uiTheme, language } = useAgentTown();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
+  const isNeo = uiTheme === "neo";
   const [activePanel, setActivePanel] = useState<PanelType>(null);
 
   const panelTitle = useMemo(() => {
     switch (activePanel) {
       case "house":
-        return "Decorate Exterior";
+        return language === "zh" ? "外观装扮" : "Decorate Exterior";
       case "interests":
-        return "Interests";
+        return language === "zh" ? "兴趣" : "Interests";
       case "jobs":
-        return "Jobs";
+        return language === "zh" ? "工作" : "Jobs";
       case "assets":
-        return "Assets";
+        return language === "zh" ? "资产" : "Assets";
       default:
         return "";
     }
-  }, [activePanel]);
+  }, [activePanel, language]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, !isNeo && styles.safeAreaClassic]}>
       <View style={styles.header}>
-        <Pressable style={styles.headerBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
+        <Pressable style={[styles.headerBtn, !isNeo && styles.headerBtnClassic]} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={24} color={isNeo ? "#fff" : "#111827"} />
         </Pressable>
-        <View style={styles.titlePill}>
-          <Ionicons name="home" size={12} color="#fff" />
-          <Text style={styles.titlePillText}>Living Room</Text>
+        <View style={[styles.titlePill, !isNeo && styles.titlePillClassic]}>
+          <Ionicons name="home" size={12} color={isNeo ? "#fff" : "#111827"} />
+          <Text style={[styles.titlePillText, !isNeo && styles.titlePillTextClassic]}>
+            {tr("我的家", "Living Room")}
+          </Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>
 
-      <View style={styles.heroCard}>
-        <Text style={styles.heroText}>My Home</Text>
+      <View style={[styles.heroCard, !isNeo && styles.heroCardClassic]}>
+        <Text style={[styles.heroText, !isNeo && styles.heroTextClassic]}>{tr("我的家", "My Home")}</Text>
         <HousePreview type={myHouseType} scale={1.6} />
       </View>
 
       <View style={styles.grid}>
-        <AppTile label="House" icon="home" color="#f97316" onPress={() => setActivePanel("house")} />
-        <AppTile label="Skills" icon="flash" color="#2563eb" onPress={() => router.push("/config")} />
+        <AppTile label={tr("房子", "House")} icon="home" color="#f97316" onPress={() => setActivePanel("house")} />
+        <AppTile label={tr("技能", "Skills")} icon="flash" color="#2563eb" onPress={() => router.push("/config")} />
         <AppTile
-          label="Interests"
+          label={tr("兴趣", "Interests")}
           icon="game-controller"
           color="#a855f7"
           onPress={() => setActivePanel("interests")}
         />
-        <AppTile label="Jobs" icon="briefcase" color="#ec4899" onPress={() => setActivePanel("jobs")} />
-        <AppTile label="Assets" icon="cash" color="#22c55e" onPress={() => setActivePanel("assets")} />
+        <AppTile label={tr("工作", "Jobs")} icon="briefcase" color="#ec4899" onPress={() => setActivePanel("jobs")} />
+        <AppTile label={tr("资产", "Assets")} icon="cash" color="#22c55e" onPress={() => setActivePanel("assets")} />
       </View>
 
       <Modal visible={activePanel !== null} transparent animationType="slide" onRequestClose={() => setActivePanel(null)}>
@@ -129,7 +134,14 @@ export default function LivingRoomScreen() {
                           myHouseType === house.id && styles.houseCardTextSelected,
                         ]}
                       >
-                        {house.name}
+                        {language === "zh"
+                          ? {
+                              0: "温馨小屋",
+                              1: "现代蓝调",
+                              2: "极简风",
+                              3: "金色庄园",
+                            }[house.id]
+                          : house.name}
                       </Text>
                     </Pressable>
                   ))}
@@ -140,19 +152,19 @@ export default function LivingRoomScreen() {
                 <View style={styles.listWrap}>
                   <View style={styles.infoItem}>
                     <Ionicons name="game-controller" size={20} color="#9333ea" />
-                    <Text style={styles.infoText}>Games</Text>
+                    <Text style={styles.infoText}>{tr("游戏", "Games")}</Text>
                   </View>
                   <View style={styles.infoItem}>
                     <Ionicons name="film" size={20} color="#dc2626" />
-                    <Text style={styles.infoText}>Movies</Text>
+                    <Text style={styles.infoText}>{tr("电影", "Movies")}</Text>
                   </View>
                   <View style={styles.infoItem}>
                     <Ionicons name="trophy" size={20} color="#16a34a" />
-                    <Text style={styles.infoText}>Sports</Text>
+                    <Text style={styles.infoText}>{tr("运动", "Sports")}</Text>
                   </View>
                   <View style={styles.infoItem}>
                     <Ionicons name="people" size={20} color="#2563eb" />
-                    <Text style={styles.infoText}>Social</Text>
+                    <Text style={styles.infoText}>{tr("社交", "Social")}</Text>
                   </View>
                 </View>
               ) : null}
@@ -160,14 +172,14 @@ export default function LivingRoomScreen() {
               {activePanel === "jobs" ? (
                 <View style={styles.listWrap}>
                   <View style={styles.jobCard}>
-                    <Text style={styles.jobTag}>Content Creation · $500/mo</Text>
-                    <Text style={styles.jobTitle}>Video Script Writer</Text>
-                    <Text style={styles.jobDesc}>Create engaging scripts for tech reviews.</Text>
+                    <Text style={styles.jobTag}>{tr("内容创作 · $500/月", "Content Creation · $500/mo")}</Text>
+                    <Text style={styles.jobTitle}>{tr("视频脚本撰写", "Video Script Writer")}</Text>
+                    <Text style={styles.jobDesc}>{tr("为科技评测创建高质量脚本。", "Create engaging scripts for tech reviews.")}</Text>
                   </View>
                   <View style={styles.jobCard}>
-                    <Text style={styles.jobTag}>Projects · $1200</Text>
+                    <Text style={styles.jobTag}>{tr("项目制 · $1200", "Projects · $1200")}</Text>
                     <Text style={styles.jobTitle}>React Dashboard</Text>
-                    <Text style={styles.jobDesc}>Build a responsive admin panel.</Text>
+                    <Text style={styles.jobDesc}>{tr("构建响应式管理面板。", "Build a responsive admin panel.")}</Text>
                   </View>
                 </View>
               ) : null}
@@ -175,17 +187,17 @@ export default function LivingRoomScreen() {
               {activePanel === "assets" ? (
                 <View style={styles.listWrap}>
                   <View style={styles.assetTotalCard}>
-                    <Text style={styles.assetLabel}>Total Earnings</Text>
+                    <Text style={styles.assetLabel}>{tr("总收益", "Total Earnings")}</Text>
                     <Text style={styles.assetValue}>$12,450.00</Text>
                   </View>
                   <View style={styles.assetGrid}>
                     <View style={styles.assetSmallCard}>
                       <Ionicons name="trending-up" size={20} color="#16a34a" />
-                      <Text style={styles.assetSmallText}>Analytics</Text>
+                      <Text style={styles.assetSmallText}>{tr("分析", "Analytics")}</Text>
                     </View>
                     <View style={styles.assetSmallCard}>
                       <Ionicons name="document-text" size={20} color="#2563eb" />
-                      <Text style={styles.assetSmallText}>Contracts</Text>
+                      <Text style={styles.assetSmallText}>{tr("合同", "Contracts")}</Text>
                     </View>
                   </View>
                 </View>
@@ -202,6 +214,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#111827",
+  },
+  safeAreaClassic: {
+    backgroundColor: "#eef4ff",
   },
   header: {
     marginTop: 8,
@@ -220,6 +235,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerBtnClassic: {
+    backgroundColor: "white",
+    borderColor: "#dbeafe",
+  },
   titlePill: {
     flexDirection: "row",
     alignItems: "center",
@@ -231,10 +250,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.15)",
   },
+  titlePillClassic: {
+    backgroundColor: "white",
+    borderColor: "#dbeafe",
+  },
   titlePillText: {
     color: "white",
     fontSize: 12,
     fontWeight: "700",
+  },
+  titlePillTextClassic: {
+    color: "#111827",
   },
   headerSpacer: {
     width: 40,
@@ -250,10 +276,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
+  heroCardClassic: {
+    backgroundColor: "white",
+    borderColor: "#dbeafe",
+  },
   heroText: {
     color: "white",
     fontSize: 13,
     fontWeight: "700",
+  },
+  heroTextClassic: {
+    color: "#111827",
   },
   grid: {
     marginTop: 26,

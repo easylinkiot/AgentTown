@@ -39,6 +39,7 @@ import {
   WORLD_WIDTH,
 } from "@/src/features/townmap/world";
 import { TownHouseNode } from "@/src/components/TownHouseNode";
+import { tx } from "@/src/i18n/translate";
 import { generateGeminiText } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 
@@ -109,16 +110,88 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildWorldIdea(seed: number) {
+function buildWorldIdea(seed: number, language: "zh" | "en") {
+  if (language === "en") {
+    const identities = [
+      "Office worker",
+      "Student",
+      "Parent",
+      "Traveler",
+      "Bike commuter",
+      "Founder",
+      "Product manager",
+      "Freelancer",
+      "Restaurant owner",
+      "New investor",
+    ];
+    const pains = [
+      "too much information",
+      "constant schedule slips",
+      "meal planning takes too long",
+      "meeting outcomes get lost",
+      "deals are scattered",
+      "trip changes are hard to sync",
+      "study plans are hard to sustain",
+      "customer follow-up gets missed",
+      "family budget goes over limit",
+      "fitness data is hard to read",
+    ];
+    const apps = [
+      "Morning Brief",
+      "Task Planner",
+      "Dining Booking",
+      "Meeting Notes",
+      "Price Alert",
+      "Calendar Sync",
+      "Study Check-in",
+      "Follow-up Bot",
+      "Budget Assistant",
+      "Health Dashboard",
+    ];
+    const identity = identities[seed % identities.length];
+    const pain = pains[(seed * 3) % pains.length];
+    const app = apps[(seed * 5) % apps.length];
+    return `[${identity}: ${pain}] Generate a ${app} mini app with one sentence.`;
+  }
+
   const identity = GROUP_IDENTITIES[seed % GROUP_IDENTITIES.length];
   const pain = GROUP_PAIN_POINTS[(seed * 3) % GROUP_PAIN_POINTS.length];
   const app = GROUP_APP_IDEAS[(seed * 5) % GROUP_APP_IDEAS.length];
   return `【${identity}：${pain}】生成一个${app} Mini App，一句话自动完成。`;
 }
 
+function buildInitialWorldGroupMessages(
+  language: "zh" | "en",
+  botName: string,
+  botAvatar: string
+): WorldGroupMessage[] {
+  return [
+    {
+      id: "world_group_system",
+      role: "system",
+      text:
+        language === "zh"
+          ? "用户视角需求洞察模式已激活。"
+          : "User-perspective ideation mode is active.",
+    },
+    {
+      id: "world_group_lead",
+      role: "agent",
+      senderName: `${botName} (Team Lead)`,
+      senderAvatar: botAvatar,
+      senderRole: "Product Manager",
+      text:
+        language === "zh"
+          ? "大家请用普通用户视角，提出一个“一句话生成 Mini App”就能解决的真实问题。"
+          : "Please use a normal user perspective and propose one real problem solvable by a one-sentence generated mini app.",
+    },
+  ];
+}
+
 export default function TownMapScreen() {
   const router = useRouter();
-  const { myHouseType, botConfig } = useAgentTown();
+  const { myHouseType, botConfig, language } = useAgentTown();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isAndroid = Platform.OS === "android";
@@ -137,21 +210,9 @@ export default function TownMapScreen() {
   const [groupPanelVisible, setGroupPanelVisible] = useState(true);
   const [groupPanelMode, setGroupPanelMode] = useState<"expanded" | "minimized">("expanded");
   const [isWorldGroupThinking, setIsWorldGroupThinking] = useState(false);
-  const [worldGroupMessages, setWorldGroupMessages] = useState<WorldGroupMessage[]>(() => [
-    {
-      id: "world_group_system",
-      role: "system",
-      text: "用户视角需求洞察模式已激活。",
-    },
-    {
-      id: "world_group_lead",
-      role: "agent",
-      senderName: `${botConfig.name} (Team Lead)`,
-      senderAvatar: botConfig.avatar,
-      senderRole: "Product Manager",
-      text: "大家请用普通用户视角，提出一个“一句话生成 Mini App”就能解决的真实问题。",
-    },
-  ]);
+  const [worldGroupMessages, setWorldGroupMessages] = useState<WorldGroupMessage[]>(() =>
+    buildInitialWorldGroupMessages(language, botConfig.name, botConfig.avatar)
+  );
 
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
@@ -297,6 +358,14 @@ export default function TownMapScreen() {
   }, [groupPanelMode, isWorldGroupThinking, worldGroupMessages.length]);
 
   useEffect(() => {
+    if (!groupPanelVisible) return;
+    if (worldGroupMessages.length > 0) return;
+    setWorldGroupMessages(
+      buildInitialWorldGroupMessages(language, botConfig.name, botConfig.avatar)
+    );
+  }, [botConfig.avatar, botConfig.name, groupPanelVisible, language, worldGroupMessages.length]);
+
+  useEffect(() => {
     if (!groupPanelVisible || worldGroupCandidates.length === 0) return;
 
     let messageTimer: ReturnType<typeof setTimeout> | null = null;
@@ -319,7 +388,7 @@ export default function TownMapScreen() {
             senderName: lot.npc.name,
             senderAvatar: lot.npc.avatar,
             senderRole: lot.npc.role,
-            text: buildWorldIdea(idx + 1),
+            text: buildWorldIdea(idx + 1, language),
           },
         ]);
         worldGroupCursorRef.current += 1;
@@ -333,7 +402,7 @@ export default function TownMapScreen() {
         clearTimeout(messageTimer);
       }
     };
-  }, [groupPanelVisible, worldGroupCandidates]);
+  }, [groupPanelVisible, language, worldGroupCandidates]);
 
   const applyZoom = (delta: number) => {
     const nextScale = clamp(scale + delta, 0.12, maxScale);
@@ -385,12 +454,18 @@ export default function TownMapScreen() {
     setChatMessages([
       {
         role: "system",
-        text: `${selectedLot.label} Group · ${members.length} members`,
+        text:
+          language === "zh"
+            ? `${selectedLot.label} 群聊 · ${members.length} 人`
+            : `${selectedLot.label} Group · ${members.length} members`,
       },
       {
         role: "model",
         senderName: members[0],
-        text: `大家好，欢迎来到 ${selectedLot.label} 群聊。`,
+        text:
+          language === "zh"
+            ? `大家好，欢迎来到 ${selectedLot.label} 群聊。`
+            : `Hi everyone, welcome to ${selectedLot.label} group chat.`,
       },
     ]);
     setInputValue("");
@@ -402,7 +477,7 @@ export default function TownMapScreen() {
     if (!reply) {
       return {
         senderName: fallbackName,
-        text: "收到，我来跟进这个话题。",
+        text: tr("收到，我来跟进这个话题。", "Got it, I can follow up this topic."),
       };
     }
 
@@ -477,7 +552,11 @@ export default function TownMapScreen() {
         {
           role: "model",
           senderName: selectedLot.npc.name,
-          text: reply ?? `${selectedLot.npc.name}: Got it. I can help with that.`,
+          text:
+            reply ??
+            (language === "zh"
+              ? `${selectedLot.npc.name}：收到，我可以协助处理。`
+              : `${selectedLot.npc.name}: Got it. I can help with that.`),
         },
       ]);
     }
@@ -515,7 +594,7 @@ export default function TownMapScreen() {
           </Pressable>
           <View style={styles.mapPill}>
             <Ionicons name="earth" size={14} color="#16a34a" />
-            <Text style={styles.mapPillText}>Town World</Text>
+            <Text style={styles.mapPillText}>{tr("世界地图", "World Map")}</Text>
           </View>
         </View>
 
@@ -540,12 +619,14 @@ export default function TownMapScreen() {
       </View>
 
       <View style={[styles.worldStatus, { top: insets.top + 66 }]}>
-        <Text style={styles.worldStatusTitle}>No-Engine World Mode</Text>
+        <Text style={styles.worldStatusTitle}>{tr("无引擎世界模式", "No-Engine World Mode")}</Text>
         <Text style={styles.worldStatusText}>
-          {`Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1}`}
+          {language === "zh"
+            ? `已加载 ${visibleChunks.length} 个区块 · 中心 C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1}`
+            : `Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1}`}
         </Text>
         <Text style={styles.worldStatusTextMinor}>
-          {`可见房源: ${visibleLots.length}`}
+          {language === "zh" ? `可见房源: ${visibleLots.length}` : `Visible homes: ${visibleLots.length}`}
         </Text>
       </View>
 
@@ -805,7 +886,7 @@ export default function TownMapScreen() {
             >
               <View style={styles.myHomePill}>
                 <Ionicons name="home" size={10} color="#3b82f6" />
-                <Text style={styles.myHomeText}>My Home</Text>
+                <Text style={styles.myHomeText}>{tr("我的家", "My Home")}</Text>
               </View>
               <TownHouseNode
                 type={mapMyHouseTypeToVisual(myHouseType)}
@@ -877,9 +958,13 @@ export default function TownMapScreen() {
                   </View>
                   <View>
                     <Text style={styles.worldGroupTitle}>
-                      {`Agent Team (Bot ${Math.min(worldGroupCursorRef.current, 99) + 1}/100)`}
+                      {language === "zh"
+                        ? `Agent 团队（Bot ${Math.min(worldGroupCursorRef.current, 99) + 1}/100）`
+                        : `Agent Team (Bot ${Math.min(worldGroupCursorRef.current, 99) + 1}/100)`}
                     </Text>
-                    <Text style={styles.worldGroupSub}>普通用户 Mini App 需求脑暴</Text>
+                    <Text style={styles.worldGroupSub}>
+                      {tr("普通用户 Mini App 需求脑暴", "Mini App ideation from user perspective")}
+                    </Text>
                   </View>
                 </View>
                 <View style={styles.worldGroupActions}>
@@ -904,31 +989,39 @@ export default function TownMapScreen() {
                 contentContainerStyle={styles.worldGroupListContent}
                 showsVerticalScrollIndicator={false}
               >
-                {worldGroupMessages.map((msg) =>
-                  msg.role === "system" ? (
-                    <View key={msg.id} style={styles.worldGroupSystemWrap}>
-                      <Text style={styles.worldGroupSystemText}>{msg.text}</Text>
-                    </View>
-                  ) : (
-                    <View key={msg.id} style={styles.worldGroupRow}>
-                      <Image
-                        source={{ uri: msg.senderAvatar || botConfig.avatar }}
-                        style={styles.worldGroupAvatar}
-                      />
-                      <View style={styles.worldGroupBubbleWrap}>
-                        <View style={styles.worldGroupNameRow}>
-                          <Text style={styles.worldGroupName} numberOfLines={1}>
-                            {msg.senderName}
-                          </Text>
-                          <Text style={styles.worldGroupRole} numberOfLines={1}>
-                            {msg.senderRole}
-                          </Text>
-                        </View>
-                        <View style={styles.worldGroupBubble}>
-                          <Text style={styles.worldGroupText}>{msg.text}</Text>
+                {worldGroupMessages.length === 0 ? (
+                  <View style={styles.worldGroupEmptyWrap}>
+                    <Text style={styles.worldGroupEmptyText}>
+                      {tr("暂无消息，正在等待 Agent 发言...", "No messages yet, waiting for agents...")}
+                    </Text>
+                  </View>
+                ) : (
+                  worldGroupMessages.map((msg) =>
+                    msg.role === "system" ? (
+                      <View key={msg.id} style={styles.worldGroupSystemWrap}>
+                        <Text style={styles.worldGroupSystemText}>{msg.text}</Text>
+                      </View>
+                    ) : (
+                      <View key={msg.id} style={styles.worldGroupRow}>
+                        <Image
+                          source={{ uri: msg.senderAvatar || botConfig.avatar }}
+                          style={styles.worldGroupAvatar}
+                        />
+                        <View style={styles.worldGroupBubbleWrap}>
+                          <View style={styles.worldGroupNameRow}>
+                            <Text style={styles.worldGroupName} numberOfLines={1}>
+                              {msg.senderName}
+                            </Text>
+                            <Text style={styles.worldGroupRole} numberOfLines={1}>
+                              {msg.senderRole}
+                            </Text>
+                          </View>
+                          <View style={styles.worldGroupBubble}>
+                            <Text style={styles.worldGroupText}>{msg.text}</Text>
+                          </View>
                         </View>
                       </View>
-                    </View>
+                    )
                   )
                 )}
 
@@ -936,7 +1029,9 @@ export default function TownMapScreen() {
                   <View style={styles.worldThinkingRow}>
                     <Ionicons name="sync-outline" size={12} color="#2563eb" />
                     <Text style={styles.worldThinkingText}>
-                      {`Bot ${Math.min(worldGroupCursorRef.current, 99) + 1} 构思中...`}
+                      {language === "zh"
+                        ? `Bot ${Math.min(worldGroupCursorRef.current, 99) + 1} 构思中...`
+                        : `Bot ${Math.min(worldGroupCursorRef.current, 99) + 1} is thinking...`}
                     </Text>
                   </View>
                 ) : null}
@@ -944,7 +1039,9 @@ export default function TownMapScreen() {
 
               <View style={styles.worldGroupFooter}>
                 <Ionicons name="mic-outline" size={13} color="#9ca3af" />
-                <Text style={styles.worldGroupFooterText}>旁观模式（Team Lead 已锁定议题）</Text>
+                <Text style={styles.worldGroupFooterText}>
+                  {tr("旁观模式（Team Lead 已锁定议题）", "Observer mode (topic locked by Team Lead)")}
+                </Text>
                 <Ionicons name="add" size={14} color="#9ca3af" />
               </View>
             </View>
@@ -958,9 +1055,11 @@ export default function TownMapScreen() {
               <Ionicons name="bulb-outline" size={14} color="white" />
             </View>
             <View>
-              <Text style={styles.worldGroupMiniTitle}>User Needs Brainstorm</Text>
+              <Text style={styles.worldGroupMiniTitle}>{tr("用户需求脑暴", "User Needs Brainstorm")}</Text>
               <Text style={styles.worldGroupMiniSub}>
-                {`Agent ${Math.min(worldGroupCursorRef.current, 99) + 1} thinking...`}
+                {language === "zh"
+                  ? `Agent ${Math.min(worldGroupCursorRef.current, 99) + 1} 思考中...`
+                  : `Agent ${Math.min(worldGroupCursorRef.current, 99) + 1} thinking...`}
               </Text>
             </View>
           </Pressable>
@@ -977,11 +1076,13 @@ export default function TownMapScreen() {
           <View style={styles.visitBtnRow}>
             <Pressable style={styles.visitBtn} onPress={openChat}>
               <Ionicons name="chatbubble" size={16} color="white" />
-              <Text style={styles.visitBtnText}>Visit {selectedLot.label}</Text>
+              <Text style={styles.visitBtnText}>
+                {language === "zh" ? `访问 ${selectedLot.label}` : `Visit ${selectedLot.label}`}
+              </Text>
             </Pressable>
             <Pressable style={[styles.visitBtn, styles.groupVisitBtn]} onPress={openGroupChat}>
               <Ionicons name="people" size={16} color="#111827" />
-              <Text style={styles.groupVisitBtnText}>Group Chat</Text>
+              <Text style={styles.groupVisitBtnText}>{tr("群聊", "Group Chat")}</Text>
             </Pressable>
           </View>
         </View>
@@ -1003,13 +1104,15 @@ export default function TownMapScreen() {
                 <View>
                   <Text style={styles.chatName}>
                     {chatMode === "group"
-                      ? `${selectedLot?.label ?? "Town"} Group`
-                      : selectedLot?.npc.name ?? "NPC"}
+                      ? `${selectedLot?.label ?? tr("小镇", "Town")} ${tr("群聊", "Group")}`
+                      : selectedLot?.npc.name ?? tr("邻居", "NPC")}
                   </Text>
                   <Text style={styles.chatRole}>
                     {chatMode === "group"
-                      ? `${Math.max(2, groupMemberNames.length)} members · Group chat`
-                      : selectedLot?.npc.role ?? "Role"}
+                      ? language === "zh"
+                        ? `${Math.max(2, groupMemberNames.length)} 人 · 群聊`
+                        : `${Math.max(2, groupMemberNames.length)} members · Group chat`
+                      : selectedLot?.npc.role ?? tr("角色", "Role")}
                   </Text>
                 </View>
               </View>
@@ -1060,7 +1163,11 @@ export default function TownMapScreen() {
                 style={styles.chatInput}
                 value={inputValue}
                 onChangeText={setInputValue}
-                placeholder={chatMode === "group" ? "Message the group..." : "Type a message..."}
+                placeholder={
+                  chatMode === "group"
+                    ? tr("发送群消息...", "Message the group...")
+                    : tr("输入消息...", "Type a message...")
+                }
                 onSubmitEditing={sendChat}
               />
               <Pressable style={styles.chatSendBtn} onPress={sendChat}>
@@ -1445,13 +1552,28 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
   },
   worldGroupList: {
-    flex: 1,
+    minHeight: 112,
     maxHeight: 220,
   },
   worldGroupListContent: {
     paddingHorizontal: 10,
     paddingVertical: 8,
     gap: 7,
+  },
+  worldGroupEmptyWrap: {
+    minHeight: 84,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  worldGroupEmptyText: {
+    color: "#64748b",
+    fontSize: 11,
+    textAlign: "center",
   },
   worldGroupSystemWrap: {
     alignItems: "center",

@@ -1,14 +1,19 @@
 import { Link, Stack } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 
+import { tx } from "@/src/i18n/translate";
+import { useAgentTown } from "@/src/state/agenttown-context";
+
 export default function NotFoundScreen() {
+  const { language } = useAgentTown();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   return (
     <>
-      <Stack.Screen options={{ title: "Not Found" }} />
+      <Stack.Screen options={{ title: tr("未找到", "Not Found") }} />
       <View style={styles.container}>
-        <Text style={styles.title}>This screen does not exist.</Text>
+        <Text style={styles.title}>{tr("这个页面不存在。", "This screen does not exist.")}</Text>
         <Link href="/" style={styles.link}>
-          Back to Home
+          {tr("返回首页", "Back to Home")}
         </Link>
       </View>
     </>

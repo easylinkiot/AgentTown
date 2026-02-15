@@ -8,8 +8,10 @@ import {
   PanResponder,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -36,6 +38,7 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from "@/src/features/townmap/world";
+import { tx } from "@/src/i18n/translate";
 import { getThemeTokens } from "@/src/theme/ui-theme";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { ChatThread } from "@/src/types";
@@ -49,6 +52,12 @@ interface MovingCar {
   direction: 1 | -1;
 }
 
+interface InlineAskMessage {
+  id: string;
+  text: string;
+  isMe: boolean;
+}
+
 const SCENE_SCALE = 0.2;
 const MAP_VERTICAL_LIFT_RATIO = 0.15;
 
@@ -58,20 +67,44 @@ function clamp(value: number, min: number, max: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { botConfig, tasks, myHouseType, uiTheme } = useAgentTown();
+  const { botConfig, tasks, myHouseType, uiTheme, language } = useAgentTown();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   const theme = getThemeTokens(uiTheme);
   const isNeo = uiTheme === "neo";
   const { height: windowHeight } = useWindowDimensions();
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [sceneSize, setSceneSize] = useState({ width: 360, height: 360 });
-  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  const [chatSheetMode, setChatSheetMode] = useState<"collapsed" | "normal" | "fullscreen">(
+    "normal"
+  );
   const [chatThreads, setChatThreads] = useState<ChatThread[]>(CHAT_DATA);
   const [isAddBotModalVisible, setIsAddBotModalVisible] = useState(false);
+  const [isInlineAskVisible, setIsInlineAskVisible] = useState(false);
+  const [isDockTaskPanelVisible, setIsDockTaskPanelVisible] = useState(false);
+  const [inlineAskInput, setInlineAskInput] = useState("");
+  const [inlineAskMessages, setInlineAskMessages] = useState<InlineAskMessage[]>(() => [
+    {
+      id: "welcome",
+      text:
+        language === "zh"
+          ? "你好！我是你的 AI 创业导师。让我们聊聊你的项目吧。"
+          : "Hi! I'm your AI startup copilot. Let's talk about your project.",
+      isMe: false,
+    },
+  ]);
+  const inlineAskScrollRef = useRef<ScrollView | null>(null);
 
-  const chatSheetHeight = Math.max(320, Math.round(windowHeight * 0.5));
+  const isChatCollapsed = chatSheetMode === "collapsed";
+  const isChatFullscreen = chatSheetMode === "fullscreen";
+
+  const chatSheetNormalHeight = isNeo
+    ? Math.max(280, Math.round(windowHeight * 0.4))
+    : Math.max(320, Math.round(windowHeight * 0.5));
+  const chatSheetHeight = Math.max(420, Math.round(windowHeight * 0.9));
   const chatSheetPeek = 68;
+  const normalSheetTranslate = Math.max(0, chatSheetHeight - chatSheetNormalHeight);
   const maxSheetTranslate = Math.max(0, chatSheetHeight - chatSheetPeek);
-  const chatSheetTranslateY = useRef(new Animated.Value(0)).current;
+  const chatSheetTranslateY = useRef(new Animated.Value(normalSheetTranslate)).current;
   const chatSheetDragStart = useRef(0);
 
   const routeLookup = useMemo(
@@ -169,10 +202,14 @@ export default function HomeScreen() {
   );
 
   const taskWidgetBottom = useMemo(() => {
-    const desiredBottom = isChatCollapsed ? chatSheetPeek + 18 : chatSheetHeight + 16;
+    const desiredBottom = isChatCollapsed
+      ? chatSheetPeek + 18
+      : isChatFullscreen
+        ? chatSheetHeight + 12
+        : chatSheetNormalHeight + 16;
     const maxBottomInsideScene = Math.max(94, sceneSize.height - 210);
     return Math.min(desiredBottom, maxBottomInsideScene);
-  }, [chatSheetHeight, chatSheetPeek, isChatCollapsed, sceneSize.height]);
+  }, [chatSheetHeight, chatSheetNormalHeight, chatSheetPeek, isChatCollapsed, isChatFullscreen, sceneSize.height]);
 
   const taskWidgetOverlayStyle = useMemo(
     () => ({
@@ -183,28 +220,62 @@ export default function HomeScreen() {
     [taskWidgetBottom]
   );
 
+  const neoDockTop = useMemo(
+    () => Math.max(108, Math.round(sceneSize.height * 0.17)),
+    [sceneSize.height]
+  );
+
+  const neoAskBottom = useMemo(() => {
+    const offset = isChatCollapsed
+      ? chatSheetPeek + 14
+      : isChatFullscreen
+        ? chatSheetHeight + 14
+        : chatSheetNormalHeight + 14;
+    return Math.max(offset, 104);
+  }, [chatSheetHeight, chatSheetNormalHeight, chatSheetPeek, isChatCollapsed, isChatFullscreen]);
+
   const animateChatSheet = useCallback(
-    (collapsed: boolean) => {
+    (mode: "collapsed" | "normal" | "fullscreen") => {
+      const toValue =
+        mode === "collapsed"
+          ? maxSheetTranslate
+          : mode === "fullscreen"
+            ? 0
+            : normalSheetTranslate;
       Animated.spring(chatSheetTranslateY, {
-        toValue: collapsed ? maxSheetTranslate : 0,
+        toValue,
         useNativeDriver: true,
         damping: 18,
         stiffness: 180,
         mass: 0.8,
       }).start();
     },
-    [chatSheetTranslateY, maxSheetTranslate]
+    [chatSheetTranslateY, maxSheetTranslate, normalSheetTranslate]
   );
 
   useEffect(() => {
-    animateChatSheet(isChatCollapsed);
-  }, [animateChatSheet, isChatCollapsed]);
+    animateChatSheet(chatSheetMode);
+  }, [animateChatSheet, chatSheetMode]);
 
   useEffect(() => {
     chatSheetTranslateY.stopAnimation((value) => {
       chatSheetTranslateY.setValue(clamp(value, 0, maxSheetTranslate));
     });
   }, [chatSheetTranslateY, maxSheetTranslate]);
+
+  useEffect(() => {
+    if (!isNeo && isInlineAskVisible) {
+      setIsInlineAskVisible(false);
+    }
+  }, [isInlineAskVisible, isNeo]);
+
+  useEffect(() => {
+    if (!isInlineAskVisible) return;
+    const timer = setTimeout(() => {
+      inlineAskScrollRef.current?.scrollToEnd({ animated: true });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [inlineAskMessages, isInlineAskVisible]);
 
   const chatSheetPanResponder = useMemo(
     () =>
@@ -225,11 +296,23 @@ export default function HomeScreen() {
             return;
           }
           const next = clamp(chatSheetDragStart.current + gesture.dy, 0, maxSheetTranslate);
-          const shouldCollapse = gesture.vy > 0.35 || next > maxSheetTranslate * 0.45;
-          setIsChatCollapsed(shouldCollapse);
+          const shouldFullscreen = gesture.vy < -0.35 || next < normalSheetTranslate * 0.62;
+          if (shouldFullscreen) {
+            setChatSheetMode("fullscreen");
+            return;
+          }
+
+          const shouldCollapse =
+            gesture.vy > 0.35 || next > (normalSheetTranslate + maxSheetTranslate) * 0.5;
+          if (shouldCollapse) {
+            setChatSheetMode("collapsed");
+            return;
+          }
+
+          setChatSheetMode("normal");
         },
       }),
-    [chatSheetTranslateY, maxSheetTranslate]
+    [chatSheetTranslateY, maxSheetTranslate, normalSheetTranslate]
   );
 
   const openThread = useCallback(
@@ -253,6 +336,29 @@ export default function HomeScreen() {
   const handleAddBotFriend = useCallback((thread: ChatThread) => {
     setChatThreads((prev) => [thread, ...prev]);
   }, []);
+
+  const handleInlineAskSend = useCallback(() => {
+    const text = inlineAskInput.trim();
+    if (!text) return;
+
+    setInlineAskInput("");
+    setInlineAskMessages((prev) => [
+      ...prev,
+      {
+        id: `ask_me_${Date.now()}`,
+        text,
+        isMe: true,
+      },
+      {
+        id: `ask_bot_${Date.now() + 1}`,
+        text:
+          language === "zh"
+            ? "收到，我会先给你一个可执行的行动计划。"
+            : "Got it. I will first give you an actionable plan.",
+        isMe: false,
+      },
+    ]);
+  }, [inlineAskInput, language]);
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.safeArea }]}>
@@ -278,8 +384,11 @@ export default function HomeScreen() {
           {isNeo ? (
             <>
               <View style={styles.neoDimmer} />
+              <View style={styles.neoOverlayTop} />
+              <View style={styles.neoOverlayBottom} />
               <View style={styles.neoGlowPurple} />
               <View style={styles.neoGlowBlue} />
+              <View style={styles.neoGlowMagenta} />
               <Svg style={styles.neoGrid} width="100%" height="100%" pointerEvents="none">
                 {Array.from({ length: 13 }).map((_, idx) => (
                   <Path
@@ -301,161 +410,166 @@ export default function HomeScreen() {
             </>
           ) : null}
 
-          <View style={[styles.sceneWorldLayer, worldLayerStyle]}>
-            <Svg
-              width={worldLayerStyle.width}
-              height={worldLayerStyle.height}
-              viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
-              preserveAspectRatio="none"
-              style={StyleSheet.absoluteFill}
-            >
-              <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill="#7ec850" />
-              <Path d={coastAreaPathForSvg()} fill="#38bdf8" opacity={0.96} />
-              <Path
-                d={coastPathForSvg()}
-                stroke="#bae6fd"
-                strokeWidth={96}
-                fill="none"
-                strokeLinecap="round"
-                opacity={0.75}
-              />
-
-              {MOUNTAIN_PEAKS.map((peak, index) => (
-                <Circle
-                  key={`home_mountain_${index}`}
-                  cx={peak.x}
-                  cy={peak.y}
-                  r={peak.radius}
-                  fill="rgba(100,116,139,0.22)"
-                />
-              ))}
-              {MOUNTAIN_PEAKS.map((peak, index) => (
-                <Circle
-                  key={`home_mountain_inner_${index}`}
-                  cx={peak.x}
-                  cy={peak.y}
-                  r={peak.radius * 0.62}
-                  fill="rgba(71,85,105,0.18)"
-                />
-              ))}
-
-              <Path
-                d={riverPathForSvg()}
-                stroke="#a5f3fc"
-                strokeWidth={RIVER_WIDTH + 80}
-                fill="none"
-                strokeLinecap="round"
-                opacity={0.95}
-              />
-              <Path
-                d={riverPathForSvg()}
-                stroke="#38bdf8"
-                strokeWidth={RIVER_WIDTH}
-                fill="none"
-                strokeLinecap="round"
-                opacity={0.92}
-              />
-
-              {ROAD_ROUTES.map((route) => (
+          {!isNeo ? (
+            <View style={[styles.sceneWorldLayer, worldLayerStyle]}>
+              <Svg
+                width={worldLayerStyle.width}
+                height={worldLayerStyle.height}
+                viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
+                preserveAspectRatio="none"
+                style={StyleSheet.absoluteFill}
+              >
+                <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill="#7ec850" />
+                <Path d={coastAreaPathForSvg()} fill="#38bdf8" opacity={0.96} />
                 <Path
-                  key={`home_road_${route.id}`}
-                  d={route.svgPath}
-                  stroke="#555"
-                  strokeWidth={58}
-                  strokeLinecap="round"
+                  d={coastPathForSvg()}
+                  stroke="#bae6fd"
+                  strokeWidth={96}
                   fill="none"
+                  strokeLinecap="round"
+                  opacity={0.75}
                 />
-              ))}
 
-              {ROAD_ROUTES.map((route) => (
+                {MOUNTAIN_PEAKS.map((peak, index) => (
+                  <Circle
+                    key={`home_mountain_${index}`}
+                    cx={peak.x}
+                    cy={peak.y}
+                    r={peak.radius}
+                    fill="rgba(100,116,139,0.22)"
+                  />
+                ))}
+                {MOUNTAIN_PEAKS.map((peak, index) => (
+                  <Circle
+                    key={`home_mountain_inner_${index}`}
+                    cx={peak.x}
+                    cy={peak.y}
+                    r={peak.radius * 0.62}
+                    fill="rgba(71,85,105,0.18)"
+                  />
+                ))}
+
                 <Path
-                  key={`home_stripe_${route.id}`}
-                  d={route.svgPath}
-                  stroke="#fff"
-                  strokeWidth={2.3}
-                  strokeDasharray="17 18"
-                  strokeLinecap="round"
+                  d={riverPathForSvg()}
+                  stroke="#a5f3fc"
+                  strokeWidth={RIVER_WIDTH + 80}
                   fill="none"
-                  opacity={0.62}
+                  strokeLinecap="round"
+                  opacity={0.95}
                 />
-              ))}
-            </Svg>
+                <Path
+                  d={riverPathForSvg()}
+                  stroke="#38bdf8"
+                  strokeWidth={RIVER_WIDTH}
+                  fill="none"
+                  strokeLinecap="round"
+                  opacity={0.92}
+                />
 
-            {sceneCars.map((car) => {
-              const route = routeLookup.get(car.routeId);
-              if (!route) return null;
+                {ROAD_ROUTES.map((route) => (
+                  <Path
+                    key={`home_road_${route.id}`}
+                    d={route.svgPath}
+                    stroke="#555"
+                    strokeWidth={58}
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                ))}
 
-              const elapsed = (clockMs / 1000) * car.speed + car.delay;
-              const baseProgress = ((elapsed % 1) + 1) % 1;
-              const t = car.direction === 1 ? baseProgress : 1 - baseProgress;
-              const point = routePoint(route, t);
-              const angle = car.direction === 1 ? point.angle : point.angle + 180;
+                {ROAD_ROUTES.map((route) => (
+                  <Path
+                    key={`home_stripe_${route.id}`}
+                    d={route.svgPath}
+                    stroke="#fff"
+                    strokeWidth={2.3}
+                    strokeDasharray="17 18"
+                    strokeLinecap="round"
+                    fill="none"
+                    opacity={0.62}
+                  />
+                ))}
+              </Svg>
 
-              return (
+              {sceneCars.map((car) => {
+                const route = routeLookup.get(car.routeId);
+                if (!route) return null;
+
+                const elapsed = (clockMs / 1000) * car.speed + car.delay;
+                const baseProgress = ((elapsed % 1) + 1) % 1;
+                const t = car.direction === 1 ? baseProgress : 1 - baseProgress;
+                const point = routePoint(route, t);
+                const angle = car.direction === 1 ? point.angle : point.angle + 180;
+
+                return (
+                  <View
+                    key={car.id}
+                    pointerEvents="none"
+                    style={[
+                      styles.carWrap,
+                      {
+                        left: point.x * SCENE_SCALE,
+                        top: point.y * SCENE_SCALE,
+                        transform: [
+                          { translateX: -5 },
+                          { translateY: -4 },
+                          { rotate: `${angle}deg` },
+                          { scale: 0.92 },
+                        ],
+                      },
+                    ]}
+                  >
+                    <View style={[styles.carBody, { backgroundColor: car.color }]}>
+                      <View style={styles.carGlass} />
+                      <View style={styles.wheelLeft} />
+                      <View style={styles.wheelRight} />
+                    </View>
+                  </View>
+                );
+              })}
+
+              {nearbyTrees.map((tree, index) => (
                 <View
-                  key={car.id}
-                  pointerEvents="none"
+                  key={`home_tree_${index}_${Math.round(tree.x)}_${Math.round(tree.y)}`}
                   style={[
-                    styles.carWrap,
+                    styles.treeWrap,
                     {
-                      left: point.x * SCENE_SCALE,
-                      top: point.y * SCENE_SCALE,
-                      transform: [
-                        { translateX: -5 },
-                        { translateY: -4 },
-                        { rotate: `${angle}deg` },
-                        { scale: 0.92 },
-                      ],
+                      left: tree.x * SCENE_SCALE,
+                      top: tree.y * SCENE_SCALE,
+                      transform: [{ scale: 0.7 + tree.scale * 0.16 }],
                     },
                   ]}
+                  pointerEvents="none"
                 >
-                  <View style={[styles.carBody, { backgroundColor: car.color }]}>
-                    <View style={styles.carGlass} />
-                    <View style={styles.wheelLeft} />
-                    <View style={styles.wheelRight} />
-                  </View>
+                  <View style={styles.treeLeaf} />
+                  <View style={styles.treeTrunk} />
+                  <View style={styles.treeShadow} />
                 </View>
-              );
-            })}
+              ))}
 
-            {nearbyTrees.map((tree, index) => (
-              <View
-                key={`home_tree_${index}_${Math.round(tree.x)}_${Math.round(tree.y)}`}
-                style={[
-                  styles.treeWrap,
-                  {
-                    left: tree.x * SCENE_SCALE,
-                    top: tree.y * SCENE_SCALE,
-                    transform: [{ scale: 0.7 + tree.scale * 0.16 }],
-                  },
-                ]}
-                pointerEvents="none"
-              >
-                <View style={styles.treeLeaf} />
-                <View style={styles.treeTrunk} />
-                <View style={styles.treeShadow} />
-              </View>
-            ))}
+              {nearbyLots.map((lot) => (
+                <Pressable
+                  key={lot.id}
+                  style={[
+                    styles.sceneLotWrap,
+                    {
+                      left: lot.x * SCENE_SCALE,
+                      top: lot.y * SCENE_SCALE,
+                    },
+                  ]}
+                  onPress={() => router.push("/town-map")}
+                >
+                  <TownHouseNode type={lot.visualType} scale={0.92} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
-            {nearbyLots.map((lot) => (
-              <Pressable
-                key={lot.id}
-                style={[
-                  styles.sceneLotWrap,
-                  {
-                    left: lot.x * SCENE_SCALE,
-                    top: lot.y * SCENE_SCALE,
-                  },
-                ]}
-                onPress={() => router.push("/town-map")}
-              >
-                <TownHouseNode type={lot.visualType} scale={0.92} />
-              </Pressable>
-            ))}
-          </View>
-
-          <View style={styles.topBar}>
-            <Pressable style={styles.avatarButton} onPress={() => router.push("/config")}>
+          <View style={[styles.topBar, isNeo && styles.topBarNeo]}>
+            <Pressable
+              style={[styles.avatarButton, isNeo && styles.avatarButtonNeo]}
+              onPress={() => router.push("/config")}
+            >
               <Image source={{ uri: botConfig.avatar }} style={styles.avatar} />
               <View
                 style={[
@@ -475,21 +589,37 @@ export default function HomeScreen() {
               ]}
               onPress={() => router.push("/town-map")}
             >
-              <Ionicons name="earth" size={16} color="#16a34a" />
-              <Text style={[styles.worldButtonText, { color: theme.topPillText }]}>
-                {isNeo ? "WORLD MAP" : "Bot World"}
+              <Ionicons name="earth" size={16} color={isNeo ? "#f8fafc" : "#16a34a"} />
+              <Text
+                style={[
+                  styles.worldButtonText,
+                  isNeo && styles.worldButtonTextNeo,
+                  { color: theme.topPillText },
+                ]}
+              >
+                {isNeo
+                  ? tr("世界地图", "WORLD MAP")
+                  : tr("世界地图", "World Map")}
               </Text>
             </Pressable>
 
             <View style={styles.headerRightGroup}>
               <Pressable
-                style={[styles.iconCircle, { backgroundColor: theme.iconCircleBg }]}
+                style={[
+                  styles.iconCircle,
+                  isNeo && styles.iconCircleNeo,
+                  { backgroundColor: theme.iconCircleBg },
+                ]}
                 onPress={() => router.push("/town-map")}
               >
                 <Ionicons name="location-outline" size={18} color={theme.iconCircleText} />
               </Pressable>
               <Pressable
-                style={[styles.iconCircle, { backgroundColor: theme.iconCircleBg }]}
+                style={[
+                  styles.iconCircle,
+                  isNeo && styles.iconCircleNeo,
+                  { backgroundColor: theme.iconCircleBg },
+                ]}
                 onPress={() => setIsAddBotModalVisible(true)}
               >
                 <Ionicons name="people-outline" size={18} color={theme.iconCircleText} />
@@ -497,82 +627,95 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <View
-            style={[
-              styles.previewMeta,
-              {
-                backgroundColor: theme.previewCardBg,
-                borderColor: theme.previewCardBorder,
-              },
-            ]}
-          >
-            <Text style={[styles.previewMetaText, { color: theme.previewText }]}>
-              {isNeo ? "No-Engine World Mode" : "Home Neighborhood Sync"}
-            </Text>
-            <Text style={[styles.previewMetaSub, { color: theme.previewSubtext }]}>
-              {`${Math.round(worldRect.minX)}-${Math.round(worldRect.maxX)} · ${Math.round(worldRect.minY)}-${Math.round(worldRect.maxY)}`}
-            </Text>
-          </View>
+          {!isNeo ? (
+            <>
+              <View
+                style={[
+                  styles.previewMeta,
+                  {
+                    backgroundColor: theme.previewCardBg,
+                    borderColor: theme.previewCardBorder,
+                  },
+                ]}
+              >
+                <Text style={[styles.previewMetaText, { color: theme.previewText }]}>
+                  {tr("家周边同步", "Home Neighborhood Sync")}
+                </Text>
+                <Text style={[styles.previewMetaSub, { color: theme.previewSubtext }]}>
+                  {`${Math.round(worldRect.minX)}-${Math.round(worldRect.maxX)} · ${Math.round(worldRect.minY)}-${Math.round(worldRect.maxY)}`}
+                </Text>
+              </View>
 
-          <View
-            style={[
-              styles.centerHomeWrap,
-              {
-                left: clamp(homeAnchor.x - 56, 20, Math.max(20, sceneSize.width - 116)),
-                top: clamp(homeAnchor.y - 58, 88, Math.max(88, sceneSize.height * 0.5 - 130)),
-              },
-            ]}
-          >
-            <Pressable style={styles.homePill} onPress={() => router.push("/living-room")}>
-              <Ionicons name="home-outline" size={12} color="#3b82f6" />
-              <Text style={styles.homePillText}>My Home</Text>
-            </Pressable>
-            <TownHouseNode type={mapMyHouseTypeToVisual(myHouseType)} scale={1.35} />
-          </View>
+              <View
+                style={[
+                  styles.centerHomeWrap,
+                  {
+                    left: clamp(homeAnchor.x - 56, 20, Math.max(20, sceneSize.width - 116)),
+                    top: clamp(homeAnchor.y - 58, 88, Math.max(88, sceneSize.height * 0.5 - 130)),
+                  },
+                ]}
+              >
+                <Pressable style={styles.homePill} onPress={() => router.push("/living-room")}>
+                  <Ionicons name="home-outline" size={12} color="#3b82f6" />
+                  <Text style={styles.homePillText}>{tr("我的家", "My Home")}</Text>
+                </Pressable>
+                <TownHouseNode type={mapMyHouseTypeToVisual(myHouseType)} scale={1.35} />
+              </View>
 
-          <Pressable
-            style={[
-              styles.avatarMarker,
-              {
-                left: clamp(homeAnchor.x - 22, 18, Math.max(18, sceneSize.width - 58)),
-                top: clamp(homeAnchor.y + 22, 88, Math.max(88, sceneSize.height * 0.5 - 58)),
-              },
-            ]}
-            onPress={() => router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })}
-          >
-            <Image source={{ uri: botConfig.avatar }} style={styles.markerAvatar} />
-            <View style={styles.onlineDotMarker} />
-          </Pressable>
+              <Pressable
+                style={[
+                  styles.avatarMarker,
+                  {
+                    left: clamp(homeAnchor.x - 22, 18, Math.max(18, sceneSize.width - 58)),
+                    top: clamp(homeAnchor.y + 22, 88, Math.max(88, sceneSize.height * 0.5 - 58)),
+                  },
+                ]}
+                onPress={() => router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })}
+              >
+                <Image source={{ uri: botConfig.avatar }} style={styles.markerAvatar} />
+                <View style={styles.onlineDotMarker} />
+              </Pressable>
 
-          <TaskWidget tasks={tasks} containerStyle={taskWidgetOverlayStyle} theme={uiTheme} />
-
-          {isNeo ? (
-            <View style={styles.neoDockWrap} pointerEvents="box-none">
-              <MiniAppDock
-                accentColor={theme.accent}
+              <TaskWidget
                 tasks={tasks}
-                onOpenChat={() =>
-                  router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })
-                }
+                containerStyle={taskWidgetOverlayStyle}
+                theme={uiTheme}
+                language={language}
               />
-            </View>
+            </>
           ) : null}
 
-          {isNeo ? (
+          <View
+            style={[
+              styles.neoDockWrap,
+              !isNeo ? styles.classicDockWrap : { top: neoDockTop },
+              isNeo && isInlineAskVisible ? styles.neoDockHidden : null,
+            ]}
+            pointerEvents={isNeo && isInlineAskVisible ? "none" : "box-none"}
+          >
+            <MiniAppDock
+              accentColor={theme.accent}
+              theme={uiTheme}
+              language={language}
+              tasks={tasks}
+              onTaskPanelVisibilityChange={setIsDockTaskPanelVisible}
+              onOpenChat={() =>
+                router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })
+              }
+            />
+          </View>
+
+          {isNeo && !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen ? (
             <Pressable
               style={[
                 styles.neoAskBar,
                 {
+                  bottom: neoAskBottom,
                   backgroundColor: theme.askBarBg,
                   borderColor: theme.askBarBorder,
                 },
               ]}
-              onPress={() =>
-                router.push({
-                  pathname: "/chat/[id]",
-                  params: { id: "mybot" },
-                })
-              }
+              onPress={() => setIsInlineAskVisible(true)}
             >
               <View style={styles.neoAskPlus}>
                 <Ionicons name="add" size={20} color="white" />
@@ -586,7 +729,7 @@ export default function HomeScreen() {
                 ]}
               >
                 <Text style={[styles.neoAskText, { color: theme.askBarInputText }]}>
-                  Ask anything
+                  {tr("随便问我", "Ask anything")}
                 </Text>
                 <View style={styles.neoAskIcons}>
                   <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.9)" />
@@ -595,12 +738,117 @@ export default function HomeScreen() {
               </View>
             </Pressable>
           ) : null}
+
+          {isNeo && isInlineAskVisible ? (
+            <View
+              style={[
+                styles.inlineAskPanel,
+                {
+                  bottom: neoAskBottom,
+                },
+              ]}
+            >
+              <View style={styles.inlineAskHeader}>
+                <Pressable
+                  style={styles.inlineAskHeaderIcon}
+                  onPress={() => setIsInlineAskVisible(false)}
+                >
+                  <Ionicons name="chevron-back" size={20} color="#60a5fa" />
+                </Pressable>
+                <Image source={{ uri: botConfig.avatar }} style={styles.inlineAskHeaderAvatar} />
+                <Text style={styles.inlineAskHeaderTitle}>MyBot</Text>
+                <View style={styles.inlineAskHeaderSpacer} />
+                <Pressable style={styles.inlineAskHeaderIcon}>
+                  <Ionicons
+                    name="ellipsis-horizontal"
+                    size={18}
+                    color="rgba(248,250,252,0.88)"
+                  />
+                </Pressable>
+              </View>
+
+              <Text style={styles.inlineAskTimeText}>{tr("刚刚", "Just now")}</Text>
+
+              <ScrollView
+                ref={inlineAskScrollRef}
+                style={styles.inlineAskMessages}
+                contentContainerStyle={styles.inlineAskMessagesContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {inlineAskMessages.map((item) => (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.inlineAskMessageRow,
+                      item.isMe ? styles.inlineAskMessageRowMe : null,
+                    ]}
+                  >
+                    {item.isMe ? null : (
+                      <Image
+                        source={{ uri: botConfig.avatar }}
+                        style={styles.inlineAskMessageAvatar}
+                      />
+                    )}
+                    <View
+                      style={[
+                        styles.inlineAskBubble,
+                        item.isMe ? styles.inlineAskBubbleMe : styles.inlineAskBubbleBot,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.inlineAskBubbleText,
+                          item.isMe ? styles.inlineAskBubbleTextMe : null,
+                        ]}
+                      >
+                        {item.text}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+
+              <View style={styles.inlineAskComposer}>
+                <Pressable style={styles.inlineAskComposerIcon}>
+                  <Ionicons name="add" size={22} color="rgba(203,213,225,0.95)" />
+                </Pressable>
+
+                <View style={styles.inlineAskInputWrap}>
+                  <TextInput
+                    style={styles.inlineAskInput}
+                    placeholder={tr("iMessage", "iMessage")}
+                    placeholderTextColor="rgba(148,163,184,0.78)"
+                    value={inlineAskInput}
+                    onChangeText={setInlineAskInput}
+                    returnKeyType="send"
+                    onSubmitEditing={handleInlineAskSend}
+                  />
+                  <Ionicons name="happy-outline" size={20} color="rgba(148,163,184,0.88)" />
+                </View>
+
+                <Pressable
+                  style={[
+                    styles.inlineAskComposerIcon,
+                    styles.inlineAskComposerPrimary,
+                  ]}
+                  onPress={handleInlineAskSend}
+                >
+                  <Ionicons
+                    name={inlineAskInput.trim() ? "arrow-up" : "mic-outline"}
+                    size={20}
+                    color="rgba(248,250,252,0.95)"
+                  />
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
         </View>
       </View>
 
       <Animated.View
         style={[
           styles.chatSheet,
+          isNeo && styles.chatSheetNeo,
           {
             backgroundColor: theme.chatSheetBg,
             borderTopColor: theme.chatSheetBorder,
@@ -614,20 +862,37 @@ export default function HomeScreen() {
         <Pressable
           style={[
             styles.chatSheetHeader,
+            isNeo && styles.chatSheetHeaderNeo,
             { borderBottomColor: isNeo ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" },
           ]}
-          onPress={() => setIsChatCollapsed((prev) => !prev)}
+          onPress={() => {
+            if (isNeo) {
+              setChatSheetMode((prev) => (prev === "fullscreen" ? "normal" : "fullscreen"));
+              return;
+            }
+            setChatSheetMode((prev) => (prev === "collapsed" ? "normal" : "collapsed"));
+          }}
           {...chatSheetPanResponder.panHandlers}
         >
-          <View style={[styles.chatHandle, { backgroundColor: theme.chatHandle }]} />
-          <Text style={[styles.chatHeaderTitle, { color: theme.sheetTitle }]}>
-            {isChatCollapsed ? `Chats (${chatThreads.length})` : "Chats"}
-          </Text>
-          <Ionicons
-            name={isChatCollapsed ? "chevron-up" : "chevron-down"}
-            size={18}
-            color={theme.chatHeaderText}
-          />
+          {isNeo ? (
+            <View style={styles.chatSheetHeaderNeoInner}>
+              <View style={[styles.chatHandle, styles.chatHandleNeo, { backgroundColor: theme.chatHandle }]} />
+            </View>
+          ) : (
+            <>
+              <View style={[styles.chatHandle, { backgroundColor: theme.chatHandle }]} />
+              <Text style={[styles.chatHeaderTitle, { color: theme.sheetTitle }]}>
+                {isChatCollapsed
+                  ? `${tr("聊天", "Chats")} (${chatThreads.length})`
+                  : tr("聊天", "Chats")}
+              </Text>
+              <Ionicons
+                name={isChatCollapsed ? "chevron-up" : "chevron-down"}
+                size={18}
+                color={theme.chatHeaderText}
+              />
+            </>
+          )}
         </Pressable>
 
         <FlatList
@@ -637,17 +902,20 @@ export default function HomeScreen() {
             <ChatListItem
               chat={item}
               theme={uiTheme}
+              language={language}
               onPress={() => openThread(item)}
             />
           )}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.chatListContent}
+          contentContainerStyle={[styles.chatListContent, isNeo && styles.chatListContentNeo]}
         />
       </Animated.View>
 
       <AddBotFriendModal
         visible={isAddBotModalVisible}
         accentColor={theme.accent}
+        theme={uiTheme}
+        language={language}
         onClose={() => setIsAddBotModalVisible(false)}
         onAdd={handleAddBotFriend}
       />
@@ -674,27 +942,55 @@ const styles = StyleSheet.create({
   },
   neoDimmer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(2,6,23,0.42)",
+    backgroundColor: "rgba(3,4,12,0.46)",
+    zIndex: 0,
+  },
+  neoOverlayTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "28%",
+    backgroundColor: "rgba(8,10,22,0.45)",
+    zIndex: 0,
+  },
+  neoOverlayBottom: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: "34%",
+    backgroundColor: "rgba(8,8,20,0.32)",
     zIndex: 0,
   },
   neoGlowPurple: {
     position: "absolute",
-    right: -70,
-    top: "46%",
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: "rgba(190,24,93,0.28)",
+    right: -96,
+    top: "66%",
+    width: 320,
+    height: 220,
+    borderRadius: 140,
+    backgroundColor: "rgba(220,38,127,0.24)",
     zIndex: 0,
   },
   neoGlowBlue: {
     position: "absolute",
-    left: -80,
-    top: "10%",
-    width: 280,
-    height: 220,
-    borderRadius: 120,
-    backgroundColor: "rgba(59,130,246,0.22)",
+    left: -90,
+    top: "14%",
+    width: 330,
+    height: 260,
+    borderRadius: 160,
+    backgroundColor: "rgba(37,99,235,0.22)",
+    zIndex: 0,
+  },
+  neoGlowMagenta: {
+    position: "absolute",
+    right: 28,
+    top: "48%",
+    width: 230,
+    height: 190,
+    borderRadius: 110,
+    backgroundColor: "rgba(190,24,93,0.18)",
     zIndex: 0,
   },
   neoGrid: {
@@ -715,6 +1011,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     zIndex: 30,
   },
+  topBarNeo: {
+    top: 6,
+    left: 18,
+    right: 18,
+  },
   avatarButton: {
     width: 44,
     height: 44,
@@ -722,6 +1023,13 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 2,
     borderColor: "white",
+  },
+  avatarButtonNeo: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(15,23,42,0.42)",
   },
   avatar: {
     width: "100%",
@@ -755,6 +1063,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  worldButtonTextNeo: {
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+  },
   headerRightGroup: {
     flexDirection: "row",
     alignItems: "center",
@@ -767,6 +1080,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(17,24,39,0.22)",
+  },
+  iconCircleNeo: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
   previewMeta: {
     position: "absolute",
@@ -908,53 +1228,197 @@ const styles = StyleSheet.create({
   },
   neoDockWrap: {
     position: "absolute",
-    top: "16%",
     left: 14,
     right: 14,
     zIndex: 34,
   },
+  neoDockHidden: {
+    opacity: 0,
+  },
+  classicDockWrap: {
+    top: "20%",
+    zIndex: 33,
+  },
   neoAskBar: {
     position: "absolute",
-    top: "42%",
     left: 16,
     right: 16,
-    minHeight: 72,
-    borderRadius: 36,
+    minHeight: 66,
+    borderRadius: 34,
     borderWidth: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    zIndex: 35,
+    zIndex: 36,
   },
   neoAskPlus: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
   neoAskInput: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 23,
+    minHeight: 48,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.12)",
     paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   neoAskText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "500",
-    letterSpacing: 0.2,
+    letterSpacing: 0.12,
   },
   neoAskIcons: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  inlineAskPanel: {
+    position: "absolute",
+    top: 74,
+    left: 14,
+    right: 14,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(8,10,18,0.95)",
+    overflow: "hidden",
+    zIndex: 38,
+  },
+  inlineAskHeader: {
+    minHeight: 56,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  inlineAskHeaderIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  inlineAskHeaderAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#334155",
+  },
+  inlineAskHeaderTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#f8fafc",
+  },
+  inlineAskHeaderSpacer: {
+    flex: 1,
+  },
+  inlineAskTimeText: {
+    marginTop: 12,
+    textAlign: "center",
+    fontSize: 11,
+    color: "rgba(148,163,184,0.72)",
+  },
+  inlineAskMessages: {
+    maxHeight: 280,
+  },
+  inlineAskMessagesContent: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 10,
+    gap: 10,
+  },
+  inlineAskMessageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    maxWidth: "92%",
+  },
+  inlineAskMessageRowMe: {
+    alignSelf: "flex-end",
+    flexDirection: "row-reverse",
+  },
+  inlineAskMessageAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#334155",
+  },
+  inlineAskBubble: {
+    maxWidth: "86%",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  inlineAskBubbleBot: {
+    backgroundColor: "rgba(51,65,85,0.64)",
+  },
+  inlineAskBubbleMe: {
+    backgroundColor: "rgba(34,197,94,0.95)",
+  },
+  inlineAskBubbleText: {
+    fontSize: 14,
+    color: "rgba(248,250,252,0.92)",
+    lineHeight: 20,
+  },
+  inlineAskBubbleTextMe: {
+    color: "#052e16",
+    fontWeight: "600",
+  },
+  inlineAskComposer: {
+    minHeight: 70,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  inlineAskComposerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(30,41,59,0.82)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  inlineAskComposerPrimary: {
+    backgroundColor: "rgba(30,64,175,0.5)",
+  },
+  inlineAskInputWrap: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    paddingLeft: 14,
+    paddingRight: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  inlineAskInput: {
+    flex: 1,
+    color: "rgba(248,250,252,0.92)",
+    fontSize: 16,
+    paddingVertical: 0,
   },
   chatSheet: {
     position: "absolute",
@@ -970,6 +1434,19 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.6)",
   },
+  chatSheetNeo: {
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderLeftColor: "rgba(255,255,255,0.06)",
+    borderRightColor: "rgba(255,255,255,0.06)",
+    shadowColor: "#000",
+    shadowOpacity: 0.36,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+  },
   chatSheetHeader: {
     position: "relative",
     zIndex: 2,
@@ -981,12 +1458,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(0,0,0,0.06)",
   },
+  chatSheetHeaderNeo: {
+    height: 34,
+    paddingHorizontal: 0,
+    borderBottomWidth: 0,
+    justifyContent: "center",
+  },
+  chatSheetHeaderNeoInner: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   chatHandle: {
     width: 40,
     height: 5,
     borderRadius: 99,
     alignSelf: "center",
     backgroundColor: "#9ca3af",
+  },
+  chatHandleNeo: {
+    width: 56,
+    height: 4.5,
+    borderRadius: 999,
   },
   chatHeaderTitle: {
     fontSize: 13,
@@ -995,6 +1488,10 @@ const styles = StyleSheet.create({
   },
   chatListContent: {
     paddingBottom: 80,
+  },
+  chatListContentNeo: {
+    paddingTop: 2,
+    paddingBottom: 90,
   },
   fab: {
     position: "absolute",

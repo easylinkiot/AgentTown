@@ -2,19 +2,23 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
-import { TaskItem, UiTheme } from "@/src/types";
+import { tx } from "@/src/i18n/translate";
+import { AppLanguage, TaskItem, UiTheme } from "@/src/types";
 
 export function TaskWidget({
   tasks,
   containerStyle,
   theme = "classic",
+  language = "zh",
 }: {
   tasks: TaskItem[];
   containerStyle?: StyleProp<ViewStyle>;
   theme?: UiTheme;
+  language?: AppLanguage;
 }) {
   const [expanded, setExpanded] = useState(true);
   const isNeo = theme === "neo";
+  const tr = (zh: string, en: string) => tx(language, zh, en);
 
   return (
     <View style={[styles.wrapper, containerStyle]}>
@@ -35,7 +39,9 @@ export function TaskWidget({
               size={14}
               color={isNeo ? "#22c55e" : "#166534"}
             />
-            <Text style={[styles.headerTitle, isNeo && styles.headerTitleNeo]}>My Tasks</Text>
+            <Text style={[styles.headerTitle, isNeo && styles.headerTitleNeo]}>
+              {tr("我的任务", "My Tasks")}
+            </Text>
             {!expanded && tasks.length > 0 ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{tasks.length}</Text>
@@ -52,7 +58,9 @@ export function TaskWidget({
         {expanded ? (
           <View style={styles.list}>
             {tasks.length === 0 ? (
-              <Text style={[styles.emptyText, isNeo && styles.emptyTextNeo]}>No tasks</Text>
+              <Text style={[styles.emptyText, isNeo && styles.emptyTextNeo]}>
+                {tr("暂无任务", "No tasks")}
+              </Text>
             ) : (
               tasks.slice(0, 5).map((task) => (
                 <View key={task.id ?? task.title} style={[styles.item, isNeo && styles.itemNeo]}>
@@ -63,7 +71,9 @@ export function TaskWidget({
                     <Text style={[styles.metaText, isNeo && styles.metaTextNeo]}>{task.assignee}</Text>
                     <View style={[styles.priorityPill, isNeo && styles.priorityPillNeo]}>
                       <Text style={[styles.priorityText, isNeo && styles.priorityTextNeo]}>
-                        {task.priority}
+                        {language === "zh"
+                          ? { High: "高", Medium: "中", Low: "低" }[task.priority]
+                          : task.priority}
                       </Text>
                     </View>
                   </View>

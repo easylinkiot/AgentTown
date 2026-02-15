@@ -1,15 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { ChatThread, UiTheme } from "@/src/types";
+import { AppLanguage, ChatThread, UiTheme } from "@/src/types";
 
 interface ChatListItemProps {
   chat: ChatThread;
   onPress: () => void;
   theme?: UiTheme;
+  language?: AppLanguage;
 }
 
-export function ChatListItem({ chat, onPress, theme = "classic" }: ChatListItemProps) {
+export function ChatListItem({
+  chat,
+  onPress,
+  theme = "classic",
+  language = "zh",
+}: ChatListItemProps) {
   const isNeo = theme === "neo";
 
   return (
@@ -52,7 +58,11 @@ export function ChatListItem({ chat, onPress, theme = "classic" }: ChatListItemP
           ]}
           numberOfLines={1}
         >
-          {chat.highlight && chat.unreadCount ? `[${chat.unreadCount} notifications] ` : ""}
+          {chat.highlight && chat.unreadCount
+            ? language === "zh"
+              ? `[${chat.unreadCount} 条通知] `
+              : `[${chat.unreadCount} notifications] `
+            : ""}
           {chat.message}
         </Text>
       </View>
@@ -71,8 +81,8 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(0,0,0,0.05)",
   },
   containerNeo: {
-    borderBottomColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(255,255,255,0.01)",
+    borderBottomColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "transparent",
   },
   avatarWrap: {
     position: "relative",
@@ -85,7 +95,7 @@ const styles = StyleSheet.create({
   },
   avatarNeo: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(255,255,255,0.18)",
   },
   unreadBadge: {
     position: "absolute",
@@ -147,21 +157,21 @@ const styles = StyleSheet.create({
     color: "#6b7280",
   },
   timeNeo: {
-    color: "rgba(148,163,184,0.88)",
+    color: "rgba(148,163,184,0.78)",
   },
   message: {
     fontSize: 12,
     color: "#4b5563",
   },
   messageNeo: {
-    color: "rgba(203,213,225,0.8)",
+    color: "rgba(203,213,225,0.74)",
   },
   highlight: {
     color: "#111827",
     fontWeight: "600",
   },
   highlightNeo: {
-    color: "#22c55e",
+    color: "#60a5fa",
     fontWeight: "700",
   },
 });

@@ -18,6 +18,8 @@ import {
   View,
 } from "react-native";
 
+import { tx } from "@/src/i18n/translate";
+import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -42,6 +44,8 @@ async function fetchGoogleProfile(accessToken: string) {
 
 export default function SignInScreen() {
   const router = useRouter();
+  const { language, updateLanguage } = useAgentTown();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   const {
     isHydrated,
     user,
@@ -78,9 +82,18 @@ export default function SignInScreen() {
 
   const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     scopes: ["openid", "profile", "email"],
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    webClientId:
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+      process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
+      "missing-google-web-client-id",
+    iosClientId:
+      process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+      "missing-google-ios-client-id",
+    androidClientId:
+      process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ||
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+      "missing-google-android-client-id",
     redirectUri,
   });
 
@@ -105,7 +118,10 @@ export default function SignInScreen() {
         : null);
 
     if (!accessToken) {
-      Alert.alert("Google 登录失败", "未获取到访问令牌。");
+      Alert.alert(
+        tx(language, "Google 登录失败", "Google Sign-In Failed"),
+        tx(language, "未获取到访问令牌。", "No access token returned.")
+      );
       setBusyKey(null);
       return;
     }
@@ -121,12 +137,15 @@ export default function SignInScreen() {
         });
         router.replace("/");
       } catch {
-        Alert.alert("Google 登录失败", "无法读取用户信息。");
+        Alert.alert(
+          tx(language, "Google 登录失败", "Google Sign-In Failed"),
+          tx(language, "无法读取用户信息。", "Cannot read user profile.")
+        );
       } finally {
         setBusyKey(null);
       }
     })();
-  }, [googleResponse, router, signInWithGoogle]);
+  }, [googleResponse, language, router, signInWithGoogle]);
 
   const handleGuestSignIn = async () => {
     try {
@@ -141,8 +160,11 @@ export default function SignInScreen() {
   const handleGoogleSignIn = async () => {
     if (googleConfigMissing) {
       Alert.alert(
-        "Google OAuth 未配置",
-        "请先在 .env.local 配置 EXPO_PUBLIC_GOOGLE_*_CLIENT_ID。"
+        tr("Google OAuth 未配置", "Google OAuth Not Configured"),
+        tr(
+          "请先在 .env.local 配置 EXPO_PUBLIC_GOOGLE_*_CLIENT_ID。",
+          "Please set EXPO_PUBLIC_GOOGLE_*_CLIENT_ID in .env.local first."
+        )
       );
       return;
     }
@@ -155,13 +177,16 @@ export default function SignInScreen() {
       }
     } catch {
       setBusyKey(null);
-      Alert.alert("Google 登录失败", "请稍后重试。");
+      Alert.alert(tr("Google 登录失败", "Google Sign-In Failed"), tr("请稍后重试。", "Please try again later."));
     }
   };
 
   const handleAppleSignIn = async () => {
     if (Platform.OS !== "ios" || !isAppleAvailable) {
-      Alert.alert("当前不可用", "Apple 登录仅在 iOS 真机或支持环境可用。");
+      Alert.alert(
+        tr("当前不可用", "Not Available"),
+        tr("Apple 登录仅在 iOS 真机或支持环境可用。", "Apple Sign-In is available only on supported iOS environments.")
+      );
       return;
     }
 
@@ -190,7 +215,7 @@ export default function SignInScreen() {
     } catch (error) {
       const knownCode = (error as { code?: string })?.code;
       if (knownCode !== "ERR_REQUEST_CANCELED") {
-        Alert.alert("Apple 登录失败", "请稍后重试。");
+        Alert.alert(tr("Apple 登录失败", "Apple Sign-In Failed"), tr("请稍后重试。", "Please try again later."));
       }
     } finally {
       setBusyKey(null);
@@ -203,10 +228,13 @@ export default function SignInScreen() {
       const result = await sendPhoneCode(phone);
       setOtpExpiresAt(result.expiresAt);
       setDevOtpHint(result.devCode || null);
-      Alert.alert("验证码已发送", "请输入短信验证码完成登录。");
+      Alert.alert(
+        tr("验证码已发送", "Code Sent"),
+        tr("请输入短信验证码完成登录。", "Enter the SMS code to finish sign-in.")
+      );
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "发送失败";
-      Alert.alert("发送失败", msg);
+      const msg = error instanceof Error ? error.message : tr("发送失败", "Failed to send");
+      Alert.alert(tr("发送失败", "Failed to Send"), msg);
     } finally {
       setBusyKey(null);
     }
@@ -218,16 +246,16 @@ export default function SignInScreen() {
       await verifyPhoneCode(phone, otpCode);
       router.replace("/");
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "验证码校验失败";
-      Alert.alert("登录失败", msg);
+      const msg = error instanceof Error ? error.message : tr("验证码校验失败", "Code verification failed");
+      Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
     } finally {
       setBusyKey(null);
     }
   };
 
   const otpTimeText = otpExpiresAt
-    ? `验证码有效期至 ${new Date(otpExpiresAt).toLocaleTimeString()}`
-    : "输入手机号获取验证码";
+    ? `${tr("验证码有效期至", "Code valid until")} ${new Date(otpExpiresAt).toLocaleTimeString()}`
+    : tr("输入手机号获取验证码", "Enter phone number to request code");
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -236,12 +264,30 @@ export default function SignInScreen() {
           <View style={styles.logoCircle}>
             <Ionicons name="planet" size={24} color="#15803d" />
           </View>
-          <Text style={styles.title}>Welcome to AgentTown</Text>
-          <Text style={styles.subtitle}>Sign in once, sync iOS / Android / Web</Text>
+          <Text style={styles.title}>{tr("欢迎来到 AgentTown", "Welcome to AgentTown")}</Text>
+          <Text style={styles.subtitle}>{tr("一次登录，同步 iOS / Android / Web", "Sign in once, sync iOS / Android / Web")}</Text>
+          <View style={styles.langRow}>
+            <Pressable
+              style={[styles.langBtn, language === "zh" && styles.langBtnActive]}
+              onPress={() => updateLanguage("zh")}
+            >
+              <Text style={[styles.langBtnText, language === "zh" && styles.langBtnTextActive]}>
+                中文
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.langBtn, language === "en" && styles.langBtnActive]}
+              onPress={() => updateLanguage("en")}
+            >
+              <Text style={[styles.langBtnText, language === "en" && styles.langBtnTextActive]}>
+                English
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>OAuth 登录</Text>
+          <Text style={styles.cardTitle}>{tr("OAuth 登录", "OAuth Sign-In")}</Text>
 
           <Pressable
             style={[styles.oauthBtn, styles.googleBtn]}
@@ -253,7 +299,7 @@ export default function SignInScreen() {
             ) : (
               <Ionicons name="logo-google" size={16} color="#111827" />
             )}
-            <Text style={styles.oauthBtnText}>Continue with Google</Text>
+            <Text style={styles.oauthBtnText}>{tr("使用 Google 继续", "Continue with Google")}</Text>
           </Pressable>
 
           <Pressable
@@ -266,17 +312,17 @@ export default function SignInScreen() {
             ) : (
               <Ionicons name="logo-apple" size={16} color="white" />
             )}
-            <Text style={styles.appleBtnText}>Continue with Apple</Text>
+            <Text style={styles.appleBtnText}>{tr("使用 Apple 继续", "Continue with Apple")}</Text>
           </Pressable>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>手机号验证码</Text>
+          <Text style={styles.cardTitle}>{tr("手机号验证码", "Phone Verification")}</Text>
           <TextInput
             style={styles.input}
             value={phone}
             onChangeText={setPhone}
-            placeholder="+86 13800138000"
+            placeholder={language === "zh" ? "+86 13800138000" : "+1 415 555 0123"}
             keyboardType="phone-pad"
             autoCapitalize="none"
           />
@@ -290,14 +336,14 @@ export default function SignInScreen() {
             ) : (
               <Ionicons name="chatbox-ellipses-outline" size={16} color="#1f2937" />
             )}
-            <Text style={styles.secondaryBtnText}>Send Code</Text>
+            <Text style={styles.secondaryBtnText}>{tr("发送验证码", "Send Code")}</Text>
           </Pressable>
 
           <TextInput
             style={styles.input}
             value={otpCode}
             onChangeText={setOtpCode}
-            placeholder="6-digit code"
+            placeholder={tr("6 位验证码", "6-digit code")}
             keyboardType="number-pad"
             autoCapitalize="none"
           />
@@ -307,16 +353,16 @@ export default function SignInScreen() {
             onPress={handleVerifyCode}
           >
             <Ionicons name="log-in-outline" size={16} color="white" />
-            <Text style={styles.primaryBtnText}>Verify and Sign In</Text>
+            <Text style={styles.primaryBtnText}>{tr("验证并登录", "Verify and Sign In")}</Text>
           </Pressable>
           <Text style={styles.helperText}>{otpTimeText}</Text>
           {__DEV__ && devOtpHint ? (
-            <Text style={styles.devHint}>DEV CODE: {devOtpHint}</Text>
+            <Text style={styles.devHint}>{tr("开发验证码", "DEV CODE")}: {devOtpHint}</Text>
           ) : null}
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>快速体验</Text>
+          <Text style={styles.cardTitle}>{tr("快速体验", "Quick Start")}</Text>
           <Pressable
             style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
             disabled={busyKey !== null}
@@ -327,7 +373,7 @@ export default function SignInScreen() {
             ) : (
               <Ionicons name="walk-outline" size={16} color="#1f2937" />
             )}
-            <Text style={styles.secondaryBtnText}>Continue as Guest</Text>
+            <Text style={styles.secondaryBtnText}>{tr("游客模式继续", "Continue as Guest")}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -371,6 +417,33 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 13,
     color: "#475569",
+  },
+  langRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    gap: 8,
+  },
+  langBtn: {
+    paddingHorizontal: 10,
+    minHeight: 30,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f8fafc",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  langBtnActive: {
+    backgroundColor: "#2563eb",
+    borderColor: "#2563eb",
+  },
+  langBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  langBtnTextActive: {
+    color: "white",
   },
   card: {
     borderRadius: 16,

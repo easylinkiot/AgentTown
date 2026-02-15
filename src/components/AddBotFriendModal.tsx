@@ -9,12 +9,15 @@ import {
   View,
 } from "react-native";
 
+import { tx } from "@/src/i18n/translate";
 import { AVATAR_PRESETS } from "@/src/constants/avatars";
-import { ChatThread } from "@/src/types";
+import { AppLanguage, ChatThread, UiTheme } from "@/src/types";
 
 interface AddBotFriendModalProps {
   visible: boolean;
   accentColor: string;
+  theme?: UiTheme;
+  language?: AppLanguage;
   onClose: () => void;
   onAdd: (thread: ChatThread) => void;
 }
@@ -26,9 +29,13 @@ function randomAvatar() {
 export function AddBotFriendModal({
   visible,
   accentColor,
+  theme = "classic",
+  language = "zh",
   onClose,
   onAdd,
 }: AddBotFriendModalProps) {
+  const isNeo = theme === "neo";
+  const tr = (zh: string, en: string) => tx(language, zh, en);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
@@ -41,8 +48,8 @@ export function AddBotFriendModal({
     if (rolePart && companyPart) return `${rolePart} · ${companyPart}`;
     if (rolePart) return rolePart;
     if (companyPart) return companyPart;
-    return "New Bot Friend";
-  }, [company, role]);
+    return language === "zh" ? "新 Bot 好友" : "New Bot Friend";
+  }, [company, language, role]);
 
   const reset = () => {
     setName("");
@@ -84,16 +91,22 @@ export function AddBotFriendModal({
       onRequestClose={handleClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.card}>
-          <View style={styles.header}>
+        <View style={[styles.card, isNeo && styles.cardNeo]}>
+          <View style={[styles.header, isNeo && styles.headerNeo]}>
             <View style={styles.headerTitleWrap}>
               <View style={styles.iconBadge}>
                 <Ionicons name="person-add-outline" size={14} color="white" />
               </View>
-              <Text style={styles.title}>Add Bot Friend</Text>
+              <Text style={[styles.title, isNeo && styles.titleNeo]}>
+                {tr("添加 Bot 好友", "Add Bot Friend")}
+              </Text>
             </View>
             <Pressable style={styles.closeBtn} onPress={handleClose}>
-              <Ionicons name="close" size={18} color="rgba(255,255,255,0.85)" />
+              <Ionicons
+                name="close"
+                size={18}
+                color={isNeo ? "rgba(255,255,255,0.85)" : "#475569"}
+              />
             </Pressable>
           </View>
 
@@ -101,40 +114,50 @@ export function AddBotFriendModal({
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder="Bot name"
-              placeholderTextColor="rgba(203,213,225,0.6)"
-              style={styles.input}
+              placeholder={tr("Bot 名称", "Bot name")}
+              placeholderTextColor={isNeo ? "rgba(203,213,225,0.6)" : "#94a3b8"}
+              style={[styles.input, isNeo && styles.inputNeo]}
             />
             <TextInput
               value={role}
               onChangeText={setRole}
-              placeholder="Role (optional)"
-              placeholderTextColor="rgba(203,213,225,0.6)"
-              style={styles.input}
+              placeholder={tr("角色（可选）", "Role (optional)")}
+              placeholderTextColor={isNeo ? "rgba(203,213,225,0.6)" : "#94a3b8"}
+              style={[styles.input, isNeo && styles.inputNeo]}
             />
             <TextInput
               value={company}
               onChangeText={setCompany}
-              placeholder="Company (optional)"
-              placeholderTextColor="rgba(203,213,225,0.6)"
-              style={styles.input}
+              placeholder={tr("公司（可选）", "Company (optional)")}
+              placeholderTextColor={isNeo ? "rgba(203,213,225,0.6)" : "#94a3b8"}
+              style={[styles.input, isNeo && styles.inputNeo]}
             />
             <TextInput
               value={avatar}
               onChangeText={setAvatar}
-              placeholder="Avatar URL"
-              placeholderTextColor="rgba(203,213,225,0.6)"
-              style={styles.input}
+              placeholder={tr("头像 URL", "Avatar URL")}
+              placeholderTextColor={isNeo ? "rgba(203,213,225,0.6)" : "#94a3b8"}
+              style={[styles.input, isNeo && styles.inputNeo]}
             />
 
             <View style={styles.actionRow}>
-              <Pressable style={styles.secondaryBtn} onPress={() => setAvatar(randomAvatar())}>
-                <Ionicons name="shuffle-outline" size={14} color="#e2e8f0" />
-                <Text style={styles.secondaryBtnText}>Random Avatar</Text>
+              <Pressable
+                style={[styles.secondaryBtn, isNeo && styles.secondaryBtnNeo]}
+                onPress={() => setAvatar(randomAvatar())}
+              >
+                <Ionicons
+                  name="shuffle-outline"
+                  size={14}
+                  color={isNeo ? "#e2e8f0" : "#1f2937"}
+                />
+                <Text style={[styles.secondaryBtnText, isNeo && styles.secondaryBtnTextNeo]}>
+                  {tr("随机头像", "Random Avatar")}
+                </Text>
               </Pressable>
               <Pressable
                 style={[
                   styles.secondaryBtn,
+                  isNeo && styles.secondaryBtnNeo,
                   isGroup && styles.secondaryBtnActive,
                 ]}
                 onPress={() => setIsGroup((v) => !v)}
@@ -142,18 +165,20 @@ export function AddBotFriendModal({
                 <Ionicons
                   name={isGroup ? "people" : "person-outline"}
                   size={14}
-                  color="#e2e8f0"
+                  color={isNeo ? "#e2e8f0" : "#1f2937"}
                 />
-                <Text style={styles.secondaryBtnText}>
-                  {isGroup ? "Group" : "Direct"}
+                <Text style={[styles.secondaryBtnText, isNeo && styles.secondaryBtnTextNeo]}>
+                  {isGroup ? tr("群聊", "Group") : tr("私聊", "Direct")}
                 </Text>
               </Pressable>
             </View>
           </View>
 
           <View style={styles.footer}>
-            <Pressable style={styles.cancelBtn} onPress={handleClose}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+            <Pressable style={[styles.cancelBtn, isNeo && styles.cancelBtnNeo]} onPress={handleClose}>
+              <Text style={[styles.cancelBtnText, isNeo && styles.cancelBtnTextNeo]}>
+                {tr("取消", "Cancel")}
+              </Text>
             </Pressable>
             <Pressable
               style={[styles.addBtn, { backgroundColor: accentColor }]}
@@ -161,7 +186,7 @@ export function AddBotFriendModal({
               disabled={!name.trim()}
             >
               <Ionicons name="add-circle-outline" size={14} color="white" />
-              <Text style={styles.addBtnText}>Add Friend</Text>
+              <Text style={styles.addBtnText}>{tr("添加好友", "Add Friend")}</Text>
             </Pressable>
           </View>
         </View>
@@ -182,19 +207,26 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 420,
     borderRadius: 24,
-    backgroundColor: "rgba(15,23,42,0.96)",
+    backgroundColor: "rgba(255,255,255,0.97)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderColor: "rgba(255,255,255,0.85)",
     overflow: "hidden",
+  },
+  cardNeo: {
+    backgroundColor: "rgba(15,23,42,0.96)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   header: {
     minHeight: 56,
     paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.1)",
+    borderBottomColor: "rgba(226,232,240,0.9)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  headerNeo: {
+    borderBottomColor: "rgba(255,255,255,0.1)",
   },
   headerTitleWrap: {
     flexDirection: "row",
@@ -210,9 +242,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    color: "#f8fafc",
+    color: "#0f172a",
     fontSize: 17,
     fontWeight: "800",
+  },
+  titleNeo: {
+    color: "#f8fafc",
   },
   closeBtn: {
     width: 28,
@@ -229,11 +264,16 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 12,
     borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "white",
+    paddingHorizontal: 12,
+    color: "#1f2937",
+    fontSize: 14,
+  },
+  inputNeo: {
     borderColor: "rgba(255,255,255,0.15)",
     backgroundColor: "rgba(2,6,23,0.45)",
-    paddingHorizontal: 12,
     color: "#e2e8f0",
-    fontSize: 14,
   },
   actionRow: {
     flexDirection: "row",
@@ -244,21 +284,28 @@ const styles = StyleSheet.create({
     minHeight: 36,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f8fafc",
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: 6,
+  },
+  secondaryBtnNeo: {
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   secondaryBtnActive: {
     backgroundColor: "rgba(34,197,94,0.25)",
     borderColor: "rgba(34,197,94,0.45)",
   },
   secondaryBtnText: {
-    color: "#e2e8f0",
+    color: "#1f2937",
     fontSize: 12,
     fontWeight: "700",
+  },
+  secondaryBtnTextNeo: {
+    color: "#e2e8f0",
   },
   footer: {
     flexDirection: "row",
@@ -271,15 +318,22 @@ const styles = StyleSheet.create({
     minHeight: 40,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f8fafc",
     alignItems: "center",
     justifyContent: "center",
   },
+  cancelBtnNeo: {
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
   cancelBtnText: {
-    color: "#e2e8f0",
+    color: "#1f2937",
     fontSize: 13,
     fontWeight: "700",
+  },
+  cancelBtnTextNeo: {
+    color: "#e2e8f0",
   },
   addBtn: {
     flex: 1.4,
@@ -296,4 +350,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-

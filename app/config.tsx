@@ -19,6 +19,7 @@ import {
 
 import { AVATAR_PRESETS } from "@/src/constants/avatars";
 import { MARKET_DATA } from "@/src/constants/marketplace";
+import { tx } from "@/src/i18n/translate";
 import { generateGeminiJson } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -46,10 +47,27 @@ const emptySkillForm: SkillForm = {
   example: "",
 };
 
+const NEO_CATEGORY_COLORS = ["#3b82f6", "#8b5cf6", "#6366f1", "#ec4899"];
+const NEO_CATEGORY_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
+  "code-slash-outline",
+  "albums-outline",
+  "people-outline",
+  "megaphone-outline",
+];
+
 export default function ConfigScreen() {
   const router = useRouter();
-  const { botConfig, updateBotConfig, uiTheme, updateUiTheme } = useAgentTown();
+  const {
+    botConfig,
+    updateBotConfig,
+    uiTheme,
+    updateUiTheme,
+    language,
+    updateLanguage,
+  } = useAgentTown();
   const { user, signOut } = useAuth();
+  const tr = (zh: string, en: string) => tx(language, zh, en);
+  const isNeo = uiTheme === "neo";
 
   const [name, setName] = useState(botConfig.name);
   const [avatar, setAvatar] = useState(botConfig.avatar);
@@ -130,7 +148,7 @@ export default function ConfigScreen() {
       setDocuments((prev) => [...prev, asset.name]);
       setKnowledgeKeywords((prev) => Array.from(new Set([...prev, ...tags])));
     } catch {
-      Alert.alert("Upload failed", "Unable to process this document.");
+      Alert.alert(tr("上传失败", "Upload failed"), tr("无法处理该文档。", "Unable to process this document."));
     } finally {
       setIsUploading(false);
     }
@@ -162,40 +180,331 @@ export default function ConfigScreen() {
     }, 900);
   };
 
+  if (isNeo) {
+    return (
+      <SafeAreaView style={[styles.safeArea, styles.safeAreaNeo]}>
+        <View style={[styles.header, styles.headerNeo]}>
+          <Pressable style={[styles.headerBtn, styles.headerBtnNeo]} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={22} color="#e2e8f0" />
+          </Pressable>
+          <Text style={[styles.headerTitle, styles.headerTitleNeo]}>
+            {tr("Bot Configuration", "Bot Configuration")}
+          </Text>
+          <View style={styles.neoHeaderActions}>
+            <Pressable style={[styles.headerBtn, styles.headerBtnNeo]} onPress={save}>
+              <Ionicons name="document-text-outline" size={18} color="#93c5fd" />
+            </Pressable>
+            <Pressable style={[styles.headerBtn, styles.headerBtnNeo]} onPress={appendCustomSkill}>
+              <Ionicons name="extension-puzzle-outline" size={18} color="#e2e8f0" />
+            </Pressable>
+          </View>
+        </View>
+
+        <ScrollView
+          style={[styles.scroll, styles.scrollNeo]}
+          contentContainerStyle={[styles.scrollContent, styles.scrollContentNeo]}
+        >
+          <View style={styles.neoIdentityCard}>
+            <View style={styles.neoIdentityAvatarWrap}>
+              <Image source={{ uri: avatar }} style={styles.avatar} />
+              <Pressable style={styles.neoAvatarShuffle} onPress={randomizeAvatar}>
+                <Ionicons name="shuffle-outline" size={12} color="#e2e8f0" />
+              </Pressable>
+            </View>
+            <View style={styles.neoIdentityBody}>
+              <Text style={styles.neoIdentityLabel}>{tr("BOT IDENTITY", "BOT IDENTITY")}</Text>
+              <TextInput
+                style={styles.neoNameInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="MyBot"
+                placeholderTextColor="rgba(148,163,184,0.9)"
+              />
+            </View>
+          </View>
+
+          <View style={styles.neoQuickRow}>
+            <Pressable style={styles.neoQuickCard} onPress={uploadKnowledge} disabled={isUploading}>
+              <View style={styles.neoQuickIconWrap}>
+                {isUploading ? (
+                  <ActivityIndicator size="small" color="#c4b5fd" />
+                ) : (
+                  <Ionicons name="cloud-upload-outline" size={20} color="#c4b5fd" />
+                )}
+              </View>
+              <Text style={styles.neoQuickTitle}>{tr("Upload Knowledge", "Upload Knowledge")}</Text>
+              <Text style={styles.neoQuickSub}>
+                {tr(
+                  `${documents.length > 0 ? documents.length : 0} docs`,
+                  `${documents.length > 0 ? documents.length : 0} docs`
+                )}
+              </Text>
+            </Pressable>
+
+            <View style={[styles.neoQuickCard, styles.neoQuickSkillCard]}>
+              <View style={styles.neoQuickIconWrap}>
+                <Ionicons name="construct-outline" size={18} color="#22c55e" />
+              </View>
+              <Text style={styles.neoQuickTag}>{tr("SKILLS", "SKILLS")}</Text>
+              <Text style={styles.neoQuickSkillTitle}>{tr("Define New Skill", "Define New Skill")}</Text>
+              <Text style={styles.neoQuickSub}>{tr("Triggers & Logic", "Triggers & Logic")}</Text>
+              <Pressable style={styles.neoQuickAddBtn} onPress={appendCustomSkill}>
+                <Ionicons name="add" size={20} color="white" />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.neoStoreCard}>
+            <View style={styles.neoStoreHeader}>
+              <View>
+                <Text style={styles.neoStoreTitle}>{tr("Skill Store", "Skill Store")}</Text>
+                <Text style={styles.neoStoreSub}>
+                  {tr("Install open-source agent capabilities", "Install open-source agent capabilities")}
+                </Text>
+              </View>
+              <Pressable style={styles.neoStoreBtn}>
+                <Ionicons name="download-outline" size={14} color="#93c5fd" />
+                <Text style={styles.neoStoreBtnText}>{tr("Store", "Store")}</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.neoStoreList}>
+              {MARKET_DATA.map((category, index) => (
+                <Pressable
+                  key={category.id}
+                  style={styles.neoStoreItem}
+                  onPress={() => setViewingSkill(category.items[0] ?? null)}
+                >
+                  <View
+                    style={[
+                      styles.neoStoreIconWrap,
+                      { backgroundColor: NEO_CATEGORY_COLORS[index % NEO_CATEGORY_COLORS.length] },
+                    ]}
+                  >
+                    <Ionicons
+                      name={NEO_CATEGORY_ICONS[index % NEO_CATEGORY_ICONS.length]}
+                      size={18}
+                      color="white"
+                    />
+                  </View>
+                  <View style={styles.neoStoreItemBody}>
+                    <Text style={styles.neoStoreItemTitle}>{`${index + 1}. ${category.title}`}</Text>
+                    <Text style={styles.neoStoreItemSub} numberOfLines={1}>
+                      {category.subtitle}
+                    </Text>
+                  </View>
+                  <View style={styles.neoStoreChevron}>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(226,232,240,0.75)" />
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={[styles.card, styles.cardNeo]}>
+            <Text style={[styles.cardTitle, styles.cardTitleNeo]}>{tr("Theme", "Theme")}</Text>
+            <View style={styles.themeRow}>
+              <Pressable
+                style={[
+                  styles.themeBtn,
+                  styles.themeBtnNeoBase,
+                ]}
+                onPress={() => updateUiTheme("classic")}
+              >
+                <Ionicons
+                  name="sunny-outline"
+                  size={16}
+                  color="rgba(226,232,240,0.85)"
+                />
+                <Text
+                  style={[
+                    styles.themeBtnText,
+                    styles.themeBtnTextNeo,
+                  ]}
+                >
+                  {tr("Classic", "Classic")}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.themeBtn,
+                  styles.themeBtnNeoBase,
+                  styles.themeBtnActiveNeo,
+                ]}
+                onPress={() => updateUiTheme("neo")}
+              >
+                <Ionicons
+                  name="moon-outline"
+                  size={16}
+                  color="white"
+                />
+                <Text
+                  style={[
+                    styles.themeBtnText,
+                    styles.themeBtnTextNeo,
+                    styles.themeBtnTextActive,
+                  ]}
+                >
+                  {tr("Neo", "Neo")}
+                </Text>
+              </Pressable>
+            </View>
+
+            <Text style={[styles.cardTitle, styles.cardTitleNeo]}>{tr("Language", "Language")}</Text>
+            <View style={styles.themeRow}>
+              <Pressable
+                style={[
+                  styles.themeBtn,
+                  styles.themeBtnNeoBase,
+                  language === "zh" && styles.themeBtnActive,
+                ]}
+                onPress={() => updateLanguage("zh")}
+              >
+                <Ionicons
+                  name="language-outline"
+                  size={16}
+                  color={language === "zh" ? "white" : "rgba(226,232,240,0.85)"}
+                />
+                <Text
+                  style={[
+                    styles.themeBtnText,
+                    styles.themeBtnTextNeo,
+                    language === "zh" && styles.themeBtnTextActive,
+                  ]}
+                >
+                  中文
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.themeBtn,
+                  styles.themeBtnNeoBase,
+                  language === "en" && styles.themeBtnActiveNeo,
+                ]}
+                onPress={() => updateLanguage("en")}
+              >
+                <Ionicons
+                  name="language-outline"
+                  size={16}
+                  color={language === "en" ? "white" : "rgba(226,232,240,0.85)"}
+                />
+                <Text
+                  style={[
+                    styles.themeBtnText,
+                    styles.themeBtnTextNeo,
+                    language === "en" && styles.themeBtnTextActive,
+                  ]}
+                >
+                  English
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {viewingSkill ? (
+            <View style={[styles.card, styles.cardNeo]}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={[styles.cardTitle, styles.cardTitleNeo]}>
+                  {tr("Skill Inspector", "Skill Inspector")} · {viewingSkill.name}
+                </Text>
+                <Pressable onPress={() => setViewingSkill(null)}>
+                  <Ionicons name="close" size={20} color="rgba(226,232,240,0.8)" />
+                </Pressable>
+              </View>
+              <Text style={[styles.marketItemDesc, styles.marketItemDescNeo]}>
+                {viewingSkill.description}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.card, styles.cardNeo]}>
+            <Text style={[styles.cardTitle, styles.cardTitleNeo]}>
+              {tr("MyBot Brain (Editable)", "MyBot Brain (Editable)")}
+            </Text>
+            <TextInput
+              style={[styles.brainEditor, styles.brainEditorNeo]}
+              multiline
+              value={instruction}
+              onChangeText={setInstruction}
+              placeholder={tr("系统指令", "System instructions")}
+              placeholderTextColor="rgba(148,163,184,0.7)"
+            />
+          </View>
+
+          <View style={[styles.card, styles.cardNeo]}>
+            <Text style={[styles.cardTitle, styles.cardTitleNeo]}>
+              {tr("Installed Skills", "Installed Skills")}
+            </Text>
+            {installedSkills.length === 0 ? (
+              <Text style={[styles.emptyText, styles.emptyTextNeo]}>
+                {tr("还没有安装技能。", "No skills installed yet.")}
+              </Text>
+            ) : (
+              installedSkills.map((skill) => (
+                <View key={skill.id} style={[styles.skillInstalledCard, styles.skillInstalledCardNeo]}>
+                  <Text style={[styles.marketItemTitle, styles.marketItemTitleNeo]}>{skill.name}</Text>
+                  <Text style={[styles.marketItemDesc, styles.marketItemDescNeo]}>{skill.description}</Text>
+                </View>
+              ))
+            )}
+            <Pressable style={[styles.signOutBtn, styles.signOutBtnNeo]} onPress={handleSignOut}>
+              <Ionicons name="log-out-outline" size={16} color="#fda4af" />
+              <Text style={[styles.signOutBtnText, styles.signOutBtnTextNeo]}>
+                {tr("退出登录", "Sign Out")}
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+
+        <View style={styles.neoFooterWrap}>
+          <Pressable style={styles.neoApplyBtn} onPress={save}>
+            <Ionicons name="save-outline" size={18} color="#111827" />
+            <Text style={styles.neoApplyBtnText}>
+              {tr("Apply Configuration", "Apply Configuration")}
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Pressable style={styles.headerBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#111827" />
         </Pressable>
-        <Text style={styles.headerTitle}>Bot 配置</Text>
+        <Text style={styles.headerTitle}>{tr("Bot 配置", "Bot Config")}</Text>
         <Pressable style={styles.saveBtn} onPress={save}>
           <Ionicons name="save" size={16} color="white" />
-          <Text style={styles.saveBtnText}>Apply</Text>
+          <Text style={styles.saveBtnText}>{tr("应用", "Apply")}</Text>
         </Pressable>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Account</Text>
+          <Text style={styles.cardTitle}>{tr("账号", "Account")}</Text>
           <Text style={styles.accountText}>
-            {`Signed in as ${user?.displayName || "Unknown"}`}
+            {tr("当前登录为", "Signed in as")} {user?.displayName || tr("未知", "Unknown")}
           </Text>
           <Text style={styles.accountSubtext}>
-            {`Provider: ${user?.provider || "unknown"}${user?.email ? ` · ${user.email}` : ""}${
+            {`${tr("提供方", "Provider")}: ${user?.provider || "unknown"}${user?.email ? ` · ${user.email}` : ""}${
               user?.phone ? ` · ${user.phone}` : ""
             }`}
           </Text>
           <Pressable style={styles.signOutBtn} onPress={handleSignOut}>
             <Ionicons name="log-out-outline" size={16} color="#b91c1c" />
-            <Text style={styles.signOutBtnText}>Sign Out</Text>
+            <Text style={styles.signOutBtnText}>{tr("退出登录", "Sign Out")}</Text>
           </Pressable>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Theme</Text>
+          <Text style={styles.cardTitle}>{tr("主题", "Theme")}</Text>
           <Text style={styles.accountSubtext}>
-            Choose between original style and new dark-glass Mini App style.
+            {tr(
+              "在经典亮色风格与暗色玻璃风格之间切换。",
+              "Choose between classic bright style and dark glass style."
+            )}
           </Text>
           <View style={styles.themeRow}>
             <Pressable
@@ -213,32 +522,55 @@ export default function ConfigScreen() {
                   uiTheme === "classic" && styles.themeBtnTextActive,
                 ]}
               >
-                Classic
+                {tr("经典", "Classic")}
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.themeBtn, uiTheme === "neo" && styles.themeBtnActiveNeo]}
+              style={styles.themeBtn}
               onPress={() => updateUiTheme("neo")}
             >
               <Ionicons
                 name="moon-outline"
                 size={16}
-                color={uiTheme === "neo" ? "white" : "#334155"}
+                color="#334155"
               />
               <Text
                 style={[
                   styles.themeBtnText,
-                  uiTheme === "neo" && styles.themeBtnTextActive,
                 ]}
               >
-                Neo Glass
+                {tr("霓虹玻璃", "Neo Glass")}
               </Text>
             </Pressable>
           </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Bot Identity</Text>
+          <Text style={styles.cardTitle}>{tr("语言", "Language")}</Text>
+          <View style={styles.themeRow}>
+            <Pressable
+              style={[styles.themeBtn, language === "zh" && styles.themeBtnActive]}
+              onPress={() => updateLanguage("zh")}
+            >
+              <Ionicons name="language-outline" size={16} color={language === "zh" ? "white" : "#334155"} />
+              <Text style={[styles.themeBtnText, language === "zh" && styles.themeBtnTextActive]}>
+                中文
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.themeBtn, language === "en" && styles.themeBtnActiveNeo]}
+              onPress={() => updateLanguage("en")}
+            >
+              <Ionicons name="language-outline" size={16} color={language === "en" ? "white" : "#334155"} />
+              <Text style={[styles.themeBtnText, language === "en" && styles.themeBtnTextActive]}>
+                English
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{tr("Bot 身份", "Bot Identity")}</Text>
           <View style={styles.identityRow}>
             <Image source={{ uri: avatar }} style={styles.avatar} />
             <View style={styles.identityInputWrap}>
@@ -247,25 +579,27 @@ export default function ConfigScreen() {
                 style={styles.avatarInput}
                 value={avatar}
                 onChangeText={setAvatar}
-                placeholder="Avatar URL"
+                placeholder={tr("头像 URL", "Avatar URL")}
               />
             </View>
           </View>
           <Pressable style={styles.secondaryBtn} onPress={randomizeAvatar}>
             <Ionicons name="shuffle" size={14} color="#1f2937" />
-            <Text style={styles.secondaryBtnText}>Random Avatar</Text>
+            <Text style={styles.secondaryBtnText}>{tr("随机头像", "Random Avatar")}</Text>
           </Pressable>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Knowledge Upload</Text>
+          <Text style={styles.cardTitle}>{tr("知识上传", "Knowledge Upload")}</Text>
           <Pressable style={styles.secondaryBtn} onPress={uploadKnowledge} disabled={isUploading}>
             {isUploading ? (
               <ActivityIndicator size="small" color="#2563eb" />
             ) : (
               <Ionicons name="cloud-upload" size={16} color="#2563eb" />
             )}
-            <Text style={[styles.secondaryBtnText, { color: "#1d4ed8" }]}>Upload Document</Text>
+            <Text style={[styles.secondaryBtnText, { color: "#1d4ed8" }]}>
+              {tr("上传文档", "Upload Document")}
+            </Text>
           </Pressable>
 
           {documents.length > 0 ? (
@@ -290,64 +624,64 @@ export default function ConfigScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Skill Builder</Text>
+          <Text style={styles.cardTitle}>{tr("技能构建", "Skill Builder")}</Text>
           <TextInput
             style={styles.field}
-            placeholder="Skill name"
+            placeholder={tr("技能名称", "Skill name")}
             value={skillForm.name}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, name: value }))}
           />
           <TextInput
             style={styles.field}
-            placeholder="Description"
+            placeholder={tr("描述", "Description")}
             value={skillForm.description}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, description: value }))}
           />
           <TextInput
             style={styles.field}
-            placeholder="Trigger"
+            placeholder={tr("触发条件", "Trigger")}
             value={skillForm.trigger}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, trigger: value }))}
           />
           <TextInput
             style={[styles.field, styles.fieldTall]}
             multiline
-            placeholder="Core logic"
+            placeholder={tr("核心逻辑", "Core logic")}
             value={skillForm.logic}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, logic: value }))}
           />
           <TextInput
             style={styles.field}
-            placeholder="Required params"
+            placeholder={tr("必填参数", "Required params")}
             value={skillForm.requiredParams}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, requiredParams: value }))}
           />
           <TextInput
             style={styles.field}
-            placeholder="Optional params"
+            placeholder={tr("可选参数", "Optional params")}
             value={skillForm.optionalParams}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, optionalParams: value }))}
           />
           <TextInput
             style={styles.field}
-            placeholder="Constraints"
+            placeholder={tr("约束条件", "Constraints")}
             value={skillForm.constraints}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, constraints: value }))}
           />
           <TextInput
             style={styles.field}
-            placeholder="Example"
+            placeholder={tr("示例", "Example")}
             value={skillForm.example}
             onChangeText={(value) => setSkillForm((prev) => ({ ...prev, example: value }))}
           />
           <Pressable style={styles.secondaryBtn} onPress={appendCustomSkill}>
             <Ionicons name="add-circle" size={16} color="#111827" />
-            <Text style={styles.secondaryBtnText}>Append Skill to Brain</Text>
+            <Text style={styles.secondaryBtnText}>{tr("追加到 Bot 脑内", "Append Skill to Brain")}</Text>
           </Pressable>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Skill Marketplace</Text>
+          <Text style={styles.cardTitle}>{tr("技能市场", "Skill Marketplace")}</Text>
           {MARKET_DATA.map((category) => (
             <View style={styles.marketCategory} key={category.id}>
               <Text style={styles.marketCategoryTitle}>{category.title}</Text>
@@ -362,7 +696,7 @@ export default function ConfigScreen() {
                       <View style={styles.marketItemHeader}>
                         <Text style={styles.marketItemTitle}>{item.name}</Text>
                         {installed ? (
-                          <Text style={styles.installedTag}>Installed</Text>
+                          <Text style={styles.installedTag}>{tr("已安装", "Installed")}</Text>
                         ) : (
                           <Pressable
                             style={styles.installBtn}
@@ -370,14 +704,14 @@ export default function ConfigScreen() {
                             disabled={installing}
                           >
                             <Text style={styles.installBtnText}>
-                              {installing ? "Installing..." : "Get"}
+                              {installing ? tr("安装中...", "Installing...") : tr("获取", "Get")}
                             </Text>
                           </Pressable>
                         )}
                       </View>
                       <Text style={styles.marketItemDesc}>{item.description}</Text>
                       <Pressable onPress={() => setViewingSkill(item)}>
-                        <Text style={styles.inspectLink}>Inspect modules</Text>
+                        <Text style={styles.inspectLink}>{tr("查看模块", "Inspect modules")}</Text>
                       </Pressable>
                     </View>
                   );
@@ -390,7 +724,9 @@ export default function ConfigScreen() {
         {viewingSkill ? (
           <View style={styles.card}>
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.cardTitle}>Skill Inspector · {viewingSkill.name}</Text>
+              <Text style={styles.cardTitle}>
+                {tr("技能详情", "Skill Inspector")} · {viewingSkill.name}
+              </Text>
               <Pressable onPress={() => setViewingSkill(null)}>
                 <Ionicons name="close" size={20} color="#6b7280" />
               </Pressable>
@@ -423,20 +759,20 @@ export default function ConfigScreen() {
         ) : null}
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>MyBot Brain (Editable)</Text>
+          <Text style={styles.cardTitle}>{tr("MyBot 脑（可编辑）", "MyBot Brain (Editable)")}</Text>
           <TextInput
             style={styles.brainEditor}
             multiline
             value={instruction}
             onChangeText={setInstruction}
-            placeholder="System instructions"
+            placeholder={tr("系统指令", "System instructions")}
           />
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Installed Skills</Text>
+          <Text style={styles.cardTitle}>{tr("已安装技能", "Installed Skills")}</Text>
           {installedSkills.length === 0 ? (
-            <Text style={styles.emptyText}>No skills installed yet.</Text>
+            <Text style={styles.emptyText}>{tr("还没有安装技能。", "No skills installed yet.")}</Text>
           ) : (
             installedSkills.map((skill) => (
               <View key={skill.id} style={styles.skillInstalledCard}>
@@ -455,6 +791,242 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#f3f4f6",
+  },
+  safeAreaNeo: {
+    backgroundColor: "#070510",
+  },
+  scrollNeo: {
+    backgroundColor: "transparent",
+  },
+  scrollContentNeo: {
+    gap: 12,
+    paddingBottom: 130,
+  },
+  neoHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerNeo: {
+    backgroundColor: "rgba(11,10,24,0.95)",
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  headerBtnNeo: {
+    backgroundColor: "rgba(31,33,51,0.9)",
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  headerTitleNeo: {
+    color: "#f8fafc",
+    fontSize: 16,
+  },
+  neoIdentityCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(20,20,36,0.82)",
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  neoIdentityAvatarWrap: {
+    position: "relative",
+    width: 94,
+    height: 94,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neoAvatarShuffle: {
+    position: "absolute",
+    right: 2,
+    bottom: 2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(71,85,105,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neoIdentityBody: {
+    flex: 1,
+    gap: 6,
+  },
+  neoIdentityLabel: {
+    alignSelf: "flex-start",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.1,
+    color: "rgba(148,163,184,0.9)",
+    backgroundColor: "rgba(30,58,138,0.35)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  neoNameInput: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(15,23,42,0.45)",
+    color: "#f8fafc",
+    fontSize: 15,
+    fontWeight: "700",
+    paddingHorizontal: 10,
+  },
+  neoQuickRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  neoQuickCard: {
+    flex: 1,
+    minHeight: 148,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(99,102,241,0.45)",
+    backgroundColor: "rgba(34,25,71,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+    gap: 6,
+  },
+  neoQuickSkillCard: {
+    alignItems: "flex-start",
+    backgroundColor: "rgba(15,19,34,0.7)",
+    borderColor: "rgba(34,197,94,0.16)",
+  },
+  neoQuickIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neoQuickTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#e2e8f0",
+    textAlign: "center",
+  },
+  neoQuickTag: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    color: "rgba(148,163,184,0.88)",
+    backgroundColor: "rgba(30,58,138,0.35)",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  neoQuickSkillTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    color: "#f8fafc",
+    fontWeight: "800",
+  },
+  neoQuickSub: {
+    fontSize: 12,
+    color: "rgba(148,163,184,0.86)",
+  },
+  neoQuickAddBtn: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#22c55e",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neoStoreCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(18,15,33,0.86)",
+    padding: 12,
+    gap: 10,
+  },
+  neoStoreHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  neoStoreTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#f8fafc",
+  },
+  neoStoreSub: {
+    marginTop: 2,
+    fontSize: 12,
+    color: "rgba(148,163,184,0.8)",
+  },
+  neoStoreBtn: {
+    minHeight: 32,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.55)",
+    backgroundColor: "rgba(30,58,138,0.35)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  neoStoreBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#bfdbfe",
+  },
+  neoStoreList: {
+    gap: 10,
+  },
+  neoStoreItem: {
+    minHeight: 84,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  neoStoreIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neoStoreItemBody: {
+    flex: 1,
+    gap: 4,
+  },
+  neoStoreItemTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#f8fafc",
+  },
+  neoStoreItemSub: {
+    fontSize: 11,
+    color: "rgba(148,163,184,0.82)",
+  },
+  neoStoreChevron: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   accountText: {
     fontSize: 13,
@@ -498,6 +1070,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
+  themeBtnNeoBase: {
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(15,23,42,0.55)",
+  },
   themeBtnActive: {
     backgroundColor: "#16a34a",
     borderColor: "#16a34a",
@@ -510,6 +1086,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#334155",
+  },
+  themeBtnTextNeo: {
+    color: "rgba(226,232,240,0.88)",
   },
   themeBtnTextActive: {
     color: "white",
@@ -569,10 +1148,17 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     gap: 10,
   },
+  cardNeo: {
+    backgroundColor: "rgba(16,16,30,0.78)",
+    borderColor: "rgba(255,255,255,0.1)",
+  },
   cardTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#111827",
+  },
+  cardTitleNeo: {
+    color: "#f8fafc",
   },
   identityRow: {
     flexDirection: "row",
@@ -701,10 +1287,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  marketItemTitleNeo: {
+    color: "#f8fafc",
+  },
   marketItemDesc: {
     fontSize: 11,
     color: "#4b5563",
     lineHeight: 16,
+  },
+  marketItemDescNeo: {
+    color: "rgba(148,163,184,0.88)",
   },
   installBtn: {
     borderRadius: 999,
@@ -777,9 +1369,17 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: Platform.select({ ios: "Courier", android: "monospace", default: "monospace" }),
   },
+  brainEditorNeo: {
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(2,6,23,0.56)",
+    color: "rgba(226,232,240,0.92)",
+  },
   emptyText: {
     fontSize: 12,
     color: "#6b7280",
+  },
+  emptyTextNeo: {
+    color: "rgba(148,163,184,0.8)",
   },
   skillInstalledCard: {
     borderWidth: 1,
@@ -788,5 +1388,41 @@ const styles = StyleSheet.create({
     padding: 8,
     gap: 4,
     backgroundColor: "#f9fafb",
+  },
+  skillInstalledCardNeo: {
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+  },
+  signOutBtnNeo: {
+    borderColor: "rgba(253,164,175,0.4)",
+    backgroundColor: "rgba(127,29,29,0.25)",
+    marginTop: 8,
+  },
+  signOutBtnTextNeo: {
+    color: "#fda4af",
+  },
+  neoFooterWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 24,
+    backgroundColor: "rgba(7,5,16,0.94)",
+  },
+  neoApplyBtn: {
+    minHeight: 54,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  neoApplyBtnText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
   },
 });
