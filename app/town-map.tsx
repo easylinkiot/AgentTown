@@ -43,8 +43,9 @@ import { generateGeminiText } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 
 interface TownMapMessage {
-  role: "user" | "model";
+  role: "user" | "model" | "system";
   text: string;
+  senderName?: string;
 }
 
 interface MovingCar {
@@ -56,13 +57,68 @@ interface MovingCar {
   direction: 1 | -1;
 }
 
+interface WorldGroupMessage {
+  id: string;
+  role: "system" | "agent";
+  senderName?: string;
+  senderAvatar?: string;
+  senderRole?: string;
+  text: string;
+}
+
+const GROUP_IDENTITIES = [
+  "上班族",
+  "学生",
+  "宝妈",
+  "旅行者",
+  "骑行通勤者",
+  "创业者",
+  "产品经理",
+  "自由职业者",
+  "餐馆老板",
+  "新手投资人",
+];
+
+const GROUP_PAIN_POINTS = [
+  "信息太多看不过来",
+  "任务排期总是拖延",
+  "每周选餐太耗时间",
+  "会议结论常常遗忘",
+  "优惠信息太分散",
+  "行程变更来不及同步",
+  "学习计划无法坚持",
+  "客户跟进容易漏掉",
+  "家庭采购预算超支",
+  "运动数据看不懂",
+];
+
+const GROUP_APP_IDEAS = [
+  "早报摘要",
+  "任务拆解",
+  "餐饮预定",
+  "会议纪要",
+  "降价提醒",
+  "日程协调",
+  "学习打卡",
+  "客户随访",
+  "预算管家",
+  "健康看板",
+];
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function buildWorldIdea(seed: number) {
+  const identity = GROUP_IDENTITIES[seed % GROUP_IDENTITIES.length];
+  const pain = GROUP_PAIN_POINTS[(seed * 3) % GROUP_PAIN_POINTS.length];
+  const app = GROUP_APP_IDEAS[(seed * 5) % GROUP_APP_IDEAS.length];
+  return `【${identity}：${pain}】生成一个${app} Mini App，一句话自动完成。`;
+}
+
 export default function TownMapScreen() {
   const router = useRouter();
-  const { myHouseType } = useAgentTown();
+  const { myHouseType, botConfig } = useAgentTown();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isAndroid = Platform.OS === "android";
@@ -74,19 +130,40 @@ export default function TownMapScreen() {
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<TownMapMessage[]>([]);
+  const [chatMode, setChatMode] = useState<"direct" | "group">("direct");
   const [inputValue, setInputValue] = useState("");
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [showWorldScale, setShowWorldScale] = useState(false);
+  const [groupPanelVisible, setGroupPanelVisible] = useState(true);
+  const [groupPanelMode, setGroupPanelMode] = useState<"expanded" | "minimized">("expanded");
+  const [isWorldGroupThinking, setIsWorldGroupThinking] = useState(false);
+  const [worldGroupMessages, setWorldGroupMessages] = useState<WorldGroupMessage[]>(() => [
+    {
+      id: "world_group_system",
+      role: "system",
+      text: "用户视角需求洞察模式已激活。",
+    },
+    {
+      id: "world_group_lead",
+      role: "agent",
+      senderName: `${botConfig.name} (Team Lead)`,
+      senderAvatar: botConfig.avatar,
+      senderRole: "Product Manager",
+      text: "大家请用普通用户视角，提出一个“一句话生成 Mini App”就能解决的真实问题。",
+    },
+  ]);
 
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
 
   const scrollXRef = useRef(0);
   const scrollYRef = useRef(0);
+  const worldGroupCursorRef = useRef(0);
 
   const horizontalRef = useRef<ScrollView | null>(null);
   const verticalRef = useRef<ScrollView | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
+  const worldGroupScrollRef = useRef<ScrollView | null>(null);
   const centeredRef = useRef(false);
 
   const mapWidthScaled = WORLD_WIDTH * scale;
@@ -119,6 +196,20 @@ export default function TownMapScreen() {
     () => visibleChunks.flatMap((chunk) => chunk.trees),
     [visibleChunks]
   );
+
+  const worldGroupCandidates = useMemo(
+    () => visibleLots.slice(0, 90),
+    [visibleLots]
+  );
+
+  const groupMemberNames = useMemo(() => {
+    if (!selectedLot) return [];
+    const nearbyMembers = visibleLots
+      .filter((lot) => lot.id !== selectedLot.id)
+      .slice(0, 3)
+      .map((lot) => lot.npc.name);
+    return [selectedLot.npc.name, ...nearbyMembers];
+  }, [selectedLot, visibleLots]);
 
   const routeLookup = useMemo(
     () => new Map(ROAD_ROUTES.map((route) => [route.id, route])),
@@ -197,6 +288,53 @@ export default function TownMapScreen() {
     }
   }, [selectedLot, visibleLots]);
 
+  useEffect(() => {
+    if (groupPanelMode !== "expanded") return;
+    const timer = setTimeout(() => {
+      worldGroupScrollRef.current?.scrollToEnd({ animated: true });
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [groupPanelMode, isWorldGroupThinking, worldGroupMessages.length]);
+
+  useEffect(() => {
+    if (!groupPanelVisible || worldGroupCandidates.length === 0) return;
+
+    let messageTimer: ReturnType<typeof setTimeout> | null = null;
+    const interval = setInterval(() => {
+      setIsWorldGroupThinking(true);
+
+      messageTimer = setTimeout(() => {
+        const idx = worldGroupCursorRef.current;
+        const lot = worldGroupCandidates[idx % worldGroupCandidates.length];
+        if (!lot) {
+          setIsWorldGroupThinking(false);
+          return;
+        }
+
+        setWorldGroupMessages((prev) => [
+          ...prev.slice(-24),
+          {
+            id: `world_group_${Date.now()}_${idx}`,
+            role: "agent",
+            senderName: lot.npc.name,
+            senderAvatar: lot.npc.avatar,
+            senderRole: lot.npc.role,
+            text: buildWorldIdea(idx + 1),
+          },
+        ]);
+        worldGroupCursorRef.current += 1;
+        setIsWorldGroupThinking(false);
+      }, 680);
+    }, 6500);
+
+    return () => {
+      clearInterval(interval);
+      if (messageTimer) {
+        clearTimeout(messageTimer);
+      }
+    };
+  }, [groupPanelVisible, worldGroupCandidates]);
+
   const applyZoom = (delta: number) => {
     const nextScale = clamp(scale + delta, 0.12, maxScale);
     if (Math.abs(nextScale - scale) < 0.001) return;
@@ -228,8 +366,63 @@ export default function TownMapScreen() {
 
   const openChat = () => {
     if (!selectedLot) return;
-    setChatMessages([{ role: "model", text: selectedLot.npc.greeting }]);
+    setChatMode("direct");
+    setChatMessages([
+      {
+        role: "model",
+        senderName: selectedLot.npc.name,
+        text: selectedLot.npc.greeting,
+      },
+    ]);
+    setInputValue("");
     setIsChatOpen(true);
+  };
+
+  const openGroupChat = () => {
+    if (!selectedLot) return;
+    setChatMode("group");
+    const members = groupMemberNames.length > 0 ? groupMemberNames : [selectedLot.npc.name];
+    setChatMessages([
+      {
+        role: "system",
+        text: `${selectedLot.label} Group · ${members.length} members`,
+      },
+      {
+        role: "model",
+        senderName: members[0],
+        text: `大家好，欢迎来到 ${selectedLot.label} 群聊。`,
+      },
+    ]);
+    setInputValue("");
+    setIsChatOpen(true);
+  };
+
+  const parseGroupReply = (reply: string | null, members: string[]) => {
+    const fallbackName = members[Math.floor(Math.random() * Math.max(1, members.length))] ?? "Member";
+    if (!reply) {
+      return {
+        senderName: fallbackName,
+        text: "收到，我来跟进这个话题。",
+      };
+    }
+
+    const normalized = reply.trim();
+    const separatorIndex = Math.max(normalized.indexOf(":"), normalized.indexOf("："));
+    if (separatorIndex > 0) {
+      const possibleName = normalized.slice(0, separatorIndex).trim();
+      const text = normalized.slice(separatorIndex + 1).trim();
+      if (possibleName && text) {
+        return {
+          senderName: possibleName,
+          text,
+        };
+      }
+    }
+
+    return {
+      senderName: fallbackName,
+      text: normalized,
+    };
   };
 
   const sendChat = async () => {
@@ -237,22 +430,57 @@ export default function TownMapScreen() {
     if (!text || !selectedLot) return;
 
     setInputValue("");
-    const nextHistory = [...chatMessages, { role: "user" as const, text }];
+    const nextHistory: TownMapMessage[] = [
+      ...chatMessages,
+      { role: "user", senderName: "You", text },
+    ];
     setChatMessages(nextHistory);
 
-    const reply = await generateGeminiText({
-      prompt: text,
-      systemInstruction: `You are ${selectedLot.npc.name}, a ${selectedLot.npc.role} in AgentTown. Keep replies short and practical.`,
-      history: nextHistory.slice(-10),
-    });
+    if (chatMode === "group") {
+      const members = groupMemberNames.length > 0 ? groupMemberNames : [selectedLot.npc.name];
+      const reply = await generateGeminiText({
+        prompt: `User says: ${text}\nReply in one line as one group member. Format must be "Name: message".`,
+        systemInstruction: `You are one member inside an AgentTown group chat. Members: ${members.join(", ")}. Keep replies short, practical and natural.`,
+        history: nextHistory
+          .filter((msg) => msg.role !== "system")
+          .slice(-10)
+          .map((msg) => ({
+            role: msg.role === "user" ? ("user" as const) : ("model" as const),
+            text: `${msg.senderName ? `${msg.senderName}: ` : ""}${msg.text}`,
+          })),
+      });
 
-    setChatMessages((prev) => [
-      ...prev,
-      {
-        role: "model",
-        text: reply ?? `${selectedLot.npc.name}: Got it. I can help with that.`,
-      },
-    ]);
+      const parsed = parseGroupReply(reply, members);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "model",
+          senderName: parsed.senderName,
+          text: parsed.text,
+        },
+      ]);
+    } else {
+      const reply = await generateGeminiText({
+        prompt: text,
+        systemInstruction: `You are ${selectedLot.npc.name}, a ${selectedLot.npc.role} in AgentTown. Keep replies short and practical.`,
+        history: nextHistory
+          .filter((msg) => msg.role !== "system")
+          .slice(-10)
+          .map((msg) => ({
+            role: msg.role === "user" ? ("user" as const) : ("model" as const),
+            text: msg.text,
+          })),
+      });
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "model",
+          senderName: selectedLot.npc.name,
+          text: reply ?? `${selectedLot.npc.name}: Got it. I can help with that.`,
+        },
+      ]);
+    }
 
     setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 40);
   };
@@ -295,9 +523,19 @@ export default function TownMapScreen() {
           <View style={styles.headerDarkCircle}>
             <Ionicons name="location-outline" size={17} color="#fff" />
           </View>
-          <View style={styles.headerDarkCircle}>
-            <Ionicons name="person-outline" size={17} color="#fff" />
-          </View>
+          <Pressable
+            style={styles.headerDarkCircle}
+            onPress={() => {
+              if (!groupPanelVisible) {
+                setGroupPanelVisible(true);
+                setGroupPanelMode("expanded");
+                return;
+              }
+              setGroupPanelMode((prev) => (prev === "expanded" ? "minimized" : "expanded"));
+            }}
+          >
+            <Ionicons name="people-outline" size={17} color="#fff" />
+          </Pressable>
         </View>
       </View>
 
@@ -628,12 +866,124 @@ export default function TownMapScreen() {
         </View>
       ) : null}
 
-      {selectedLot ? (
-        <View style={styles.visitWrap}>
-          <Pressable style={styles.visitBtn} onPress={openChat}>
-            <Ionicons name="chatbubble" size={16} color="white" />
-            <Text style={styles.visitBtnText}>Visit {selectedLot.label}</Text>
+      {groupPanelVisible ? (
+        groupPanelMode === "expanded" ? (
+          <View style={styles.worldGroupWrap} pointerEvents="box-none">
+            <View style={styles.worldGroupCard}>
+              <View style={styles.worldGroupHeader}>
+                <View style={styles.worldGroupHeaderLeft}>
+                  <View style={styles.worldGroupBadge}>
+                    <Ionicons name="people" size={12} color="white" />
+                  </View>
+                  <View>
+                    <Text style={styles.worldGroupTitle}>
+                      {`Agent Team (Bot ${Math.min(worldGroupCursorRef.current, 99) + 1}/100)`}
+                    </Text>
+                    <Text style={styles.worldGroupSub}>普通用户 Mini App 需求脑暴</Text>
+                  </View>
+                </View>
+                <View style={styles.worldGroupActions}>
+                  <Pressable
+                    style={styles.worldGroupActionBtn}
+                    onPress={() => setGroupPanelMode("minimized")}
+                  >
+                    <Ionicons name="remove" size={16} color="#64748b" />
+                  </Pressable>
+                  <Pressable
+                    style={styles.worldGroupActionBtn}
+                    onPress={() => setGroupPanelVisible(false)}
+                  >
+                    <Ionicons name="close" size={14} color="#64748b" />
+                  </Pressable>
+                </View>
+              </View>
+
+              <ScrollView
+                ref={worldGroupScrollRef}
+                style={styles.worldGroupList}
+                contentContainerStyle={styles.worldGroupListContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {worldGroupMessages.map((msg) =>
+                  msg.role === "system" ? (
+                    <View key={msg.id} style={styles.worldGroupSystemWrap}>
+                      <Text style={styles.worldGroupSystemText}>{msg.text}</Text>
+                    </View>
+                  ) : (
+                    <View key={msg.id} style={styles.worldGroupRow}>
+                      <Image
+                        source={{ uri: msg.senderAvatar || botConfig.avatar }}
+                        style={styles.worldGroupAvatar}
+                      />
+                      <View style={styles.worldGroupBubbleWrap}>
+                        <View style={styles.worldGroupNameRow}>
+                          <Text style={styles.worldGroupName} numberOfLines={1}>
+                            {msg.senderName}
+                          </Text>
+                          <Text style={styles.worldGroupRole} numberOfLines={1}>
+                            {msg.senderRole}
+                          </Text>
+                        </View>
+                        <View style={styles.worldGroupBubble}>
+                          <Text style={styles.worldGroupText}>{msg.text}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  )
+                )}
+
+                {isWorldGroupThinking ? (
+                  <View style={styles.worldThinkingRow}>
+                    <Ionicons name="sync-outline" size={12} color="#2563eb" />
+                    <Text style={styles.worldThinkingText}>
+                      {`Bot ${Math.min(worldGroupCursorRef.current, 99) + 1} 构思中...`}
+                    </Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+
+              <View style={styles.worldGroupFooter}>
+                <Ionicons name="mic-outline" size={13} color="#9ca3af" />
+                <Text style={styles.worldGroupFooterText}>旁观模式（Team Lead 已锁定议题）</Text>
+                <Ionicons name="add" size={14} color="#9ca3af" />
+              </View>
+            </View>
+          </View>
+        ) : (
+          <Pressable
+            style={styles.worldGroupMini}
+            onPress={() => setGroupPanelMode("expanded")}
+          >
+            <View style={styles.worldGroupMiniBadge}>
+              <Ionicons name="bulb-outline" size={14} color="white" />
+            </View>
+            <View>
+              <Text style={styles.worldGroupMiniTitle}>User Needs Brainstorm</Text>
+              <Text style={styles.worldGroupMiniSub}>
+                {`Agent ${Math.min(worldGroupCursorRef.current, 99) + 1} thinking...`}
+              </Text>
+            </View>
           </Pressable>
+        )
+      ) : null}
+
+      {selectedLot ? (
+        <View
+          style={[
+            styles.visitWrap,
+            groupPanelVisible && groupPanelMode === "expanded" ? styles.visitWrapRaised : null,
+          ]}
+        >
+          <View style={styles.visitBtnRow}>
+            <Pressable style={styles.visitBtn} onPress={openChat}>
+              <Ionicons name="chatbubble" size={16} color="white" />
+              <Text style={styles.visitBtnText}>Visit {selectedLot.label}</Text>
+            </Pressable>
+            <Pressable style={[styles.visitBtn, styles.groupVisitBtn]} onPress={openGroupChat}>
+              <Ionicons name="people" size={16} color="#111827" />
+              <Text style={styles.groupVisitBtnText}>Group Chat</Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -651,8 +1001,16 @@ export default function TownMapScreen() {
                   <Image source={{ uri: selectedLot.npc.avatar }} style={styles.chatAvatar} />
                 ) : null}
                 <View>
-                  <Text style={styles.chatName}>{selectedLot?.npc.name ?? "NPC"}</Text>
-                  <Text style={styles.chatRole}>{selectedLot?.npc.role ?? "Role"}</Text>
+                  <Text style={styles.chatName}>
+                    {chatMode === "group"
+                      ? `${selectedLot?.label ?? "Town"} Group`
+                      : selectedLot?.npc.name ?? "NPC"}
+                  </Text>
+                  <Text style={styles.chatRole}>
+                    {chatMode === "group"
+                      ? `${Math.max(2, groupMemberNames.length)} members · Group chat`
+                      : selectedLot?.npc.role ?? "Role"}
+                  </Text>
                 </View>
               </View>
               <Pressable
@@ -669,22 +1027,31 @@ export default function TownMapScreen() {
               ref={chatScrollRef}
             >
               {chatMessages.map((msg, index) => (
-                <View
-                  key={`${msg.role}_${index}`}
-                  style={[
-                    styles.chatRow,
-                    msg.role === "user" ? styles.chatRowMe : styles.chatRowBot,
-                  ]}
-                >
+                msg.role === "system" ? (
+                  <View key={`${msg.role}_${index}`} style={styles.systemRow}>
+                    <Text style={styles.systemText}>{msg.text}</Text>
+                  </View>
+                ) : (
                   <View
+                    key={`${msg.role}_${index}`}
                     style={[
-                      styles.chatBubble,
-                      msg.role === "user" ? styles.chatBubbleMe : styles.chatBubbleBot,
+                      styles.chatRow,
+                      msg.role === "user" ? styles.chatRowMe : styles.chatRowBot,
                     ]}
                   >
-                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                    <View
+                      style={[
+                        styles.chatBubble,
+                        msg.role === "user" ? styles.chatBubbleMe : styles.chatBubbleBot,
+                      ]}
+                    >
+                      {chatMode === "group" && msg.role === "model" && msg.senderName ? (
+                        <Text style={styles.chatSender}>{msg.senderName}</Text>
+                      ) : null}
+                      <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                    </View>
                   </View>
-                </View>
+                )
               ))}
             </ScrollView>
 
@@ -693,7 +1060,7 @@ export default function TownMapScreen() {
                 style={styles.chatInput}
                 value={inputValue}
                 onChangeText={setInputValue}
-                placeholder="Type a message..."
+                placeholder={chatMode === "group" ? "Message the group..." : "Type a message..."}
                 onSubmitEditing={sendChat}
               />
               <Pressable style={styles.chatSendBtn} onPress={sendChat}>
@@ -1014,6 +1381,205 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "#ef4444",
   },
+  worldGroupWrap: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 26,
+    zIndex: 22,
+    elevation: 22,
+  },
+  worldGroupCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(255,255,255,0.94)",
+    overflow: "hidden",
+    maxHeight: 320,
+  },
+  worldGroupHeader: {
+    minHeight: 52,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  worldGroupHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+    paddingRight: 8,
+  },
+  worldGroupBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    backgroundColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  worldGroupTitle: {
+    color: "#111827",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  worldGroupSub: {
+    marginTop: 1,
+    color: "#059669",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  worldGroupActions: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  worldGroupActionBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f3f4f6",
+  },
+  worldGroupList: {
+    flex: 1,
+    maxHeight: 220,
+  },
+  worldGroupListContent: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 7,
+  },
+  worldGroupSystemWrap: {
+    alignItems: "center",
+  },
+  worldGroupSystemText: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f1f5f9",
+    color: "#64748b",
+    fontSize: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  worldGroupRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7,
+  },
+  worldGroupAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 9,
+    backgroundColor: "#d1d5db",
+  },
+  worldGroupBubbleWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  worldGroupNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  worldGroupName: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#1f2937",
+    maxWidth: 130,
+  },
+  worldGroupRole: {
+    fontSize: 9,
+    color: "#64748b",
+    maxWidth: 100,
+  },
+  worldGroupBubble: {
+    borderRadius: 12,
+    borderTopLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+    backgroundColor: "white",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  worldGroupText: {
+    color: "#334155",
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  worldThinkingRow: {
+    marginTop: 2,
+    marginBottom: 4,
+    marginLeft: 33,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#dbeafe",
+    backgroundColor: "#eff6ff",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  worldThinkingText: {
+    color: "#1d4ed8",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  worldGroupFooter: {
+    minHeight: 34,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#f8fafc",
+  },
+  worldGroupFooterText: {
+    flex: 1,
+    color: "#64748b",
+    fontSize: 10,
+  },
+  worldGroupMini: {
+    position: "absolute",
+    left: 12,
+    bottom: 96,
+    zIndex: 22,
+    elevation: 22,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(255,255,255,0.94)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  worldGroupMiniBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  worldGroupMiniTitle: {
+    color: "#1f2937",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  worldGroupMiniSub: {
+    marginTop: 1,
+    color: "#64748b",
+    fontSize: 9,
+  },
   visitWrap: {
     position: "absolute",
     bottom: 24,
@@ -1021,6 +1587,14 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: "center",
     zIndex: 20,
+  },
+  visitWrapRaised: {
+    bottom: 336,
+  },
+  visitBtnRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   visitBtn: {
     minHeight: 46,
@@ -1031,8 +1605,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  groupVisitBtn: {
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.65)",
+  },
   visitBtnText: {
     color: "white",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  groupVisitBtnText: {
+    color: "#111827",
     fontWeight: "700",
     fontSize: 13,
   },
@@ -1092,6 +1676,20 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
+  systemRow: {
+    alignItems: "center",
+    marginVertical: 4,
+  },
+  systemText: {
+    fontSize: 11,
+    color: "#64748b",
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
   chatRow: {
     flexDirection: "row",
   },
@@ -1119,6 +1717,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#111827",
     lineHeight: 20,
+  },
+  chatSender: {
+    fontSize: 10,
+    color: "#64748b",
+    fontWeight: "700",
+    marginBottom: 3,
   },
   chatInputWrap: {
     margin: 12,

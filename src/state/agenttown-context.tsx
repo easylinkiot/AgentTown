@@ -1,15 +1,17 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
 
 import { DEFAULT_MYBOT_AVATAR } from "@/src/constants/chat";
-import { BotConfig, TaskItem } from "@/src/types";
+import { BotConfig, TaskItem, UiTheme } from "@/src/types";
 
 interface AgentTownContextValue {
   botConfig: BotConfig;
   tasks: TaskItem[];
   myHouseType: number;
+  uiTheme: UiTheme;
   updateBotConfig: (next: BotConfig) => void;
   addTask: (task: TaskItem) => void;
   updateHouseType: (next: number) => void;
+  updateUiTheme: (next: UiTheme) => void;
 }
 
 const defaultBotConfig: BotConfig = {
@@ -38,19 +40,22 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [botConfig, setBotConfig] = useState<BotConfig>(defaultBotConfig);
   const [tasks, setTasks] = useState<TaskItem[]>(defaultTasks);
   const [myHouseType, setMyHouseType] = useState<number>(3);
+  const [uiTheme, setUiTheme] = useState<UiTheme>("classic");
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {
       botConfig,
       tasks,
       myHouseType,
+      uiTheme,
       updateBotConfig: setBotConfig,
       addTask: (task) => {
         setTasks((prev) => [{ ...task, id: task.id ?? String(Date.now()) }, ...prev]);
       },
       updateHouseType: setMyHouseType,
+      updateUiTheme: setUiTheme,
     };
-  }, [botConfig, myHouseType, tasks]);
+  }, [botConfig, myHouseType, tasks, uiTheme]);
 
   return (
     <AgentTownContext.Provider value={value}>{children}</AgentTownContext.Provider>

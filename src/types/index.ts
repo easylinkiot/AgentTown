@@ -14,6 +14,8 @@ export interface ChatThread {
   supportsVideo?: boolean;
 }
 
+export type UiTheme = "classic" | "neo";
+
 export type TaskPriority = "High" | "Medium" | "Low";
 export type TaskStatus = "Pending" | "In Progress" | "Done";
 

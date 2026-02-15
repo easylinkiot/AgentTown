@@ -61,11 +61,45 @@ function toHistory(messages: ConversationMessage[]) {
 
 export default function ChatDetailScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    name?: string;
+    avatar?: string;
+    isGroup?: string;
+    memberCount?: string;
+    phoneNumber?: string;
+    supportsVideo?: string;
+  }>();
   const chatId = String(params.id || "");
 
   const { botConfig, addTask } = useAgentTown();
-  const thread = useMemo(() => resolveChatThread(chatId, botConfig), [botConfig, chatId]);
+  const thread = useMemo(() => {
+    const routeName = typeof params.name === "string" ? params.name : "";
+    const routeAvatar = typeof params.avatar === "string" ? params.avatar : "";
+
+    if (routeName || routeAvatar) {
+      const parsedMemberCount =
+        typeof params.memberCount === "string" && params.memberCount
+          ? Number(params.memberCount)
+          : undefined;
+      return {
+        id: chatId,
+        name: routeName || "Unknown Chat",
+        avatar: routeAvatar || DEFAULT_MYBOT_AVATAR,
+        message: "",
+        time: "Now",
+        isGroup: params.isGroup === "true",
+        memberCount: Number.isFinite(parsedMemberCount) ? parsedMemberCount : undefined,
+        phoneNumber:
+          typeof params.phoneNumber === "string" && params.phoneNumber
+            ? params.phoneNumber
+            : undefined,
+        supportsVideo: params.supportsVideo !== "false",
+      };
+    }
+
+    return resolveChatThread(chatId, botConfig);
+  }, [botConfig, chatId, params.avatar, params.isGroup, params.memberCount, params.name, params.phoneNumber, params.supportsVideo]);
   const isGroupChat = Boolean(thread.isGroup || chatId.startsWith("group_"));
 
   const [messages, setMessages] = useState<ConversationMessage[]>(() =>

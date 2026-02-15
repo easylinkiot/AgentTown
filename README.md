@@ -20,6 +20,11 @@ AgentTown is an Expo-based, AI-ready application that runs on iOS, Android, and 
   - Procedural lots/markets/trees
   - Select lot + visit NPC
   - In-map NPC chat modal
+- Authentication (Phase 1):
+  - Google OAuth
+  - Sign in with Apple (iOS)
+  - Phone OTP (dev-mode in-memory code)
+  - Guest mode
 - Living Room gameplay:
   - House/interests/jobs/assets panels
   - House type switching linked to home state
@@ -145,7 +150,19 @@ Then set:
 
 ```bash
 EXPO_PUBLIC_GEMINI_API_KEY=your_key_here
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=...
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...
 ```
+
+## Authentication Notes
+
+- OAuth screen route: `/sign-in`
+- All app pages are auth-gated by `app/_layout.tsx`.
+- Phone OTP is currently a local dev-mode implementation for fast iteration:
+  - code is generated in app memory
+  - in dev build it is shown as `DEV CODE`
+  - replace with real SMS provider in backend for production
 
 Run by platform:
 

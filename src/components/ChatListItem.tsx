@@ -1,20 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { ChatThread } from "@/src/types";
+import { ChatThread, UiTheme } from "@/src/types";
 
 interface ChatListItemProps {
   chat: ChatThread;
   onPress: () => void;
+  theme?: UiTheme;
 }
 
-export function ChatListItem({ chat, onPress }: ChatListItemProps) {
+export function ChatListItem({ chat, onPress, theme = "classic" }: ChatListItemProps) {
+  const isNeo = theme === "neo";
+
   return (
-    <Pressable style={styles.container} onPress={onPress}>
+    <Pressable style={[styles.container, isNeo && styles.containerNeo]} onPress={onPress}>
       <View style={styles.avatarWrap}>
-        <Image source={{ uri: chat.avatar }} style={styles.avatar} />
+        <Image source={{ uri: chat.avatar }} style={[styles.avatar, isNeo && styles.avatarNeo]} />
         {!!chat.unreadCount && (
-          <View style={styles.unreadBadge}>
+          <View style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
             <Text style={styles.unreadText}>{chat.unreadCount}</Text>
           </View>
         )}
@@ -23,18 +26,32 @@ export function ChatListItem({ chat, onPress }: ChatListItemProps) {
         <View style={styles.rowTop}>
           <View style={styles.nameWrap}>
             {chat.isGroup ? (
-              <Ionicons name="people" size={14} color="#64748b" />
+              <Ionicons
+                name="people"
+                size={14}
+                color={isNeo ? "rgba(226,232,240,0.75)" : "#64748b"}
+              />
             ) : null}
-            <Text style={styles.name} numberOfLines={1}>
+            <Text style={[styles.name, isNeo && styles.nameNeo]} numberOfLines={1}>
               {chat.name}
             </Text>
             {chat.isGroup && chat.memberCount ? (
-              <Text style={styles.memberCount}>{chat.memberCount}</Text>
+              <Text style={[styles.memberCount, isNeo && styles.memberCountNeo]}>
+                {chat.memberCount}
+              </Text>
             ) : null}
           </View>
-          <Text style={styles.time}>{chat.time}</Text>
+          <Text style={[styles.time, isNeo && styles.timeNeo]}>{chat.time}</Text>
         </View>
-        <Text style={[styles.message, chat.highlight && styles.highlight]} numberOfLines={1}>
+        <Text
+          style={[
+            styles.message,
+            chat.highlight && styles.highlight,
+            isNeo && styles.messageNeo,
+            isNeo && chat.highlight && styles.highlightNeo,
+          ]}
+          numberOfLines={1}
+        >
           {chat.highlight && chat.unreadCount ? `[${chat.unreadCount} notifications] ` : ""}
           {chat.message}
         </Text>
@@ -53,6 +70,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(0,0,0,0.05)",
   },
+  containerNeo: {
+    borderBottomColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.01)",
+  },
   avatarWrap: {
     position: "relative",
   },
@@ -61,6 +82,10 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 12,
     backgroundColor: "#d1d5db",
+  },
+  avatarNeo: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
   },
   unreadBadge: {
     position: "absolute",
@@ -75,6 +100,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
+  },
+  unreadBadgeNeo: {
+    borderColor: "rgba(15,23,42,0.9)",
   },
   unreadText: {
     color: "white",
@@ -103,21 +131,37 @@ const styles = StyleSheet.create({
     color: "#111827",
     maxWidth: "84%",
   },
+  nameNeo: {
+    color: "#f8fafc",
+  },
   memberCount: {
     fontSize: 10,
     color: "#64748b",
     fontWeight: "600",
   },
+  memberCountNeo: {
+    color: "rgba(148,163,184,0.95)",
+  },
   time: {
     fontSize: 11,
     color: "#6b7280",
+  },
+  timeNeo: {
+    color: "rgba(148,163,184,0.88)",
   },
   message: {
     fontSize: 12,
     color: "#4b5563",
   },
+  messageNeo: {
+    color: "rgba(203,213,225,0.8)",
+  },
   highlight: {
     color: "#111827",
     fontWeight: "600",
+  },
+  highlightNeo: {
+    color: "#22c55e",
+    fontWeight: "700",
   },
 });

@@ -16,6 +16,8 @@ import {
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 
 import { ChatListItem } from "@/src/components/ChatListItem";
+import { AddBotFriendModal } from "@/src/components/AddBotFriendModal";
+import { MiniAppDock } from "@/src/components/MiniAppDock";
 import { TaskWidget } from "@/src/components/TaskWidget";
 import { TownHouseNode } from "@/src/components/TownHouseNode";
 import { CHAT_DATA } from "@/src/constants/chat";
@@ -34,7 +36,9 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from "@/src/features/townmap/world";
+import { getThemeTokens } from "@/src/theme/ui-theme";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { ChatThread } from "@/src/types";
 
 interface MovingCar {
   id: string;
@@ -54,11 +58,15 @@ function clamp(value: number, min: number, max: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { botConfig, tasks, myHouseType } = useAgentTown();
+  const { botConfig, tasks, myHouseType, uiTheme } = useAgentTown();
+  const theme = getThemeTokens(uiTheme);
+  const isNeo = uiTheme === "neo";
   const { height: windowHeight } = useWindowDimensions();
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [sceneSize, setSceneSize] = useState({ width: 360, height: 360 });
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  const [chatThreads, setChatThreads] = useState<ChatThread[]>(CHAT_DATA);
+  const [isAddBotModalVisible, setIsAddBotModalVisible] = useState(false);
 
   const chatSheetHeight = Math.max(320, Math.round(windowHeight * 0.5));
   const chatSheetPeek = 68;
@@ -224,11 +232,33 @@ export default function HomeScreen() {
     [chatSheetTranslateY, maxSheetTranslate]
   );
 
+  const openThread = useCallback(
+    (chat: ChatThread) => {
+      router.push({
+        pathname: "/chat/[id]",
+        params: {
+          id: chat.id,
+          name: chat.name,
+          avatar: chat.avatar,
+          isGroup: chat.isGroup ? "true" : "false",
+          memberCount: chat.memberCount ? String(chat.memberCount) : undefined,
+          phoneNumber: chat.phoneNumber ?? undefined,
+          supportsVideo: chat.supportsVideo === false ? "false" : "true",
+        },
+      });
+    },
+    [router]
+  );
+
+  const handleAddBotFriend = useCallback((thread: ChatThread) => {
+    setChatThreads((prev) => [thread, ...prev]);
+  }, []);
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.safeArea }]}>
       <View style={styles.topSection}>
         <View
-          style={styles.townBg}
+          style={[styles.townBg, { backgroundColor: theme.mapBase }]}
           onLayout={(event) => {
             const nextWidth = event.nativeEvent.layout.width;
             const nextHeight = event.nativeEvent.layout.height;
@@ -245,6 +275,32 @@ export default function HomeScreen() {
             }
           }}
         >
+          {isNeo ? (
+            <>
+              <View style={styles.neoDimmer} />
+              <View style={styles.neoGlowPurple} />
+              <View style={styles.neoGlowBlue} />
+              <Svg style={styles.neoGrid} width="100%" height="100%" pointerEvents="none">
+                {Array.from({ length: 13 }).map((_, idx) => (
+                  <Path
+                    key={`neo_grid_h_${idx}`}
+                    d={`M 0 ${idx * 64} L 1600 ${idx * 64}`}
+                    stroke="rgba(255,255,255,0.07)"
+                    strokeWidth={1}
+                  />
+                ))}
+                {Array.from({ length: 9 }).map((_, idx) => (
+                  <Path
+                    key={`neo_grid_v_${idx}`}
+                    d={`M ${idx * 64} 0 L ${idx * 64} 1200`}
+                    stroke="rgba(255,255,255,0.07)"
+                    strokeWidth={1}
+                  />
+                ))}
+              </Svg>
+            </>
+          ) : null}
+
           <View style={[styles.sceneWorldLayer, worldLayerStyle]}>
             <Svg
               width={worldLayerStyle.width}
@@ -401,27 +457,61 @@ export default function HomeScreen() {
           <View style={styles.topBar}>
             <Pressable style={styles.avatarButton} onPress={() => router.push("/config")}>
               <Image source={{ uri: botConfig.avatar }} style={styles.avatar} />
-              <View style={styles.onlineDot} />
+              <View
+                style={[
+                  styles.onlineDot,
+                  isNeo && { borderColor: "rgba(2,6,23,0.9)" },
+                ]}
+              />
             </Pressable>
 
-            <Pressable style={styles.worldButton} onPress={() => router.push("/town-map")}>
+            <Pressable
+              style={[
+                styles.worldButton,
+                {
+                  backgroundColor: theme.topPillBg,
+                  borderColor: theme.topPillBorder,
+                },
+              ]}
+              onPress={() => router.push("/town-map")}
+            >
               <Ionicons name="earth" size={16} color="#16a34a" />
-              <Text style={styles.worldButtonText}>Bot World</Text>
+              <Text style={[styles.worldButtonText, { color: theme.topPillText }]}>
+                {isNeo ? "WORLD MAP" : "Bot World"}
+              </Text>
             </Pressable>
 
             <View style={styles.headerRightGroup}>
-              <Pressable style={styles.iconCircle} onPress={() => router.push("/town-map")}>
-                <Ionicons name="location-outline" size={18} color="#fff" />
+              <Pressable
+                style={[styles.iconCircle, { backgroundColor: theme.iconCircleBg }]}
+                onPress={() => router.push("/town-map")}
+              >
+                <Ionicons name="location-outline" size={18} color={theme.iconCircleText} />
               </Pressable>
-              <Pressable style={styles.iconCircle} onPress={() => router.push("/town-map")}>
-                <Ionicons name="people-outline" size={18} color="#fff" />
+              <Pressable
+                style={[styles.iconCircle, { backgroundColor: theme.iconCircleBg }]}
+                onPress={() => setIsAddBotModalVisible(true)}
+              >
+                <Ionicons name="people-outline" size={18} color={theme.iconCircleText} />
               </Pressable>
             </View>
           </View>
 
-          <View style={styles.previewMeta}>
-            <Text style={styles.previewMetaText}>Home Neighborhood Sync</Text>
-            <Text style={styles.previewMetaSub}>{`${Math.round(worldRect.minX)}-${Math.round(worldRect.maxX)} · ${Math.round(worldRect.minY)}-${Math.round(worldRect.maxY)}`}</Text>
+          <View
+            style={[
+              styles.previewMeta,
+              {
+                backgroundColor: theme.previewCardBg,
+                borderColor: theme.previewCardBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.previewMetaText, { color: theme.previewText }]}>
+              {isNeo ? "No-Engine World Mode" : "Home Neighborhood Sync"}
+            </Text>
+            <Text style={[styles.previewMetaSub, { color: theme.previewSubtext }]}>
+              {`${Math.round(worldRect.minX)}-${Math.round(worldRect.maxX)} · ${Math.round(worldRect.minY)}-${Math.round(worldRect.maxY)}`}
+            </Text>
           </View>
 
           <View
@@ -454,7 +544,57 @@ export default function HomeScreen() {
             <View style={styles.onlineDotMarker} />
           </Pressable>
 
-          <TaskWidget tasks={tasks} containerStyle={taskWidgetOverlayStyle} />
+          <TaskWidget tasks={tasks} containerStyle={taskWidgetOverlayStyle} theme={uiTheme} />
+
+          {isNeo ? (
+            <View style={styles.neoDockWrap} pointerEvents="box-none">
+              <MiniAppDock
+                accentColor={theme.accent}
+                tasks={tasks}
+                onOpenChat={() =>
+                  router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })
+                }
+              />
+            </View>
+          ) : null}
+
+          {isNeo ? (
+            <Pressable
+              style={[
+                styles.neoAskBar,
+                {
+                  backgroundColor: theme.askBarBg,
+                  borderColor: theme.askBarBorder,
+                },
+              ]}
+              onPress={() =>
+                router.push({
+                  pathname: "/chat/[id]",
+                  params: { id: "mybot" },
+                })
+              }
+            >
+              <View style={styles.neoAskPlus}>
+                <Ionicons name="add" size={20} color="white" />
+              </View>
+              <View
+                style={[
+                  styles.neoAskInput,
+                  {
+                    backgroundColor: theme.askBarInputBg,
+                  },
+                ]}
+              >
+                <Text style={[styles.neoAskText, { color: theme.askBarInputText }]}>
+                  Ask anything
+                </Text>
+                <View style={styles.neoAskIcons}>
+                  <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.9)" />
+                  <Ionicons name="pulse-outline" size={16} color="rgba(226,232,240,0.9)" />
+                </View>
+              </View>
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -462,39 +602,42 @@ export default function HomeScreen() {
         style={[
           styles.chatSheet,
           {
+            backgroundColor: theme.chatSheetBg,
+            borderTopColor: theme.chatSheetBorder,
+          },
+          {
             height: chatSheetHeight,
             transform: [{ translateY: chatSheetTranslateY }],
           },
         ]}
       >
         <Pressable
-          style={styles.chatSheetHeader}
+          style={[
+            styles.chatSheetHeader,
+            { borderBottomColor: isNeo ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" },
+          ]}
           onPress={() => setIsChatCollapsed((prev) => !prev)}
           {...chatSheetPanResponder.panHandlers}
         >
-          <View style={styles.chatHandle} />
-          <Text style={styles.chatHeaderTitle}>
-            {isChatCollapsed ? `Chats (${CHAT_DATA.length})` : "Chats"}
+          <View style={[styles.chatHandle, { backgroundColor: theme.chatHandle }]} />
+          <Text style={[styles.chatHeaderTitle, { color: theme.sheetTitle }]}>
+            {isChatCollapsed ? `Chats (${chatThreads.length})` : "Chats"}
           </Text>
           <Ionicons
             name={isChatCollapsed ? "chevron-up" : "chevron-down"}
             size={18}
-            color="#64748b"
+            color={theme.chatHeaderText}
           />
         </Pressable>
 
         <FlatList
-          data={CHAT_DATA}
+          data={chatThreads}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <ChatListItem
               chat={item}
-              onPress={() =>
-                router.push({
-                  pathname: "/chat/[id]",
-                  params: { id: item.id },
-                })
-              }
+              theme={uiTheme}
+              onPress={() => openThread(item)}
             />
           )}
           showsVerticalScrollIndicator={false}
@@ -502,8 +645,15 @@ export default function HomeScreen() {
         />
       </Animated.View>
 
-      <Pressable style={styles.fab}>
-        <Text style={styles.fabText}>+</Text>
+      <AddBotFriendModal
+        visible={isAddBotModalVisible}
+        accentColor={theme.accent}
+        onClose={() => setIsAddBotModalVisible(false)}
+        onAdd={handleAddBotFriend}
+      />
+
+      <Pressable style={[styles.fab, { backgroundColor: theme.fabBg }]}>
+        <Text style={[styles.fabText, { color: theme.fabText }]}>+</Text>
       </Pressable>
     </SafeAreaView>
   );
@@ -522,8 +672,38 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#7ec850",
   },
+  neoDimmer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2,6,23,0.42)",
+    zIndex: 0,
+  },
+  neoGlowPurple: {
+    position: "absolute",
+    right: -70,
+    top: "46%",
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: "rgba(190,24,93,0.28)",
+    zIndex: 0,
+  },
+  neoGlowBlue: {
+    position: "absolute",
+    left: -80,
+    top: "10%",
+    width: 280,
+    height: 220,
+    borderRadius: 120,
+    backgroundColor: "rgba(59,130,246,0.22)",
+    zIndex: 0,
+  },
+  neoGrid: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
   sceneWorldLayer: {
     position: "absolute",
+    zIndex: 2,
   },
   topBar: {
     position: "absolute",
@@ -599,6 +779,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.25)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.15)",
+    maxWidth: 260,
   },
   previewMetaText: {
     fontSize: 10,
@@ -724,6 +905,56 @@ const styles = StyleSheet.create({
     backgroundColor: "#22c55e",
     borderWidth: 2,
     borderColor: "#fff",
+  },
+  neoDockWrap: {
+    position: "absolute",
+    top: "16%",
+    left: 14,
+    right: 14,
+    zIndex: 34,
+  },
+  neoAskBar: {
+    position: "absolute",
+    top: "42%",
+    left: 16,
+    right: 16,
+    minHeight: 72,
+    borderRadius: 36,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    zIndex: 35,
+  },
+  neoAskPlus: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neoAskInput: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  neoAskText: {
+    fontSize: 15,
+    fontWeight: "500",
+    letterSpacing: 0.2,
+  },
+  neoAskIcons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   chatSheet: {
     position: "absolute",

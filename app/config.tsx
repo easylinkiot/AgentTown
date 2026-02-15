@@ -21,6 +21,7 @@ import { AVATAR_PRESETS } from "@/src/constants/avatars";
 import { MARKET_DATA } from "@/src/constants/marketplace";
 import { generateGeminiJson } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { useAuth } from "@/src/state/auth-context";
 import { BotConfig, MarketItem } from "@/src/types";
 
 interface SkillForm {
@@ -47,7 +48,8 @@ const emptySkillForm: SkillForm = {
 
 export default function ConfigScreen() {
   const router = useRouter();
-  const { botConfig, updateBotConfig } = useAgentTown();
+  const { botConfig, updateBotConfig, uiTheme, updateUiTheme } = useAgentTown();
+  const { user, signOut } = useAuth();
 
   const [name, setName] = useState(botConfig.name);
   const [avatar, setAvatar] = useState(botConfig.avatar);
@@ -85,6 +87,11 @@ export default function ConfigScreen() {
     };
     updateBotConfig(next);
     router.back();
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.replace("/sign-in");
   };
 
   const uploadKnowledge = async () => {
@@ -169,6 +176,67 @@ export default function ConfigScreen() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Account</Text>
+          <Text style={styles.accountText}>
+            {`Signed in as ${user?.displayName || "Unknown"}`}
+          </Text>
+          <Text style={styles.accountSubtext}>
+            {`Provider: ${user?.provider || "unknown"}${user?.email ? ` · ${user.email}` : ""}${
+              user?.phone ? ` · ${user.phone}` : ""
+            }`}
+          </Text>
+          <Pressable style={styles.signOutBtn} onPress={handleSignOut}>
+            <Ionicons name="log-out-outline" size={16} color="#b91c1c" />
+            <Text style={styles.signOutBtnText}>Sign Out</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Theme</Text>
+          <Text style={styles.accountSubtext}>
+            Choose between original style and new dark-glass Mini App style.
+          </Text>
+          <View style={styles.themeRow}>
+            <Pressable
+              style={[styles.themeBtn, uiTheme === "classic" && styles.themeBtnActive]}
+              onPress={() => updateUiTheme("classic")}
+            >
+              <Ionicons
+                name="sunny-outline"
+                size={16}
+                color={uiTheme === "classic" ? "white" : "#334155"}
+              />
+              <Text
+                style={[
+                  styles.themeBtnText,
+                  uiTheme === "classic" && styles.themeBtnTextActive,
+                ]}
+              >
+                Classic
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.themeBtn, uiTheme === "neo" && styles.themeBtnActiveNeo]}
+              onPress={() => updateUiTheme("neo")}
+            >
+              <Ionicons
+                name="moon-outline"
+                size={16}
+                color={uiTheme === "neo" ? "white" : "#334155"}
+              />
+              <Text
+                style={[
+                  styles.themeBtnText,
+                  uiTheme === "neo" && styles.themeBtnTextActive,
+                ]}
+              >
+                Neo Glass
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Bot Identity</Text>
           <View style={styles.identityRow}>
@@ -387,6 +455,64 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#f3f4f6",
+  },
+  accountText: {
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "700",
+  },
+  accountSubtext: {
+    fontSize: 12,
+    color: "#475569",
+    lineHeight: 18,
+  },
+  signOutBtn: {
+    minHeight: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  signOutBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#b91c1c",
+  },
+  themeRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  themeBtn: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f8fafc",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  themeBtnActive: {
+    backgroundColor: "#16a34a",
+    borderColor: "#16a34a",
+  },
+  themeBtnActiveNeo: {
+    backgroundColor: "#1e293b",
+    borderColor: "#1e293b",
+  },
+  themeBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  themeBtnTextActive: {
+    color: "white",
   },
   header: {
     height: 56,
