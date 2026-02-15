@@ -41,3 +41,7 @@ yarn-error.*
 /ios
 /android
 /artifacts
+
+# python cache
+__pycache__/
+*.pyc
