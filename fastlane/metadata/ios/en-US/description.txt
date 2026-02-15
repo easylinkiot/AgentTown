@@ -1,0 +1,14 @@
+AgentTown turns team chat into an execution workspace.
+
+Create mini apps from natural language, run them inside the conversation, and keep context in one place.
+
+What you can do:
+- Generate mini apps from chat prompts.
+- Confirm inputs and rules before running.
+- Run and write back summary results to chat.
+- Coordinate team tasks with bots and people.
+- Explore a world-map style workspace for teams, homes, and bot neighborhoods.
+
+Built for product teams, operations, creators, and AI-native workflows.
+
+AgentTown supports bilingual UI (English and Chinese) and keeps creation fast with minimal interruption to chat flow.

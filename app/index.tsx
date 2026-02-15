@@ -264,12 +264,6 @@ export default function HomeScreen() {
   }, [chatSheetTranslateY, maxSheetTranslate]);
 
   useEffect(() => {
-    if (!isNeo && isInlineAskVisible) {
-      setIsInlineAskVisible(false);
-    }
-  }, [isInlineAskVisible, isNeo]);
-
-  useEffect(() => {
     if (!isInlineAskVisible) return;
     const timer = setTimeout(() => {
       inlineAskScrollRef.current?.scrollToEnd({ animated: true });
@@ -359,6 +353,9 @@ export default function HomeScreen() {
       },
     ]);
   }, [inlineAskInput, language]);
+
+  const askAuxIconColor = isNeo ? "rgba(226,232,240,0.9)" : "#64748b";
+  const shouldShowAskBar = !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen;
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.safeArea }]}>
@@ -598,8 +595,8 @@ export default function HomeScreen() {
                 ]}
               >
                 {isNeo
-                  ? tr("世界地图", "WORLD MAP")
-                  : tr("世界地图", "World Map")}
+                  ? tr("智界", "AGENT WORLD")
+                  : tr("智界", "Agent World")}
               </Text>
             </Pressable>
 
@@ -689,9 +686,9 @@ export default function HomeScreen() {
             style={[
               styles.neoDockWrap,
               !isNeo ? styles.classicDockWrap : { top: neoDockTop },
-              isNeo && isInlineAskVisible ? styles.neoDockHidden : null,
+              isInlineAskVisible ? styles.neoDockHidden : null,
             ]}
-            pointerEvents={isNeo && isInlineAskVisible ? "none" : "box-none"}
+            pointerEvents={isInlineAskVisible ? "none" : "box-none"}
           >
             <MiniAppDock
               accentColor={theme.accent}
@@ -705,10 +702,11 @@ export default function HomeScreen() {
             />
           </View>
 
-          {isNeo && !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen ? (
+          {shouldShowAskBar ? (
             <Pressable
               style={[
                 styles.neoAskBar,
+                !isNeo && styles.askBarClassic,
                 {
                   bottom: neoAskBottom,
                   backgroundColor: theme.askBarBg,
@@ -717,14 +715,16 @@ export default function HomeScreen() {
               ]}
               onPress={() => setIsInlineAskVisible(true)}
             >
-              <View style={styles.neoAskPlus}>
-                <Ionicons name="add" size={20} color="white" />
+              <View style={[styles.neoAskPlus, !isNeo && styles.askPlusClassic]}>
+                <Ionicons name="add" size={20} color={isNeo ? "white" : "#0f172a"} />
               </View>
               <View
                 style={[
                   styles.neoAskInput,
+                  !isNeo && styles.askInputClassic,
                   {
                     backgroundColor: theme.askBarInputBg,
+                    borderColor: isNeo ? "rgba(255,255,255,0.12)" : "#cbd5e1",
                   },
                 ]}
               >
@@ -732,17 +732,18 @@ export default function HomeScreen() {
                   {tr("随便问我", "Ask anything")}
                 </Text>
                 <View style={styles.neoAskIcons}>
-                  <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.9)" />
-                  <Ionicons name="pulse-outline" size={16} color="rgba(226,232,240,0.9)" />
+                  <Ionicons name="mic-outline" size={16} color={askAuxIconColor} />
+                  <Ionicons name="pulse-outline" size={16} color={askAuxIconColor} />
                 </View>
               </View>
             </Pressable>
           ) : null}
 
-          {isNeo && isInlineAskVisible ? (
+          {isInlineAskVisible ? (
             <View
               style={[
                 styles.inlineAskPanel,
+                !isNeo && styles.inlineAskPanelClassic,
                 {
                   bottom: neoAskBottom,
                 },
@@ -750,24 +751,28 @@ export default function HomeScreen() {
             >
               <View style={styles.inlineAskHeader}>
                 <Pressable
-                  style={styles.inlineAskHeaderIcon}
+                  style={[styles.inlineAskHeaderIcon, !isNeo && styles.inlineAskHeaderIconClassic]}
                   onPress={() => setIsInlineAskVisible(false)}
                 >
-                  <Ionicons name="chevron-back" size={20} color="#60a5fa" />
+                  <Ionicons name="chevron-back" size={20} color={isNeo ? "#60a5fa" : "#2563eb"} />
                 </Pressable>
                 <Image source={{ uri: botConfig.avatar }} style={styles.inlineAskHeaderAvatar} />
-                <Text style={styles.inlineAskHeaderTitle}>MyBot</Text>
+                <Text style={[styles.inlineAskHeaderTitle, !isNeo && styles.inlineAskHeaderTitleClassic]}>
+                  MyBot
+                </Text>
                 <View style={styles.inlineAskHeaderSpacer} />
-                <Pressable style={styles.inlineAskHeaderIcon}>
+                <Pressable style={[styles.inlineAskHeaderIcon, !isNeo && styles.inlineAskHeaderIconClassic]}>
                   <Ionicons
                     name="ellipsis-horizontal"
                     size={18}
-                    color="rgba(248,250,252,0.88)"
+                    color={isNeo ? "rgba(248,250,252,0.88)" : "#334155"}
                   />
                 </Pressable>
               </View>
 
-              <Text style={styles.inlineAskTimeText}>{tr("刚刚", "Just now")}</Text>
+              <Text style={[styles.inlineAskTimeText, !isNeo && styles.inlineAskTimeTextClassic]}>
+                {tr("刚刚", "Just now")}
+              </Text>
 
               <ScrollView
                 ref={inlineAskScrollRef}
@@ -793,11 +798,13 @@ export default function HomeScreen() {
                       style={[
                         styles.inlineAskBubble,
                         item.isMe ? styles.inlineAskBubbleMe : styles.inlineAskBubbleBot,
+                        !isNeo && !item.isMe ? styles.inlineAskBubbleBotClassic : null,
                       ]}
                     >
                       <Text
                         style={[
                           styles.inlineAskBubbleText,
+                          !isNeo && styles.inlineAskBubbleTextClassic,
                           item.isMe ? styles.inlineAskBubbleTextMe : null,
                         ]}
                       >
@@ -808,28 +815,33 @@ export default function HomeScreen() {
                 ))}
               </ScrollView>
 
-              <View style={styles.inlineAskComposer}>
-                <Pressable style={styles.inlineAskComposerIcon}>
-                  <Ionicons name="add" size={22} color="rgba(203,213,225,0.95)" />
+              <View style={[styles.inlineAskComposer, !isNeo && styles.inlineAskComposerClassic]}>
+                <Pressable style={[styles.inlineAskComposerIcon, !isNeo && styles.inlineAskComposerIconClassic]}>
+                  <Ionicons name="add" size={22} color={isNeo ? "rgba(203,213,225,0.95)" : "#64748b"} />
                 </Pressable>
 
-                <View style={styles.inlineAskInputWrap}>
+                <View style={[styles.inlineAskInputWrap, !isNeo && styles.inlineAskInputWrapClassic]}>
                   <TextInput
-                    style={styles.inlineAskInput}
+                    style={[styles.inlineAskInput, !isNeo && styles.inlineAskInputClassic]}
                     placeholder={tr("iMessage", "iMessage")}
-                    placeholderTextColor="rgba(148,163,184,0.78)"
+                    placeholderTextColor={isNeo ? "rgba(148,163,184,0.78)" : "#94a3b8"}
                     value={inlineAskInput}
                     onChangeText={setInlineAskInput}
                     returnKeyType="send"
                     onSubmitEditing={handleInlineAskSend}
                   />
-                  <Ionicons name="happy-outline" size={20} color="rgba(148,163,184,0.88)" />
+                  <Ionicons
+                    name="happy-outline"
+                    size={20}
+                    color={isNeo ? "rgba(148,163,184,0.88)" : "#94a3b8"}
+                  />
                 </View>
 
                 <Pressable
                   style={[
                     styles.inlineAskComposerIcon,
                     styles.inlineAskComposerPrimary,
+                    !isNeo && styles.inlineAskComposerPrimaryClassic,
                   ]}
                   onPress={handleInlineAskSend}
                 >
@@ -866,11 +878,11 @@ export default function HomeScreen() {
             { borderBottomColor: isNeo ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" },
           ]}
           onPress={() => {
-            if (isNeo) {
-              setChatSheetMode((prev) => (prev === "fullscreen" ? "normal" : "fullscreen"));
-              return;
-            }
-            setChatSheetMode((prev) => (prev === "collapsed" ? "normal" : "collapsed"));
+            setChatSheetMode((prev) => {
+              if (prev === "collapsed") return "normal";
+              if (prev === "normal") return "fullscreen";
+              return "collapsed";
+            });
           }}
           {...chatSheetPanResponder.panHandlers}
         >
@@ -1252,6 +1264,12 @@ const styles = StyleSheet.create({
     gap: 8,
     zIndex: 36,
   },
+  askBarClassic: {
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+  },
   neoAskPlus: {
     width: 48,
     height: 48,
@@ -1261,6 +1279,10 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  askPlusClassic: {
+    backgroundColor: "#22c55e",
+    borderColor: "#22c55e",
   },
   neoAskInput: {
     flex: 1,
@@ -1272,6 +1294,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  askInputClassic: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#cbd5e1",
   },
   neoAskText: {
     fontSize: 16,
@@ -1295,6 +1321,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     zIndex: 38,
   },
+  inlineAskPanelClassic: {
+    borderColor: "rgba(148,163,184,0.28)",
+    backgroundColor: "rgba(255,255,255,0.98)",
+  },
   inlineAskHeader: {
     minHeight: 56,
     borderBottomWidth: 1,
@@ -1312,6 +1342,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.06)",
   },
+  inlineAskHeaderIconClassic: {
+    backgroundColor: "#f1f5f9",
+  },
   inlineAskHeaderAvatar: {
     width: 32,
     height: 32,
@@ -1323,6 +1356,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#f8fafc",
   },
+  inlineAskHeaderTitleClassic: {
+    color: "#0f172a",
+  },
   inlineAskHeaderSpacer: {
     flex: 1,
   },
@@ -1331,6 +1367,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 11,
     color: "rgba(148,163,184,0.72)",
+  },
+  inlineAskTimeTextClassic: {
+    color: "#94a3b8",
   },
   inlineAskMessages: {
     maxHeight: 280,
@@ -1366,6 +1405,9 @@ const styles = StyleSheet.create({
   inlineAskBubbleBot: {
     backgroundColor: "rgba(51,65,85,0.64)",
   },
+  inlineAskBubbleBotClassic: {
+    backgroundColor: "#e2e8f0",
+  },
   inlineAskBubbleMe: {
     backgroundColor: "rgba(34,197,94,0.95)",
   },
@@ -1373,6 +1415,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "rgba(248,250,252,0.92)",
     lineHeight: 20,
+  },
+  inlineAskBubbleTextClassic: {
+    color: "#334155",
   },
   inlineAskBubbleTextMe: {
     color: "#052e16",
@@ -1388,6 +1433,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  inlineAskComposerClassic: {
+    borderTopColor: "rgba(148,163,184,0.28)",
+  },
   inlineAskComposerIcon: {
     width: 44,
     height: 44,
@@ -1398,8 +1446,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
+  inlineAskComposerIconClassic: {
+    backgroundColor: "#f1f5f9",
+    borderColor: "#cbd5e1",
+  },
   inlineAskComposerPrimary: {
     backgroundColor: "rgba(30,64,175,0.5)",
+  },
+  inlineAskComposerPrimaryClassic: {
+    backgroundColor: "#2563eb",
+    borderColor: "#1d4ed8",
   },
   inlineAskInputWrap: {
     flex: 1,
@@ -1414,11 +1470,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  inlineAskInputWrapClassic: {
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+  },
   inlineAskInput: {
     flex: 1,
     color: "rgba(248,250,252,0.92)",
     fontSize: 16,
     paddingVertical: 0,
+  },
+  inlineAskInputClassic: {
+    color: "#1e293b",
   },
   chatSheet: {
     position: "absolute",

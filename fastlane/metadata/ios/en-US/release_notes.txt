@@ -1,0 +1,5 @@
+- New dark and classic themes with improved visual consistency.
+- New Create App flow for chat-driven mini app generation.
+- Added mini app runtime and summary writeback to chat.
+- Improved world map visuals and interaction layers.
+- Added bilingual support (English and Chinese).

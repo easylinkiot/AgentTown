@@ -372,24 +372,27 @@ function getTypeMeta(type: MiniAppType): {
   };
 }
 
-function buildFallbackCard(prompt: string): MiniAppCard {
+function buildFallbackCard(prompt: string, language: AppLanguage = "zh"): MiniAppCard {
   const type = inferType(prompt);
   const meta = getTypeMeta(type);
+  const isZh = language === "zh";
 
   if (type === "flashcard") {
     return {
       id: `draft_${Date.now()}`,
-      title: "每日单词打卡",
+      title: isZh ? "每日单词打卡" : "Word Sprint",
       type,
       icon: meta.icon,
       color: meta.color,
       heroImage: meta.heroImage,
-      description: "每日生成高频高阶词，支持发音、释义和例句。",
+      description: isZh
+        ? "每日生成高频高阶词，支持发音、释义和例句。"
+        : "Generate daily high-frequency vocabulary with pronunciation and examples.",
       flashcard: {
-        word: "Serendipity",
-        pronunciation: "/ˌserənˈdɪpəti/",
-        definition: "意外发现珍贵事物的幸运能力。",
-        example: "We found this idea by pure serendipity.",
+        word: isZh ? "Serendipity" : "Momentum",
+        pronunciation: isZh ? "/ˌserənˈdɪpəti/" : "/məˈmentəm/",
+        definition: isZh ? "意外发现珍贵事物的幸运能力。" : "The force that keeps growth moving forward.",
+        example: isZh ? "We found this idea by pure serendipity." : "Our product gained strong momentum this quarter.",
       },
     };
   }
@@ -397,12 +400,14 @@ function buildFallbackCard(prompt: string): MiniAppCard {
   if (type === "price_tracker") {
     return {
       id: `draft_${Date.now()}`,
-      title: "降价猎手",
+      title: isZh ? "降价猎手" : "Price Hunter",
       type,
       icon: meta.icon,
       color: meta.color,
       heroImage: meta.heroImage,
-      description: "监控你关注品牌的最低价并自动给出提醒。",
+      description: isZh
+        ? "监控你关注品牌的最低价并自动给出提醒。"
+        : "Track your saved products and alert the lowest available prices.",
       priceItems: [
         { product: "Lululemon Align", retailer: "Lulu CN", price: 499, trend: "down" },
         { product: "On Cloudmonster", retailer: "On Store", price: 1099, trend: "stable" },
@@ -413,34 +418,48 @@ function buildFallbackCard(prompt: string): MiniAppCard {
 
   return {
     id: `draft_${Date.now()}`,
-    title: "AI 科技全景哨兵",
+    title: isZh ? "AI 科技全景哨兵" : "AI News Radar",
     type,
     icon: meta.icon,
     color: meta.color,
     heroImage: meta.heroImage,
-    description: "实时聚合 Reddit、GitHub 及中美科技媒体的 AI 热点。",
+    description: isZh
+      ? "实时聚合 Reddit、GitHub 及中美科技媒体的 AI 热点。"
+      : "Aggregate AI headlines from Reddit, GitHub, and major media in real time.",
     newsItems: [
       {
-        title: "Reddit 热议：Meta 计划在下季度推出新模型",
+        title: isZh
+          ? "Reddit 热议：Meta 计划在下季度推出新模型"
+          : "Reddit Buzz: Meta plans a new model next quarter",
         source: "Reddit",
-        summary: "开发者社区持续讨论模型参数与推理效率。",
+        summary: isZh
+          ? "开发者社区持续讨论模型参数与推理效率。"
+          : "Developers are debating model scale and inference efficiency.",
       },
       {
-        title: "GitHub Trending: Open-Devin 项目活跃度上升",
+        title: isZh
+          ? "GitHub Trending: Open-Devin 项目活跃度上升"
+          : "GitHub Trending: Open-Devin activity is rising",
         source: "GitHub",
-        summary: "开源 Agent 工程化能力进入新一轮迭代。",
+        summary: isZh
+          ? "开源 Agent 工程化能力进入新一轮迭代。"
+          : "Open-source agent engineering is entering another acceleration cycle.",
       },
       {
-        title: "The Verge: OpenAI 语音交互模型进展",
+        title: isZh
+          ? "The Verge: OpenAI 语音交互模型进展"
+          : "The Verge: OpenAI voice interaction model progress",
         source: "The Verge",
-        summary: "多模态交互体验成为产品落地关键方向。",
+        summary: isZh
+          ? "多模态交互体验成为产品落地关键方向。"
+          : "Multimodal interaction is becoming a key product direction.",
       },
     ],
   };
 }
 
 function buildQuickActionApp(action: QuickAction, language: AppLanguage): MiniAppCard {
-  const fallback = buildFallbackCard(quickActionPrompt(action.id, language));
+  const fallback = buildFallbackCard(quickActionPrompt(action.id, language), language);
   return {
     ...fallback,
     id: `quick_${action.id}`,
@@ -451,8 +470,8 @@ function buildQuickActionApp(action: QuickAction, language: AppLanguage): MiniAp
   };
 }
 
-function normalizeGeneratedCard(raw: any, prompt: string): MiniAppCard {
-  const fallback = buildFallbackCard(prompt);
+function normalizeGeneratedCard(raw: any, prompt: string, language: AppLanguage): MiniAppCard {
+  const fallback = buildFallbackCard(prompt, language);
   if (!raw || typeof raw !== "object") return fallback;
 
   const type: MiniAppType =
@@ -538,8 +557,12 @@ function normalizeGeneratedCard(raw: any, prompt: string): MiniAppCard {
   return card;
 }
 
-async function generateMiniAppCard(prompt: string) {
-  const fallback = buildFallbackCard(prompt);
+async function generateMiniAppCard(prompt: string, language: AppLanguage) {
+  const fallback = buildFallbackCard(prompt, language);
+  const outputLangHint =
+    language === "zh"
+      ? "Use Chinese for all user-facing strings."
+      : "Use English for all user-facing strings.";
 
   const generated = await generateGeminiJson<any>(
     [
@@ -557,7 +580,7 @@ async function generateMiniAppCard(prompt: string) {
       '  "example": "..."',
       "}",
       "Rules:",
-      "1) Use Chinese for all user-facing strings.",
+      `1) ${outputLangHint}`,
       "2) If type is news_feed or price_tracker, provide 3 items.",
       "3) If type is flashcard, provide word/pronunciation/definition/example.",
       `User prompt: ${prompt}`,
@@ -580,7 +603,7 @@ async function generateMiniAppCard(prompt: string) {
     }
   );
 
-  return normalizeGeneratedCard(generated, prompt);
+  return normalizeGeneratedCard(generated, prompt, language);
 }
 
 function AppPreviewCard({ app }: { app: MiniAppCard }) {
@@ -793,11 +816,28 @@ export function MiniAppDock({
   const [previewMode, setPreviewMode] = useState<"new" | "installed">("new");
   const [showManager, setShowManager] = useState(false);
 
+  const appDisplayTitle = (app: MiniAppCard) =>
+    app.shortcutId ? quickActionLabel(app.shortcutId, language) : app.title;
+
   useEffect(() => {
     if (installedApps.length > 0) return;
     const seeded = QUICK_ACTIONS.map((action) => buildQuickActionApp(action, language));
     setInstalledApps(seeded);
   }, [installedApps.length, language]);
+
+  useEffect(() => {
+    setInstalledApps((prev) => {
+      let changed = false;
+      const next = prev.map((app) => {
+        if (!app.shortcutId) return app;
+        const localized = quickActionLabel(app.shortcutId, language);
+        if (app.title === localized) return app;
+        changed = true;
+        return { ...app, title: localized };
+      });
+      return changed ? next : prev;
+    });
+  }, [language]);
 
   useEffect(() => {
     persistedInstalledApps = installedApps;
@@ -838,7 +878,7 @@ export function MiniAppDock({
       setShowTasks((prev) => !prev);
       return;
     }
-    setActiveRuntimeApp(app);
+    setActiveRuntimeApp({ ...app, title: appDisplayTitle(app) });
   };
 
   const moveInstalledApp = (fromIndex: number, toIndex: number) => {
@@ -863,6 +903,7 @@ export function MiniAppDock({
     setInstalledApps((prev) =>
       prev.map((app) => {
         if (app.id !== id) return app;
+        if (app.shortcutId) return app;
         const title = nextTitle.trim().slice(0, 24);
         return { ...app, title: title || app.title };
       })
@@ -898,14 +939,14 @@ export function MiniAppDock({
 
     try {
       setIsGenerating(true);
-      const app = await generateMiniAppCard(raw);
+      const app = await generateMiniAppCard(raw, language);
       setDraftApp(app);
       setPreviewMode("new");
     } catch {
       Alert.alert(tr("生成失败", "Generation failed"), tr("已切换到本地模板，请稍后重试。", "Switched to fallback template. Please try again."), [
         {
           text: "OK",
-          onPress: () => setDraftApp(buildFallbackCard(raw)),
+          onPress: () => setDraftApp(buildFallbackCard(raw, language)),
         },
       ]);
     } finally {
@@ -989,7 +1030,7 @@ export function MiniAppDock({
                 <Ionicons name={app.icon} size={14} color="white" />
               </View>
               <Text style={[styles.actionLabel, !isNeo && styles.actionLabelClassic]} numberOfLines={1}>
-                {app.title}
+                {appDisplayTitle(app)}
               </Text>
             </Pressable>
           ))}
@@ -1038,7 +1079,7 @@ export function MiniAppDock({
 
         {installedApps.length > 0 ? (
           <View style={styles.generatedCard}>
-            <Text style={styles.generatedCardTitle}>{installedApps[0].title}</Text>
+            <Text style={styles.generatedCardTitle}>{appDisplayTitle(installedApps[0])}</Text>
             <Text style={styles.generatedCardText} numberOfLines={2}>
               {tr(
                 "已安装，点击可再次打开；点击“运行并回写”把摘要写回聊天流。",
@@ -1266,8 +1307,9 @@ export function MiniAppDock({
                   </View>
                   <TextInput
                     style={[styles.managerInput, !isNeo && styles.managerInputClassic]}
-                    value={app.title}
+                    value={appDisplayTitle(app)}
                     onChangeText={(next) => renameInstalledApp(app.id, next)}
+                    editable={!app.shortcutId}
                     maxLength={24}
                     placeholder={tr("应用名称", "App title")}
                     placeholderTextColor={isNeo ? "rgba(148,163,184,0.8)" : "#94a3b8"}

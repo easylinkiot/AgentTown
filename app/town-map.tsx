@@ -594,7 +594,7 @@ export default function TownMapScreen() {
           </Pressable>
           <View style={styles.mapPill}>
             <Ionicons name="earth" size={14} color="#16a34a" />
-            <Text style={styles.mapPillText}>{tr("世界地图", "World Map")}</Text>
+            <Text style={styles.mapPillText}>{tr("智界", "Agent World")}</Text>
           </View>
         </View>
 

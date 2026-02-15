@@ -1,0 +1,13 @@
+AgentTown is a chat-driven workspace for AI-native teams.
+
+Turn plain chat messages into runnable mini apps, then execute and write back summaries to keep everyone aligned.
+
+Core capabilities:
+- Mini app generation from natural language prompts.
+- Editable fields and validation before running.
+- Runtime execution with summary writeback to chat.
+- Team collaboration with bots, tasks, and grouped conversations.
+- World-map style interface for navigating team contexts.
+- Bilingual UI: English and Chinese.
+
+Use AgentTown to move from discussion to execution faster.
