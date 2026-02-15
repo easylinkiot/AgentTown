@@ -6,6 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "android_native":"expo run:android",
+    "ios_native": "expo run:ios",
     "web": "expo start --web",
     "start:clean": "expo start --clear",
     "lint": "eslint .",
