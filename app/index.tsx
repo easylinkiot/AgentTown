@@ -202,20 +202,33 @@ export default function HomeScreen() {
   );
 
   const taskWidgetBottom = useMemo(() => {
-    const desiredBottom = isChatCollapsed
+    const baseBottom = isChatCollapsed
       ? chatSheetPeek + 18
       : isChatFullscreen
         ? chatSheetHeight + 12
         : chatSheetNormalHeight + 16;
+    const shouldReserveAskBarSpace =
+      !isNeo && !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen;
+    const desiredBottom = shouldReserveAskBarSpace ? baseBottom + 84 : baseBottom;
     const maxBottomInsideScene = Math.max(94, sceneSize.height - 210);
     return Math.min(desiredBottom, maxBottomInsideScene);
-  }, [chatSheetHeight, chatSheetNormalHeight, chatSheetPeek, isChatCollapsed, isChatFullscreen, sceneSize.height]);
+  }, [
+    chatSheetHeight,
+    chatSheetNormalHeight,
+    chatSheetPeek,
+    isChatCollapsed,
+    isChatFullscreen,
+    isDockTaskPanelVisible,
+    isInlineAskVisible,
+    isNeo,
+    sceneSize.height,
+  ]);
 
   const taskWidgetOverlayStyle = useMemo(
     () => ({
       right: 14,
       bottom: taskWidgetBottom,
-      zIndex: 12,
+      zIndex: 37,
     }),
     [taskWidgetBottom]
   );
