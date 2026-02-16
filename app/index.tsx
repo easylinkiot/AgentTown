@@ -209,7 +209,18 @@ export default function HomeScreen() {
         : chatSheetNormalHeight + 16;
     const shouldReserveAskBarSpace =
       !isNeo && !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen;
-    const desiredBottom = shouldReserveAskBarSpace ? baseBottom + 84 : baseBottom;
+    const askBarBottom = Math.max(
+      isChatCollapsed
+        ? chatSheetPeek + 14
+        : isChatFullscreen
+          ? chatSheetHeight + 14
+          : chatSheetNormalHeight + 14,
+      104
+    );
+    const askBarTop = askBarBottom + 66;
+    const desiredBottom = shouldReserveAskBarSpace
+      ? Math.max(baseBottom, askBarTop + 14)
+      : baseBottom;
     const maxBottomInsideScene = Math.max(94, sceneSize.height - 210);
     return Math.min(desiredBottom, maxBottomInsideScene);
   }, [
