@@ -13,6 +13,9 @@ RAW_DIR = ROOT / "marketing" / "store-assets" / "raw"
 OUT_ROOT = ROOT / "marketing" / "store-assets" / "generated"
 LOGO_DIR = OUT_ROOT / "logo"
 APP_ASSETS_DIR = ROOT / "assets" / "images"
+IOS_APP_ICON_PATH = ROOT / "ios" / "AgentTown" / "Images.xcassets" / "AppIcon.appiconset" / "App-Icon-1024x1024@1x.png"
+IOS_SPLASH_LEGACY_DIR = ROOT / "ios" / "AgentTown" / "Images.xcassets" / "SplashScreenLegacy.imageset"
+ANDROID_RES_DIR = ROOT / "android" / "app" / "src" / "main" / "res"
 IOS_SCREENSHOT_DIR_EN = ROOT / "fastlane" / "screenshots" / "en-US"
 IOS_SCREENSHOT_DIR_ZH = ROOT / "fastlane" / "screenshots" / "zh-Hans"
 ANDROID_IMAGES_DIR = ROOT / "fastlane" / "metadata" / "android" / "images"
@@ -61,6 +64,19 @@ def rounded_mask(size: Tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
+def add_blurred_ellipse(
+    canvas: Image.Image,
+    bbox: Tuple[int, int, int, int],
+    color: Tuple[int, int, int, int],
+    blur: int,
+) -> None:
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    draw.ellipse(bbox, fill=color)
+    layer = layer.filter(ImageFilter.GaussianBlur(radius=blur))
+    canvas.alpha_composite(layer)
+
+
 def draw_world_chat_symbol(
     canvas: Image.Image,
     center_x: int,
@@ -69,145 +85,269 @@ def draw_world_chat_symbol(
     dark_bg: bool,
 ) -> None:
     draw = ImageDraw.Draw(canvas)
-    accent = (34, 197, 94, 255)
-    fg = (248, 250, 252, 248) if dark_bg else (15, 23, 42, 240)
-    globe_line = (255, 255, 255, 235)
-    stroke = max(3, icon_size // 32)
+    line_color = (246, 252, 255, 248) if dark_bg else (22, 40, 77, 236)
+    stroke = max(6, icon_size // 52)
 
-    globe_r = int(icon_size * 0.28)
-    globe_cy = center_y - int(icon_size * 0.17)
+    globe_r = int(icon_size * 0.39)
+    globe_cy = center_y - int(icon_size * 0.20)
+    globe_left = center_x - globe_r
+    globe_top = globe_cy - globe_r
+    globe_size = globe_r * 2
 
-    draw.ellipse(
+    add_blurred_ellipse(
+        canvas,
         (
-            center_x - globe_r,
-            globe_cy - globe_r,
-            center_x + globe_r,
-            globe_cy + globe_r,
+            globe_left - int(globe_r * 0.35),
+            globe_top - int(globe_r * 0.30),
+            globe_left + globe_size + int(globe_r * 0.35),
+            globe_top + globe_size + int(globe_r * 0.45),
         ),
-        fill=accent,
+        (34, 197, 94, 130) if dark_bg else (16, 185, 129, 90),
+        blur=max(16, icon_size // 12),
     )
+
+    globe_top_color = (88, 246, 178) if dark_bg else (47, 219, 152)
+    globe_bottom_color = (25, 190, 123) if dark_bg else (20, 161, 109)
+    globe = gradient((globe_size, globe_size), globe_top_color, globe_bottom_color).convert("RGBA")
+    globe_mask = Image.new("L", (globe_size, globe_size), 0)
+    ImageDraw.Draw(globe_mask).ellipse((0, 0, globe_size - 1, globe_size - 1), fill=255)
+    globe.putalpha(globe_mask)
+
+    gloss = Image.new("RGBA", (globe_size, globe_size), (0, 0, 0, 0))
+    gloss_draw = ImageDraw.Draw(gloss)
+    gloss_draw.ellipse(
+        (
+            int(globe_size * 0.12),
+            int(globe_size * 0.04),
+            int(globe_size * 0.56),
+            int(globe_size * 0.46),
+        ),
+        fill=(255, 255, 255, 62 if dark_bg else 46),
+    )
+    gloss = gloss.filter(ImageFilter.GaussianBlur(radius=max(6, icon_size // 58)))
+    globe = Image.alpha_composite(globe, gloss)
+    canvas.alpha_composite(globe, (globe_left, globe_top))
+
     draw.ellipse(
         (
-            center_x - int(globe_r * 0.56),
-            globe_cy - globe_r,
-            center_x + int(globe_r * 0.56),
-            globe_cy + globe_r,
+            center_x - int(globe_r * 0.57),
+            globe_cy - globe_r + int(globe_r * 0.02),
+            center_x + int(globe_r * 0.57),
+            globe_cy + globe_r - int(globe_r * 0.02),
         ),
-        outline=globe_line,
+        outline=line_color,
         width=stroke,
     )
     draw.ellipse(
         (
-            center_x - globe_r,
+            center_x - globe_r + int(globe_r * 0.02),
             globe_cy - int(globe_r * 0.34),
-            center_x + globe_r,
+            center_x + globe_r - int(globe_r * 0.02),
             globe_cy + int(globe_r * 0.34),
         ),
-        outline=globe_line,
+        outline=line_color,
         width=stroke,
     )
     draw.line(
         (
-            center_x - int(globe_r * 0.92),
+            center_x - int(globe_r * 0.90),
             globe_cy,
-            center_x + int(globe_r * 0.92),
+            center_x + int(globe_r * 0.90),
             globe_cy,
         ),
-        fill=globe_line,
+        fill=line_color,
         width=stroke,
     )
 
-    bubble_w = int(icon_size * 0.76)
-    bubble_h = int(icon_size * 0.24)
-    bubble_x = center_x - bubble_w // 2
-    bubble_y = center_y + int(icon_size * 0.18)
-    bubble_radius = int(icon_size * 0.09)
-    draw.rounded_rectangle(
-        (bubble_x, bubble_y, bubble_x + bubble_w, bubble_y + bubble_h),
-        radius=bubble_radius,
-        fill=fg,
+    dot_r = max(6, icon_size // 36)
+    dot_x = center_x + int(globe_r * 0.76)
+    dot_y = globe_cy + int(globe_r * 0.70)
+    add_blurred_ellipse(
+        canvas,
+        (dot_x - dot_r * 3, dot_y - dot_r * 3, dot_x + dot_r * 3, dot_y + dot_r * 3),
+        (32, 221, 136, 128 if dark_bg else 90),
+        blur=max(6, icon_size // 84),
     )
-    draw.polygon(
-        [
-            (bubble_x + int(bubble_w * 0.44), bubble_y + bubble_h),
-            (bubble_x + int(bubble_w * 0.56), bubble_y + bubble_h),
-            (bubble_x + int(bubble_w * 0.50), bubble_y + bubble_h + int(icon_size * 0.08)),
-        ],
-        fill=fg,
-    )
-
-    dot_r = max(4, icon_size // 24)
-    dot_x = center_x + int(globe_r * 0.7)
-    dot_y = globe_cy + int(globe_r * 0.7)
     draw.ellipse(
         (dot_x - dot_r, dot_y - dot_r, dot_x + dot_r, dot_y + dot_r),
-        fill=accent,
-        outline=(255, 255, 255, 250),
-        width=max(1, stroke // 2),
+        fill=(34, 197, 94, 255),
+        outline=(255, 255, 255, 248),
+        width=max(2, stroke // 3),
     )
+
+    bubble_w = int(icon_size * 0.86)
+    bubble_h = int(icon_size * 0.30)
+    bubble_tail_h = int(icon_size * 0.11)
+    bubble_x = center_x - bubble_w // 2
+    bubble_y = center_y + int(icon_size * 0.26)
+    bubble_radius = int(bubble_h * 0.48)
+
+    shadow_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow_layer)
+    shadow_offset = max(6, icon_size // 96)
+    shadow_draw.rounded_rectangle(
+        (
+            bubble_x + shadow_offset,
+            bubble_y + shadow_offset + 1,
+            bubble_x + bubble_w + shadow_offset,
+            bubble_y + bubble_h + shadow_offset + 1,
+        ),
+        radius=bubble_radius,
+        fill=(8, 22, 44, 120 if dark_bg else 72),
+    )
+    shadow_draw.polygon(
+        [
+            (bubble_x + int(bubble_w * 0.44) + shadow_offset, bubble_y + bubble_h + shadow_offset + 1),
+            (bubble_x + int(bubble_w * 0.56) + shadow_offset, bubble_y + bubble_h + shadow_offset + 1),
+            (
+                bubble_x + int(bubble_w * 0.50) + shadow_offset,
+                bubble_y + bubble_h + bubble_tail_h - int(icon_size * 0.01) + 1,
+            ),
+        ],
+        fill=(8, 22, 44, 120 if dark_bg else 72),
+    )
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=max(8, icon_size // 64)))
+    canvas.alpha_composite(shadow_layer)
+
+    bubble = Image.new("RGBA", (bubble_w, bubble_h + bubble_tail_h), (0, 0, 0, 0))
+    bubble_draw = ImageDraw.Draw(bubble)
+    top_color = (250, 252, 255) if dark_bg else (247, 250, 255)
+    bottom_color = (226, 234, 246) if dark_bg else (222, 233, 246)
+    for y in range(bubble_h):
+        t = y / max(1, bubble_h - 1)
+        bubble_line = tuple(int(top_color[i] * (1 - t) + bottom_color[i] * t) for i in range(3)) + (255,)
+        bubble_draw.line((0, y, bubble_w, y), fill=bubble_line)
+    bubble_draw.polygon(
+        [
+            (int(bubble_w * 0.44), bubble_h),
+            (int(bubble_w * 0.56), bubble_h),
+            (int(bubble_w * 0.50), bubble_h + bubble_tail_h - int(icon_size * 0.01)),
+        ],
+        fill=bottom_color + (255,),
+    )
+
+    bubble_mask = Image.new("L", (bubble_w, bubble_h + bubble_tail_h), 0)
+    mask_draw = ImageDraw.Draw(bubble_mask)
+    mask_draw.rounded_rectangle((0, 0, bubble_w, bubble_h), radius=bubble_radius, fill=255)
+    mask_draw.polygon(
+        [
+            (int(bubble_w * 0.44), bubble_h),
+            (int(bubble_w * 0.56), bubble_h),
+            (int(bubble_w * 0.50), bubble_h + bubble_tail_h - int(icon_size * 0.01)),
+        ],
+        fill=255,
+    )
+    bubble.putalpha(bubble_mask)
+
+    gloss_overlay = Image.new("RGBA", bubble.size, (0, 0, 0, 0))
+    gloss_draw = ImageDraw.Draw(gloss_overlay)
+    gloss_draw.rounded_rectangle(
+        (int(bubble_w * 0.08), int(bubble_h * 0.20), int(bubble_w * 0.92), int(bubble_h * 0.34)),
+        radius=max(6, bubble_h // 16),
+        fill=(204, 215, 232, 145 if dark_bg else 118),
+    )
+    gloss_overlay = gloss_overlay.filter(ImageFilter.GaussianBlur(radius=max(4, icon_size // 140)))
+    bubble = Image.alpha_composite(bubble, gloss_overlay)
+    canvas.alpha_composite(bubble, (bubble_x, bubble_y))
 
 
 def draw_brand_mark(size: int = 1024, dark_bg: bool = True, mode: str = "card") -> Image.Image:
     if dark_bg:
-        bg_start, bg_end = (9, 6, 22), (14, 24, 48)
-        border_color = (49, 67, 106, 255)
+        bg_start, bg_end = (2, 10, 36), (8, 23, 66)
+        border_color = (74, 103, 171, 196)
     else:
-        bg_start, bg_end = (246, 250, 255), (233, 241, 251)
-        border_color = (198, 215, 239, 255)
+        bg_start, bg_end = (240, 247, 255), (228, 239, 252)
+        border_color = (170, 194, 225, 196)
 
     base = gradient((size, size), bg_start, bg_end).convert("RGBA")
 
+    add_blurred_ellipse(
+        base,
+        (int(size * 0.15), int(size * -0.18), int(size * 0.92), int(size * 0.52)),
+        (43, 223, 149, 95) if dark_bg else (52, 211, 153, 56),
+        blur=max(36, size // 8),
+    )
+    add_blurred_ellipse(
+        base,
+        (int(size * -0.24), int(size * 0.46), int(size * 0.44), int(size * 1.14)),
+        (75, 158, 255, 70) if dark_bg else (96, 165, 250, 52),
+        blur=max(40, size // 8),
+    )
+    if dark_bg:
+        add_blurred_ellipse(
+            base,
+            (int(size * 0.36), int(size * 0.60), int(size * 1.08), int(size * 1.24)),
+            (203, 35, 128, 72),
+            blur=max(48, size // 8),
+        )
+
+    center = size // 2
+    symbol_size = int(size * (0.58 if mode == "card" else 0.64))
+
     if mode == "card":
         draw = ImageDraw.Draw(base)
-        pad = int(size * 0.06)
-        radius = int(size * 0.22)
-        card_color = (9, 21, 55, 245) if dark_bg else (250, 252, 255, 252)
+        pad = int(size * 0.07)
+        radius = int(size * 0.23)
+        card_color = (7, 23, 64, 238) if dark_bg else (248, 252, 255, 248)
         draw.rounded_rectangle(
             (pad, pad, size - pad, size - pad),
             radius=radius,
             fill=card_color,
             outline=border_color,
-            width=max(3, size // 220),
+            width=max(2, size // 280),
         )
-        center = size // 2
-        glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        glow_draw = ImageDraw.Draw(glow)
-        glow_r = int(size * 0.26)
-        glow_draw.ellipse(
-            (center - glow_r, center - glow_r - int(size * 0.1), center + glow_r, center + glow_r),
-            fill=(34, 197, 94, 76),
+        draw.rounded_rectangle(
+            (pad + 3, pad + 3, size - pad - 3, size - pad - 3),
+            radius=max(6, radius - 3),
+            outline=(180, 220, 255, 38) if dark_bg else (153, 176, 206, 62),
+            width=max(1, size // 512),
         )
-        glow = glow.filter(ImageFilter.GaussianBlur(radius=size // 18))
-        base = Image.alpha_composite(base, glow)
-        draw_world_chat_symbol(base, center, center, int(size * 0.56), dark_bg=True)
-    else:
-        center = size // 2
-        glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        glow_draw = ImageDraw.Draw(glow)
-        glow_r = int(size * 0.34)
-        glow_draw.ellipse(
-            (
-                center - glow_r,
-                center - glow_r - int(size * 0.08),
-                center + glow_r,
-                center + glow_r + int(size * 0.04),
-            ),
-            fill=(34, 197, 94, 62),
-        )
-        glow = glow.filter(ImageFilter.GaussianBlur(radius=size // 16))
-        base = Image.alpha_composite(base, glow)
-        draw_world_chat_symbol(base, center, center, int(size * 0.62), dark_bg=dark_bg)
+        symbol_size = int(size * 0.56)
+
+    draw_world_chat_symbol(base, center, center, symbol_size, dark_bg=dark_bg)
 
     return base
 
 
 def generate_runtime_icons() -> None:
-    ensure_dirs([APP_ASSETS_DIR])
+    ensure_dirs([APP_ASSETS_DIR, IOS_SPLASH_LEGACY_DIR, ANDROID_IMAGES_DIR])
     icon_1024 = draw_brand_mark(size=1024, dark_bg=True, mode="plain").convert("RGB")
     icon_1024.save(APP_ASSETS_DIR / "icon.png", quality=95)
     icon_1024.save(APP_ASSETS_DIR / "adaptive-icon.png", quality=95)
     icon_1024.save(APP_ASSETS_DIR / "splash-icon.png", quality=95)
     icon_1024.resize((48, 48), Image.Resampling.LANCZOS).save(APP_ASSETS_DIR / "favicon.png")
+    icon_1024.save(IOS_APP_ICON_PATH, quality=95)
+    for splash_name in ("image.png", "image@2x.png", "image@3x.png"):
+        icon_1024.save(IOS_SPLASH_LEGACY_DIR / splash_name, quality=95)
+
+    launcher_sizes = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+    foreground_sizes = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
+    splash_sizes = {"mdpi": 288, "hdpi": 432, "xhdpi": 576, "xxhdpi": 864, "xxxhdpi": 1152}
+
+    for density, px in launcher_sizes.items():
+        mipmap_dir = ANDROID_RES_DIR / f"mipmap-{density}"
+        ensure_dirs([mipmap_dir])
+        resized = icon_1024.resize((px, px), Image.Resampling.LANCZOS)
+        resized.save(mipmap_dir / "ic_launcher.webp", format="WEBP", quality=95, method=6)
+        resized.save(mipmap_dir / "ic_launcher_round.webp", format="WEBP", quality=95, method=6)
+
+    for density, px in foreground_sizes.items():
+        mipmap_dir = ANDROID_RES_DIR / f"mipmap-{density}"
+        ensure_dirs([mipmap_dir])
+        icon_1024.resize((px, px), Image.Resampling.LANCZOS).save(
+            mipmap_dir / "ic_launcher_foreground.webp",
+            format="WEBP",
+            quality=95,
+            method=6,
+        )
+
+    for density, px in splash_sizes.items():
+        drawable_dir = ANDROID_RES_DIR / f"drawable-{density}"
+        ensure_dirs([drawable_dir])
+        icon_1024.resize((px, px), Image.Resampling.LANCZOS).save(
+            drawable_dir / "splashscreen_logo.png",
+            quality=95,
+        )
 
 
 def draw_logo_variants() -> None:
