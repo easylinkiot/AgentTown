@@ -43,7 +43,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [tasks, setTasks] = useState<TaskItem[]>(defaultTasks);
   const [myHouseType, setMyHouseType] = useState<number>(3);
   const [uiTheme, setUiTheme] = useState<UiTheme>("classic");
-  const [language, setLanguage] = useState<AppLanguage>("zh");
+  const [language, setLanguage] = useState<AppLanguage>("en");
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {

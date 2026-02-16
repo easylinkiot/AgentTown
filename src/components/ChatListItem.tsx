@@ -14,7 +14,7 @@ export function ChatListItem({
   chat,
   onPress,
   theme = "classic",
-  language = "zh",
+  language = "en",
 }: ChatListItemProps) {
   const isNeo = theme === "neo";
 

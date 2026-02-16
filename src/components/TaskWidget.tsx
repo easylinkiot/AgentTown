@@ -9,7 +9,7 @@ export function TaskWidget({
   tasks,
   containerStyle,
   theme = "classic",
-  language = "zh",
+  language = "en",
 }: {
   tasks: TaskItem[];
   containerStyle?: StyleProp<ViewStyle>;

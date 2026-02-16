@@ -372,7 +372,7 @@ function getTypeMeta(type: MiniAppType): {
   };
 }
 
-function buildFallbackCard(prompt: string, language: AppLanguage = "zh"): MiniAppCard {
+function buildFallbackCard(prompt: string, language: AppLanguage = "en"): MiniAppCard {
   const type = inferType(prompt);
   const meta = getTypeMeta(type);
   const isZh = language === "zh";
@@ -800,7 +800,7 @@ export function MiniAppDock({
   onOpenChat,
   tasks,
   theme = "classic",
-  language = "zh",
+  language = "en",
   onTaskPanelVisibilityChange,
 }: MiniAppDockProps) {
   const isNeo = theme === "neo";

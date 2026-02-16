@@ -30,7 +30,7 @@ export function AddBotFriendModal({
   visible,
   accentColor,
   theme = "classic",
-  language = "zh",
+  language = "en",
   onClose,
   onAdd,
 }: AddBotFriendModalProps) {
