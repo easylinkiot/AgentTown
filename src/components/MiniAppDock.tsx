@@ -1,14 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -66,6 +68,10 @@ interface MiniAppCard {
 }
 
 let persistedInstalledApps: MiniAppCard[] = [];
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
 
 interface MiniAppDockProps {
   accentColor: string;
@@ -804,6 +810,7 @@ export function MiniAppDock({
   onTaskPanelVisibilityChange,
 }: MiniAppDockProps) {
   const isNeo = theme === "neo";
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const [expanded, setExpanded] = useState(true);
   const [showCreator, setShowCreator] = useState(false);
@@ -815,6 +822,19 @@ export function MiniAppDock({
   const [activeRuntimeApp, setActiveRuntimeApp] = useState<MiniAppCard | null>(null);
   const [previewMode, setPreviewMode] = useState<"new" | "installed">("new");
   const [showManager, setShowManager] = useState(false);
+  const [collapsedOffset, setCollapsedOffset] = useState({ x: 0, y: 0 });
+  const [collapsedSide, setCollapsedSide] = useState<"left" | "right">("right");
+  const collapsedOffsetRef = useRef(collapsedOffset);
+  const hasInitCollapsedOffset = useRef(false);
+  const collapsedDragStart = useRef({ x: 0, y: 0 });
+  const collapsedPressStartAt = useRef(0);
+  const collapsedDidMove = useRef(false);
+
+  const collapsedMaxX = useMemo(() => Math.max(0, windowWidth - 28 - 60), [windowWidth]);
+  const collapsedMaxY = useMemo(
+    () => Math.max(0, Math.min(windowHeight * (isNeo ? 0.42 : 0.34), isNeo ? 340 : 300)),
+    [isNeo, windowHeight]
+  );
 
   const appDisplayTitle = (app: MiniAppCard) =>
     app.shortcutId ? quickActionLabel(app.shortcutId, language) : app.title;
@@ -846,6 +866,116 @@ export function MiniAppDock({
   useEffect(() => {
     onTaskPanelVisibilityChange?.(showTasks);
   }, [onTaskPanelVisibilityChange, showTasks]);
+
+  useEffect(() => {
+    if (hasInitCollapsedOffset.current) return;
+    hasInitCollapsedOffset.current = true;
+    const defaultX = isNeo ? Math.max(0, collapsedMaxX - 2) : 0;
+    const defaultY = Math.min(isNeo ? 140 : 0, collapsedMaxY);
+    setCollapsedSide(defaultX > collapsedMaxX / 2 ? "right" : "left");
+    setCollapsedOffset({
+      x: defaultX,
+      y: defaultY,
+    });
+  }, [collapsedMaxX, collapsedMaxY, isNeo]);
+
+  useEffect(() => {
+    collapsedOffsetRef.current = collapsedOffset;
+  }, [collapsedOffset]);
+
+  useEffect(() => {
+    setCollapsedOffset((prev) => {
+      const nextX = clamp(prev.x, 0, collapsedMaxX);
+      const nextY = clamp(prev.y, 0, collapsedMaxY);
+      if (prev.x === nextX && prev.y === nextY) return prev;
+      return { x: nextX, y: nextY };
+    });
+  }, [collapsedMaxX, collapsedMaxY]);
+
+  const collapsedPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          collapsedDragStart.current = collapsedOffsetRef.current;
+          collapsedPressStartAt.current = Date.now();
+          collapsedDidMove.current = false;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (
+            !collapsedDidMove.current &&
+            (Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2)
+          ) {
+            collapsedDidMove.current = true;
+          }
+          const nextX = clamp(
+            collapsedDragStart.current.x + gestureState.dx,
+            0,
+            collapsedMaxX
+          );
+          const nextY = clamp(
+            collapsedDragStart.current.y + gestureState.dy,
+            0,
+            collapsedMaxY
+          );
+          setCollapsedOffset((prev) => {
+            if (prev.x === nextX && prev.y === nextY) return prev;
+            return { x: nextX, y: nextY };
+          });
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const tapDuration = Date.now() - collapsedPressStartAt.current;
+          const consideredTap =
+            !collapsedDidMove.current &&
+            Math.abs(gestureState.dx) <= 3 &&
+            Math.abs(gestureState.dy) <= 3 &&
+            tapDuration < 220;
+          if (consideredTap) {
+            setExpanded(true);
+            return;
+          }
+          const rawX = collapsedDragStart.current.x + gestureState.dx;
+          const rawY = collapsedDragStart.current.y + gestureState.dy;
+          const clampedX = clamp(rawX, 0, collapsedMaxX);
+          const clampedY = clamp(rawY, 0, collapsedMaxY);
+          const edgeSnapThreshold = 18;
+          const settledX =
+            clampedX < edgeSnapThreshold
+              ? 0
+              : collapsedMaxX - clampedX < edgeSnapThreshold
+                ? collapsedMaxX
+                : clampedX;
+          setCollapsedSide(settledX > collapsedMaxX / 2 ? "right" : "left");
+          setCollapsedOffset({
+            x: settledX,
+            y: clampedY,
+          });
+        },
+        onPanResponderTerminate: (_, gestureState) => {
+          const rawX = collapsedDragStart.current.x + gestureState.dx;
+          const rawY = collapsedDragStart.current.y + gestureState.dy;
+          const clampedX = clamp(rawX, 0, collapsedMaxX);
+          const clampedY = clamp(rawY, 0, collapsedMaxY);
+          const edgeSnapThreshold = 18;
+          const settledX =
+            clampedX < edgeSnapThreshold
+              ? 0
+              : collapsedMaxX - clampedX < edgeSnapThreshold
+                ? collapsedMaxX
+                : clampedX;
+          setCollapsedSide(settledX > collapsedMaxX / 2 ? "right" : "left");
+          setCollapsedOffset({
+            x: settledX,
+            y: clampedY,
+          });
+        },
+      }),
+    [collapsedMaxX, collapsedMaxY]
+  );
 
   const selectedCountText = language === "zh" ? "创建应用" : "Create App";
   const createSubText =
@@ -973,12 +1103,37 @@ export function MiniAppDock({
 
   if (!expanded) {
     return (
-      <Pressable
-        style={[styles.minButton, !isNeo && styles.minButtonClassic]}
-        onPress={() => setExpanded(true)}
-      >
-        <Ionicons name="grid-outline" size={22} color="white" />
-      </Pressable>
+      <View style={styles.minButtonArea} pointerEvents="box-none">
+        <View
+          style={[
+            styles.minButtonDraggable,
+            {
+              transform: [
+                { translateX: collapsedOffset.x },
+                { translateY: collapsedOffset.y },
+              ],
+            },
+          ]}
+          {...collapsedPanResponder.panHandlers}
+        >
+          <View style={[styles.minButton, !isNeo && styles.minButtonClassic]}>
+            <Ionicons name="grid-outline" size={22} color="white" />
+          </View>
+          {isNeo ? (
+            <View
+              style={[
+                styles.minButtonLabel,
+                collapsedSide === "right"
+                  ? styles.minButtonLabelLeft
+                  : styles.minButtonLabelRight,
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={styles.minButtonLabelText}>{tr("仪表盘", "Dashboard")}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
     );
   }
 
@@ -1666,6 +1821,36 @@ const styles = StyleSheet.create({
   minButtonClassic: {
     backgroundColor: "#22c55e",
     borderColor: "rgba(255,255,255,0.75)",
+  },
+  minButtonArea: {
+    width: "100%",
+    minHeight: 84,
+  },
+  minButtonDraggable: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+  },
+  minButtonLabel: {
+    position: "absolute",
+    top: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(2,6,23,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  minButtonLabelLeft: {
+    right: 68,
+  },
+  minButtonLabelRight: {
+    left: 68,
+  },
+  minButtonLabelText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(248,250,252,0.92)",
   },
   modalOverlay: {
     flex: 1,

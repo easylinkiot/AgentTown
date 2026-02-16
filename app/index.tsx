@@ -20,7 +20,6 @@ import Svg, { Circle, Path, Rect } from "react-native-svg";
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { AddBotFriendModal } from "@/src/components/AddBotFriendModal";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
-import { TaskWidget } from "@/src/components/TaskWidget";
 import { TownHouseNode } from "@/src/components/TownHouseNode";
 import { CHAT_DATA } from "@/src/constants/chat";
 import {
@@ -199,49 +198,6 @@ export default function HomeScreen() {
       y: Math.max(106, sceneSize.height * 0.27),
     }),
     [sceneSize.height, sceneSize.width]
-  );
-
-  const taskWidgetBottom = useMemo(() => {
-    const baseBottom = isChatCollapsed
-      ? chatSheetPeek + 18
-      : isChatFullscreen
-        ? chatSheetHeight + 12
-        : chatSheetNormalHeight + 16;
-    const shouldReserveAskBarSpace =
-      !isNeo && !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen;
-    const askBarBottom = Math.max(
-      isChatCollapsed
-        ? chatSheetPeek + 14
-        : isChatFullscreen
-          ? chatSheetHeight + 14
-          : chatSheetNormalHeight + 14,
-      104
-    );
-    const askBarTop = askBarBottom + 66;
-    const desiredBottom = shouldReserveAskBarSpace
-      ? Math.max(baseBottom, askBarTop + 14)
-      : baseBottom;
-    const maxBottomInsideScene = Math.max(94, sceneSize.height - 210);
-    return Math.min(desiredBottom, maxBottomInsideScene);
-  }, [
-    chatSheetHeight,
-    chatSheetNormalHeight,
-    chatSheetPeek,
-    isChatCollapsed,
-    isChatFullscreen,
-    isDockTaskPanelVisible,
-    isInlineAskVisible,
-    isNeo,
-    sceneSize.height,
-  ]);
-
-  const taskWidgetOverlayStyle = useMemo(
-    () => ({
-      right: 14,
-      bottom: taskWidgetBottom,
-      zIndex: 37,
-    }),
-    [taskWidgetBottom]
   );
 
   const neoDockTop = useMemo(
@@ -697,12 +653,6 @@ export default function HomeScreen() {
                 <View style={styles.onlineDotMarker} />
               </Pressable>
 
-              <TaskWidget
-                tasks={tasks}
-                containerStyle={taskWidgetOverlayStyle}
-                theme={uiTheme}
-                language={language}
-              />
             </>
           ) : null}
 
