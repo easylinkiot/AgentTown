@@ -172,6 +172,23 @@ npm run android
 npm run web
 ```
 
+## Native Run Scripts
+
+When you need to run with native build pipelines (instead of Expo Go), use:
+
+```bash
+npm run ios_native
+npm run android_native
+```
+
+- `ios_native`: runs `expo run:ios` and builds/installs the app to iOS Simulator (or selected iOS device).
+- `android_native`: runs `expo run:android` and builds/installs the app to Android emulator (or connected Android device).
+
+Prerequisites:
+
+- iOS: Xcode + CocoaPods available in your shell.
+- Android: Android SDK + `adb` + an emulator/device ready.
+
 ## Quality Gates
 
 ```bash
