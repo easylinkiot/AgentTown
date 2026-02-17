@@ -1,11 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Speech from "expo-speech";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from "expo-speech-recognition";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -73,7 +79,8 @@ export default function ChatDetailScreen() {
   }>();
   const chatId = String(params.id || "");
 
-  const { botConfig, addTask, language } = useAgentTown();
+  const { botConfig, addTask, language, voiceModeEnabled, updateVoiceModeEnabled } =
+    useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const thread = useMemo(() => {
     const routeName = typeof params.name === "string" ? params.name : "";
@@ -114,13 +121,19 @@ export default function ChatDetailScreen() {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiContext, setAiContext] = useState<AiContextState>({ mode: "idle", data: null });
   const [attachmentPanelVisible, setAttachmentPanelVisible] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<PickedImageAsset | null>(null);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const handleSendRef = useRef<(text?: string) => void>(() => {});
+  const chatVoiceActiveRef = useRef(false);
   const [groupMemberCount, setGroupMemberCount] = useState(
     thread.memberCount ?? (isGroupChat ? 6 : 2)
   );
   const [inviteCursor, setInviteCursor] = useState(0);
   const scrollRef = useRef<ScrollView | null>(null);
   const inputRef = useRef<TextInput>(null);
+  const isFocused = useIsFocused();
+  const voiceLocale = language === "zh" ? "zh-CN" : "en-US";
   const focusInput = useCallback(() => {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
@@ -161,8 +174,73 @@ export default function ChatDetailScreen() {
     setMessages((prev) => [...prev, systemMessage]);
   };
 
-  const handleSend = async () => {
-    const text = inputValue.trim();
+  const speakText = useCallback(
+    (text: string) => {
+      if (!voiceModeEnabled || !text) return;
+      Speech.stop();
+      Speech.speak(text, {
+        language: voiceLocale,
+        rate: language === "zh" ? 0.92 : 1.0,
+      });
+    },
+    [language, voiceLocale, voiceModeEnabled]
+  );
+
+  useEffect(() => {
+    chatVoiceActiveRef.current = isFocused;
+    if (!isFocused) {
+      setIsVoiceListening(false);
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (!isFocused && isVoiceListening) {
+      ExpoSpeechRecognitionModule.abort();
+    }
+  }, [isFocused, isVoiceListening]);
+
+  useSpeechRecognitionEvent("start", () => {
+    if (!chatVoiceActiveRef.current) return;
+    setIsVoiceListening(true);
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    if (!chatVoiceActiveRef.current) return;
+    setIsVoiceListening(false);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    if (!chatVoiceActiveRef.current) return;
+    const transcript = event.results?.[0]?.transcript?.trim();
+    if (!transcript) return;
+    setInputValue(transcript);
+    if (event.isFinal) {
+      setIsVoiceListening(false);
+      ExpoSpeechRecognitionModule.stop();
+      handleSendRef.current?.(transcript);
+    }
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    if (!chatVoiceActiveRef.current) return;
+    setIsVoiceListening(false);
+    appendSystemMessage(
+      tr(
+        `语音识别失败：${event.error}`,
+        `Speech recognition failed: ${event.error}`
+      )
+    );
+  });
+
+  useEffect(() => {
+    return () => {
+      ExpoSpeechRecognitionModule.abort();
+      Speech.stop();
+    };
+  }, []);
+
+  const handleSend = async (overrideText?: string) => {
+    const text = (overrideText ?? inputValue).trim();
     if (!text) {
       focusInput();
       return;
@@ -202,7 +280,12 @@ export default function ChatDetailScreen() {
 
     setMessages((prev) => [...prev, aiMessage]);
     setIsAiThinking(false);
+    speakText(aiMessage.content);
   };
+
+  useEffect(() => {
+    handleSendRef.current = handleSend;
+  }, [handleSend]);
 
   const sendImageMessage = async () => {
     if (!pendingImage) return;
@@ -248,6 +331,48 @@ export default function ChatDetailScreen() {
     setMessages((prev) => [...prev, aiMessage]);
     setIsAiThinking(false);
   };
+
+  const startVoiceInput = useCallback(async () => {
+    try {
+      const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+      if (!available) {
+        appendSystemMessage(
+          tr("当前设备不支持语音识别。", "Speech recognition is unavailable on this device.")
+        );
+        return;
+      }
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        appendSystemMessage(
+          tr("未获得麦克风或语音识别权限。", "Microphone or speech permission not granted.")
+        );
+        return;
+      }
+      Speech.stop();
+      setIsVoiceListening(true);
+      ExpoSpeechRecognitionModule.start({
+        lang: voiceLocale,
+        interimResults: true,
+        continuous: false,
+        addsPunctuation: true,
+      });
+    } catch {
+      appendSystemMessage(
+        tr("无法启动语音识别，请稍后重试。", "Unable to start speech recognition. Please try again.")
+      );
+    }
+  }, [appendSystemMessage, tr, voiceLocale]);
+
+  const stopVoiceInput = useCallback(() => {
+    ExpoSpeechRecognitionModule.stop();
+  }, []);
+
+  const toggleVoiceMode = useCallback(() => {
+    if (voiceModeEnabled) {
+      Speech.stop();
+    }
+    updateVoiceModeEnabled(!voiceModeEnabled);
+  }, [updateVoiceModeEnabled, voiceModeEnabled]);
 
   const openImagePicker = async () => {
     try {
@@ -299,19 +424,7 @@ export default function ChatDetailScreen() {
   };
 
   const openMoreActions = () => {
-    if (isGroupChat) {
-      Alert.alert(tr("群聊操作", "Group Actions"), tr("是否添加一个模拟成员到该群？", "Add one mock member to this group?"), [
-        { text: tr("取消", "Cancel"), style: "cancel" },
-        { text: tr("添加成员", "Add Member"), onPress: addMemberToGroup },
-      ]);
-      return;
-    }
-
-    Alert.alert(tr("聊天操作", "Chat Actions"), tr("在此聊天中打开通话选项？", "Open call options in this chat?"), [
-      { text: tr("取消", "Cancel"), style: "cancel" },
-      { text: tr("语音通话", "Voice Call"), onPress: startVoiceCall },
-      { text: tr("视频通话", "Video Call"), onPress: startVideoCall },
-    ]);
+    setIsMoreMenuOpen(true);
   };
 
   const runReplySuggestions = async (msg: ConversationMessage) => {
@@ -404,6 +517,9 @@ export default function ChatDetailScreen() {
     });
   };
 
+  const hasInput = inputValue.trim().length > 0;
+  const shouldShowMic = !pendingImage && !hasInput;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -443,11 +559,70 @@ export default function ChatDetailScreen() {
                 color={thread.supportsVideo === false ? "#9ca3af" : "#111827"}
               />
             </Pressable>
+            <Pressable style={styles.headerMiniBtn} onPress={toggleVoiceMode}>
+              <Ionicons
+                name={voiceModeEnabled ? "pulse" : "pulse-outline"}
+                size={18}
+                color={voiceModeEnabled ? "#22c55e" : "#111827"}
+              />
+            </Pressable>
             <Pressable style={styles.headerMiniBtn} onPress={openMoreActions}>
               <Ionicons name="ellipsis-horizontal" size={18} color="#111827" />
             </Pressable>
           </View>
         </View>
+
+        <Modal
+          transparent
+          visible={isMoreMenuOpen}
+          animationType="fade"
+          onRequestClose={() => setIsMoreMenuOpen(false)}
+        >
+          <View style={styles.moreMenuOverlay} pointerEvents="box-none">
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setIsMoreMenuOpen(false)}
+            />
+            <View style={styles.moreMenuCard}>
+              {isGroupChat ? (
+                <Pressable
+                  style={styles.moreMenuItem}
+                  onPress={() => {
+                    setIsMoreMenuOpen(false);
+                    addMemberToGroup();
+                  }}
+                >
+                  <Ionicons name="person-add-outline" size={18} color="#111827" />
+                  <Text style={styles.moreMenuText}>{tr("拉人进群", "Invite Member")}</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <Pressable
+                    style={styles.moreMenuItem}
+                    onPress={() => {
+                      setIsMoreMenuOpen(false);
+                      startVoiceCall();
+                    }}
+                  >
+                    <Ionicons name="call-outline" size={18} color="#111827" />
+                    <Text style={styles.moreMenuText}>{tr("语音通话", "Voice Call")}</Text>
+                  </Pressable>
+                  <View style={styles.moreMenuDivider} />
+                  <Pressable
+                    style={styles.moreMenuItem}
+                    onPress={() => {
+                      setIsMoreMenuOpen(false);
+                      startVideoCall();
+                    }}
+                  >
+                    <Ionicons name="videocam-outline" size={18} color="#111827" />
+                    <Text style={styles.moreMenuText}>{tr("视频通话", "Video Call")}</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
 
         <ScrollView
           ref={scrollRef}
@@ -727,9 +902,35 @@ export default function ChatDetailScreen() {
           />
           <Pressable
             style={styles.sendBtn}
-            onPress={() => (pendingImage ? sendImageMessage() : handleSend())}
+            onPress={() => {
+              if (pendingImage) {
+                sendImageMessage();
+                return;
+              }
+              if (hasInput) {
+                handleSend();
+                return;
+              }
+              if (isVoiceListening) {
+                stopVoiceInput();
+                return;
+              }
+              startVoiceInput();
+            }}
           >
-            <Ionicons name={pendingImage ? "image" : "send"} size={18} color="white" />
+            <Ionicons
+              name={
+                pendingImage
+                  ? "image"
+                  : hasInput
+                    ? "send"
+                    : isVoiceListening
+                      ? "stop-circle"
+                      : "mic-outline"
+              }
+              size={18}
+              color="white"
+            />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -791,6 +992,42 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
+  },
+  moreMenuOverlay: {
+    flex: 1,
+    alignItems: "flex-end",
+    paddingTop: 66,
+    paddingRight: 12,
+  },
+  moreMenuCard: {
+    minWidth: 180,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "white",
+    paddingVertical: 6,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  moreMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  moreMenuText: {
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "600",
+  },
+  moreMenuDivider: {
+    height: 1,
+    backgroundColor: "#e5e7eb",
+    marginHorizontal: 10,
   },
   messageList: {
     flex: 1,

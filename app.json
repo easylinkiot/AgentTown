@@ -18,7 +18,12 @@
       "bundleIdentifier": "com.biceek.agenttown",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Allow AgentTown to use the microphone for voice input.",
+        "NSSpeechRecognitionUsageDescription": "Allow AgentTown to use speech recognition for voice input.",
+        "NSCameraUsageDescription": "Allow AgentTown to access the camera for sharing photos.",
+        "NSPhotoLibraryUsageDescription": "Allow AgentTown to access your photo library to share images.",
+        "NSPhotoLibraryAddUsageDescription": "Allow AgentTown to save images to your photo library."
       }
     },
     "android": {
@@ -28,7 +33,10 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.jason.agenttown"
+      "package": "com.jason.agenttown",
+      "permissions": [
+        "RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -37,7 +45,15 @@
     },
     "plugins": [
       "expo-router",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow AgentTown to use the microphone for voice input.",
+          "speechRecognitionPermission": "Allow AgentTown to use speech recognition for voice input.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
+  KeyboardAvoidingView,
   Modal,
   PixelRatio,
   Platform,
@@ -1094,7 +1095,11 @@ export default function TownMapScreen() {
         transparent
         onRequestClose={() => setIsChatOpen(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 6 : 0}
+          style={styles.modalOverlay}
+        >
           <View style={styles.chatSheet}>
             <View style={styles.chatHeader}>
               <View style={styles.chatHeaderLeft}>
@@ -1175,7 +1180,7 @@ export default function TownMapScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

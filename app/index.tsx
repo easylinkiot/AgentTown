@@ -1,10 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import * as Speech from "expo-speech";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from "expo-speech-recognition";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   FlatList,
   Image,
+  Keyboard,
+  Platform,
   PanResponder,
   Pressable,
   SafeAreaView,
@@ -66,7 +74,15 @@ function clamp(value: number, min: number, max: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { botConfig, tasks, myHouseType, uiTheme, language } = useAgentTown();
+  const {
+    botConfig,
+    tasks,
+    myHouseType,
+    uiTheme,
+    language,
+    voiceModeEnabled,
+    updateVoiceModeEnabled,
+  } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const theme = getThemeTokens(uiTheme);
   const isNeo = uiTheme === "neo";
@@ -81,6 +97,7 @@ export default function HomeScreen() {
   const [isInlineAskVisible, setIsInlineAskVisible] = useState(false);
   const [isDockTaskPanelVisible, setIsDockTaskPanelVisible] = useState(false);
   const [inlineAskInput, setInlineAskInput] = useState("");
+  const [isInlineAskListening, setIsInlineAskListening] = useState(false);
   const [inlineAskMessages, setInlineAskMessages] = useState<InlineAskMessage[]>(() => [
     {
       id: "welcome",
@@ -93,6 +110,10 @@ export default function HomeScreen() {
   ]);
   const inlineAskScrollRef = useRef<ScrollView | null>(null);
   const inlineAskInputRef = useRef<TextInput>(null);
+  const inlineAskSendRef = useRef<(text?: string) => void>(() => {});
+  const inlineAskVoiceActiveRef = useRef(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const isHomeFocused = useIsFocused();
 
   const isChatCollapsed = chatSheetMode === "collapsed";
   const isChatFullscreen = chatSheetMode === "fullscreen";
@@ -111,6 +132,69 @@ export default function HomeScreen() {
     () => new Map(ROAD_ROUTES.map((route) => [route.id, route])),
     []
   );
+
+  const voiceLocale = language === "zh" ? "zh-CN" : "en-US";
+
+  const speakText = useCallback(
+    (text: string) => {
+      if (!voiceModeEnabled || !text) return;
+      Speech.stop();
+      Speech.speak(text, {
+        language: voiceLocale,
+        rate: language === "zh" ? 0.92 : 1.0,
+      });
+    },
+    [language, voiceLocale, voiceModeEnabled]
+  );
+
+  const appendInlineAskBotMessage = useCallback((text: string) => {
+    setInlineAskMessages((prev) => [
+      ...prev,
+      {
+        id: `ask_bot_${Date.now()}`,
+        text,
+        isMe: false,
+      },
+    ]);
+  }, []);
+
+  useEffect(() => {
+    inlineAskVoiceActiveRef.current =
+      isHomeFocused && (isInlineAskVisible || isInlineAskListening);
+  }, [isHomeFocused, isInlineAskListening, isInlineAskVisible]);
+
+  useSpeechRecognitionEvent("start", () => {
+    if (!inlineAskVoiceActiveRef.current) return;
+    setIsInlineAskListening(true);
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    if (!inlineAskVoiceActiveRef.current) return;
+    setIsInlineAskListening(false);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    if (!inlineAskVoiceActiveRef.current) return;
+    const transcript = event.results?.[0]?.transcript?.trim();
+    if (!transcript) return;
+    setInlineAskInput(transcript);
+    if (event.isFinal) {
+      setIsInlineAskListening(false);
+      ExpoSpeechRecognitionModule.stop();
+      inlineAskSendRef.current?.(transcript);
+    }
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    if (!inlineAskVoiceActiveRef.current) return;
+    setIsInlineAskListening(false);
+    appendInlineAskBotMessage(
+      tr(
+        `语音识别失败：${event.error}`,
+        `Speech recognition failed: ${event.error}`
+      )
+    );
+  });
 
   const sceneCars = useMemo<MovingCar[]>(() => {
     const colors = ["#ef4444", "#3b82f6", "#facc15", "#1f2937", "#ffffff", "#f97316"];
@@ -300,6 +384,28 @@ export default function HomeScreen() {
     return () => clearTimeout(timer);
   }, [isInlineAskVisible]);
 
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      ExpoSpeechRecognitionModule.abort();
+      Speech.stop();
+    };
+  }, []);
+
   const openThread = useCallback(
     (chat: ChatThread) => {
       if (chat.id === "mybot") {
@@ -326,31 +432,81 @@ export default function HomeScreen() {
     setChatThreads((prev) => [thread, ...prev]);
   }, []);
 
-  const handleInlineAskSend = useCallback(() => {
-    const text = inlineAskInput.trim();
+  const handleInlineAskSend = useCallback((overrideText?: string) => {
+    const text = (overrideText ?? inlineAskInput).trim();
     if (!text) return;
 
     setInlineAskInput("");
+    const botReply =
+      language === "zh"
+        ? "收到，我会先给你一个可执行的行动计划。"
+        : "Got it. I will first give you an actionable plan.";
     setInlineAskMessages((prev) => [
       ...prev,
-      {
-        id: `ask_me_${Date.now()}`,
-        text,
-        isMe: true,
-      },
-      {
-        id: `ask_bot_${Date.now() + 1}`,
-        text:
-          language === "zh"
-            ? "收到，我会先给你一个可执行的行动计划。"
-            : "Got it. I will first give you an actionable plan.",
-        isMe: false,
-      },
+      { id: `ask_me_${Date.now()}`, text, isMe: true },
+      { id: `ask_bot_${Date.now() + 1}`, text: botReply, isMe: false },
     ]);
+    speakText(botReply);
     setTimeout(() => inlineAskInputRef.current?.focus(), 0);
-  }, [inlineAskInput, language]);
+  }, [inlineAskInput, language, speakText]);
+
+  useEffect(() => {
+    inlineAskSendRef.current = handleInlineAskSend;
+  }, [handleInlineAskSend]);
+
+  const startInlineAskListening = useCallback(async () => {
+    setIsInlineAskVisible(true);
+    setInlineAskInput("");
+    try {
+      const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+      if (!available) {
+        appendInlineAskBotMessage(
+          tr("当前设备不支持语音识别。", "Speech recognition is unavailable on this device.")
+        );
+        return;
+      }
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        appendInlineAskBotMessage(
+          tr("未获得麦克风或语音识别权限。", "Microphone or speech permission not granted.")
+        );
+        return;
+      }
+      Speech.stop();
+      setIsInlineAskListening(true);
+      ExpoSpeechRecognitionModule.start({
+        lang: voiceLocale,
+        interimResults: true,
+        continuous: false,
+        addsPunctuation: true,
+      });
+    } catch (error) {
+      appendInlineAskBotMessage(
+        tr("无法启动语音识别，请稍后重试。", "Unable to start speech recognition. Please try again.")
+      );
+    }
+  }, [appendInlineAskBotMessage, tr, voiceLocale]);
+
+  const stopInlineAskListening = useCallback(() => {
+    ExpoSpeechRecognitionModule.stop();
+  }, []);
+
+  const toggleVoiceMode = useCallback(() => {
+    if (voiceModeEnabled) {
+      Speech.stop();
+    }
+    updateVoiceModeEnabled(!voiceModeEnabled);
+  }, [updateVoiceModeEnabled, voiceModeEnabled]);
+
+  useEffect(() => {
+    if ((!isInlineAskVisible || !isHomeFocused) && isInlineAskListening) {
+      stopInlineAskListening();
+    }
+  }, [isHomeFocused, isInlineAskListening, isInlineAskVisible, stopInlineAskListening]);
 
   const askAuxIconColor = isNeo ? "rgba(226,232,240,0.9)" : "#64748b";
+  const askMicColor = isInlineAskListening ? theme.accent : askAuxIconColor;
+  const askPulseColor = voiceModeEnabled ? theme.accent : askAuxIconColor;
   const shouldShowAskBar = !isInlineAskVisible && !isDockTaskPanelVisible && !isChatFullscreen;
 
   return (
@@ -720,8 +876,34 @@ export default function HomeScreen() {
                   {tr("随便问我", "Ask anything")}
                 </Text>
                 <View style={styles.neoAskIcons}>
-                  <Ionicons name="mic-outline" size={16} color={askAuxIconColor} />
-                  <Ionicons name="pulse-outline" size={16} color={askAuxIconColor} />
+                  <Pressable
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      if (isInlineAskListening) {
+                        stopInlineAskListening();
+                      } else {
+                        startInlineAskListening();
+                      }
+                    }}
+                  >
+                    <Ionicons
+                      name={isInlineAskListening ? "stop-circle" : "mic-outline"}
+                      size={16}
+                      color={askMicColor}
+                    />
+                  </Pressable>
+                  <Pressable
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      toggleVoiceMode();
+                    }}
+                  >
+                    <Ionicons
+                      name={voiceModeEnabled ? "pulse" : "pulse-outline"}
+                      size={16}
+                      color={askPulseColor}
+                    />
+                  </Pressable>
                 </View>
               </View>
             </Pressable>
@@ -734,6 +916,7 @@ export default function HomeScreen() {
                 !isNeo && styles.inlineAskPanelClassic,
                 {
                   bottom: neoAskBottom,
+                  paddingBottom: keyboardHeight,
                 },
               ]}
             >
@@ -831,12 +1014,29 @@ export default function HomeScreen() {
                   style={[
                     styles.inlineAskComposerIcon,
                     styles.inlineAskComposerPrimary,
+                    isInlineAskListening ? styles.inlineAskComposerPrimaryActive : null,
                     !isNeo && styles.inlineAskComposerPrimaryClassic,
                   ]}
-                  onPress={handleInlineAskSend}
+                  onPress={() => {
+                    if (inlineAskInput.trim()) {
+                      handleInlineAskSend();
+                      return;
+                    }
+                    if (isInlineAskListening) {
+                      stopInlineAskListening();
+                      return;
+                    }
+                    startInlineAskListening();
+                  }}
                 >
                   <Ionicons
-                    name={inlineAskInput.trim() ? "arrow-up" : "mic-outline"}
+                    name={
+                      inlineAskInput.trim()
+                        ? "arrow-up"
+                        : isInlineAskListening
+                          ? "stop-circle"
+                          : "mic-outline"
+                    }
                     size={20}
                     color="rgba(248,250,252,0.95)"
                   />
@@ -1443,6 +1643,10 @@ const styles = StyleSheet.create({
   },
   inlineAskComposerPrimary: {
     backgroundColor: "rgba(30,64,175,0.5)",
+  },
+  inlineAskComposerPrimaryActive: {
+    backgroundColor: "#22c55e",
+    borderColor: "#16a34a",
   },
   inlineAskComposerPrimaryClassic: {
     backgroundColor: "#2563eb",

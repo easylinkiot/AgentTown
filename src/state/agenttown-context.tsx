@@ -9,11 +9,13 @@ interface AgentTownContextValue {
   myHouseType: number;
   uiTheme: UiTheme;
   language: AppLanguage;
+  voiceModeEnabled: boolean;
   updateBotConfig: (next: BotConfig) => void;
   addTask: (task: TaskItem) => void;
   updateHouseType: (next: number) => void;
   updateUiTheme: (next: UiTheme) => void;
   updateLanguage: (next: AppLanguage) => void;
+  updateVoiceModeEnabled: (next: boolean) => void;
 }
 
 const defaultBotConfig: BotConfig = {
@@ -44,6 +46,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [myHouseType, setMyHouseType] = useState<number>(3);
   const [uiTheme, setUiTheme] = useState<UiTheme>("classic");
   const [language, setLanguage] = useState<AppLanguage>("en");
+  const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {
@@ -52,6 +55,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       myHouseType,
       uiTheme,
       language,
+      voiceModeEnabled,
       updateBotConfig: setBotConfig,
       addTask: (task) => {
         setTasks((prev) => [{ ...task, id: task.id ?? String(Date.now()) }, ...prev]);
@@ -59,8 +63,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       updateHouseType: setMyHouseType,
       updateUiTheme: setUiTheme,
       updateLanguage: setLanguage,
+      updateVoiceModeEnabled: setVoiceModeEnabled,
     };
-  }, [botConfig, language, myHouseType, tasks, uiTheme]);
+  }, [botConfig, language, myHouseType, tasks, uiTheme, voiceModeEnabled]);
 
   return (
     <AgentTownContext.Provider value={value}>{children}</AgentTownContext.Provider>

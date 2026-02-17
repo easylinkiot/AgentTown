@@ -3,8 +3,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -1273,7 +1275,11 @@ export function MiniAppDock({
         transparent
         onRequestClose={() => setShowCreator(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+          style={styles.modalOverlay}
+        >
           <View style={[styles.modalCard, !isNeo && styles.modalCardClassic]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleWrap}>
@@ -1393,7 +1399,7 @@ export function MiniAppDock({
               )}
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
