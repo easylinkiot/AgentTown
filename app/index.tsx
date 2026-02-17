@@ -92,6 +92,7 @@ export default function HomeScreen() {
     },
   ]);
   const inlineAskScrollRef = useRef<ScrollView | null>(null);
+  const inlineAskInputRef = useRef<TextInput>(null);
 
   const isChatCollapsed = chatSheetMode === "collapsed";
   const isChatFullscreen = chatSheetMode === "fullscreen";
@@ -289,8 +290,22 @@ export default function HomeScreen() {
     [chatSheetTranslateY, maxSheetTranslate, normalSheetTranslate]
   );
 
+  const openInlineAsk = useCallback(() => {
+    setIsInlineAskVisible(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isInlineAskVisible) return;
+    const timer = setTimeout(() => inlineAskInputRef.current?.focus(), 60);
+    return () => clearTimeout(timer);
+  }, [isInlineAskVisible]);
+
   const openThread = useCallback(
     (chat: ChatThread) => {
+      if (chat.id === "mybot") {
+        openInlineAsk();
+        return;
+      }
       router.push({
         pathname: "/chat/[id]",
         params: {
@@ -304,7 +319,7 @@ export default function HomeScreen() {
         },
       });
     },
-    [router]
+    [openInlineAsk, router]
   );
 
   const handleAddBotFriend = useCallback((thread: ChatThread) => {
@@ -332,6 +347,7 @@ export default function HomeScreen() {
         isMe: false,
       },
     ]);
+    setTimeout(() => inlineAskInputRef.current?.focus(), 0);
   }, [inlineAskInput, language]);
 
   const askAuxIconColor = isNeo ? "rgba(226,232,240,0.9)" : "#64748b";
@@ -647,7 +663,7 @@ export default function HomeScreen() {
                     top: clamp(homeAnchor.y + 22, 88, Math.max(88, sceneSize.height * 0.5 - 58)),
                   },
                 ]}
-                onPress={() => router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })}
+                onPress={openInlineAsk}
               >
                 <Image source={{ uri: botConfig.avatar }} style={styles.markerAvatar} />
                 <View style={styles.onlineDotMarker} />
@@ -670,9 +686,7 @@ export default function HomeScreen() {
               language={language}
               tasks={tasks}
               onTaskPanelVisibilityChange={setIsDockTaskPanelVisible}
-              onOpenChat={() =>
-                router.push({ pathname: "/chat/[id]", params: { id: "mybot" } })
-              }
+              onOpenChat={openInlineAsk}
             />
           </View>
 
@@ -687,7 +701,7 @@ export default function HomeScreen() {
                   borderColor: theme.askBarBorder,
                 },
               ]}
-              onPress={() => setIsInlineAskVisible(true)}
+              onPress={openInlineAsk}
             >
               <View style={[styles.neoAskPlus, !isNeo && styles.askPlusClassic]}>
                 <Ionicons name="add" size={20} color={isNeo ? "white" : "#0f172a"} />
@@ -796,12 +810,14 @@ export default function HomeScreen() {
 
                 <View style={[styles.inlineAskInputWrap, !isNeo && styles.inlineAskInputWrapClassic]}>
                   <TextInput
+                    ref={inlineAskInputRef}
                     style={[styles.inlineAskInput, !isNeo && styles.inlineAskInputClassic]}
-                    placeholder={tr("iMessage", "iMessage")}
+                    placeholder={tr("输入消息", "Message")}
                     placeholderTextColor={isNeo ? "rgba(148,163,184,0.78)" : "#94a3b8"}
                     value={inlineAskInput}
                     onChangeText={setInlineAskInput}
                     returnKeyType="send"
+                    blurOnSubmit={false}
                     onSubmitEditing={handleInlineAskSend}
                   />
                   <Ionicons
@@ -873,7 +889,7 @@ export default function HomeScreen() {
                   : tr("聊天", "Chats")}
               </Text>
               <Ionicons
-                name={isChatCollapsed ? "chevron-up" : "chevron-down"}
+                name={isChatFullscreen ? "chevron-down" : "chevron-up"}
                 size={18}
                 color={theme.chatHeaderText}
               />
@@ -1346,7 +1362,8 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
   },
   inlineAskMessages: {
-    maxHeight: 280,
+    flex: 1,
+    minHeight: 0,
   },
   inlineAskMessagesContent: {
     paddingHorizontal: 12,

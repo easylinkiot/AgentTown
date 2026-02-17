@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -120,6 +120,10 @@ export default function ChatDetailScreen() {
   );
   const [inviteCursor, setInviteCursor] = useState(0);
   const scrollRef = useRef<ScrollView | null>(null);
+  const inputRef = useRef<TextInput>(null);
+  const focusInput = useCallback(() => {
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
 
   useEffect(() => {
     setMessages(getInitialConversation(chatId, thread));
@@ -159,10 +163,14 @@ export default function ChatDetailScreen() {
 
   const handleSend = async () => {
     const text = inputValue.trim();
-    if (!text) return;
+    if (!text) {
+      focusInput();
+      return;
+    }
 
     setInputValue("");
     setAttachmentPanelVisible(false);
+    focusInput();
 
     const userMessage: ConversationMessage = {
       id: `${Date.now()}`,
@@ -202,6 +210,7 @@ export default function ChatDetailScreen() {
     const caption = inputValue.trim();
     setInputValue("");
     setAttachmentPanelVisible(false);
+    focusInput();
 
     const userImageMessage: ConversationMessage = {
       id: `${Date.now()}-img`,
@@ -707,11 +716,14 @@ export default function ChatDetailScreen() {
             />
           </Pressable>
           <TextInput
+            ref={inputRef}
             style={styles.mainInput}
             value={inputValue}
             onChangeText={setInputValue}
             placeholder={pendingImage ? tr("添加图片描述", "Add image caption") : tr("输入消息", "Type a message")}
             onSubmitEditing={() => (pendingImage ? sendImageMessage() : handleSend())}
+            blurOnSubmit={false}
+            autoFocus
           />
           <Pressable
             style={styles.sendBtn}
