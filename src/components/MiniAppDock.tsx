@@ -812,7 +812,7 @@ export function MiniAppDock({
   const isNeo = theme === "neo";
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const tr = (zh: string, en: string) => tx(language, zh, en);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [showCreator, setShowCreator] = useState(false);
   const [promptInput, setPromptInput] = useState(QUICK_ACTIONS[0].prompt);
   const [isGenerating, setIsGenerating] = useState(false);
