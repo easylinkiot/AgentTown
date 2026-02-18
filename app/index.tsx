@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
@@ -25,6 +26,7 @@ import { ChatThread } from "@/src/types";
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     chatThreads,
     friends,
@@ -238,18 +240,25 @@ export default function HomeScreen() {
             />
           )}
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.presenceRow}
-          >
-            {presence.map((item) => (
-              <View key={item.id} style={styles.presenceItem}>
-                <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
-                <View style={styles.presenceDot} />
-              </View>
-            ))}
-          </ScrollView>
+          <View style={[styles.presenceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.presenceScroll}
+              contentContainerStyle={styles.presenceRow}
+            >
+              {presence.map((item) => (
+                <View key={item.id} style={styles.presenceItem}>
+                  <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
+                  <View style={styles.presenceDot} />
+                </View>
+              ))}
+            </ScrollView>
+
+            <Pressable style={styles.presenceAdd} onPress={() => setPeopleModal(true)}>
+              <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
+            </Pressable>
+          </View>
         </View>
 
         <Modal
@@ -504,6 +513,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 4,
   },
+  presenceBar: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  presenceScroll: {
+    flex: 1,
+  },
   presenceItem: {
     width: 46,
     height: 46,
@@ -518,6 +534,17 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+  },
+  presenceAdd: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
   },
   presenceDot: {
     position: "absolute",

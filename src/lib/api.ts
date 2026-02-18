@@ -335,9 +335,16 @@ export async function createChatThread(payload: ChatThread) {
   });
 }
 
-export async function listThreadMessages(threadId: string) {
+export async function listThreadMessages(
+  threadId: string,
+  options?: { limit?: number; before?: string }
+) {
+  const params = new URLSearchParams();
+  if (options?.limit && options.limit > 0) params.set("limit", String(options.limit));
+  if (options?.before) params.set("before", options.before);
+  const qs = params.toString();
   return apiFetch<ConversationMessage[]>(
-    `/v1/chat/threads/${encodeURIComponent(threadId)}/messages`
+    `/v1/chat/threads/${encodeURIComponent(threadId)}/messages${qs ? `?${qs}` : ""}`
   );
 }
 
