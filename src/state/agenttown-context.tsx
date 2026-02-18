@@ -44,7 +44,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [botConfig, setBotConfig] = useState<BotConfig>(defaultBotConfig);
   const [tasks, setTasks] = useState<TaskItem[]>(defaultTasks);
   const [myHouseType, setMyHouseType] = useState<number>(3);
-  const [uiTheme, setUiTheme] = useState<UiTheme>("classic");
+  const [uiTheme, setUiTheme] = useState<UiTheme>("neo");
   const [language, setLanguage] = useState<AppLanguage>("en");
   const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
 

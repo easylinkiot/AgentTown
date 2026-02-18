@@ -2,10 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import * as Speech from "expo-speech";
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from "expo-speech-recognition";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -49,6 +45,11 @@ import { tx } from "@/src/i18n/translate";
 import { getThemeTokens } from "@/src/theme/ui-theme";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { ChatThread } from "@/src/types";
+import {
+  addSpeechRecognitionListener,
+  getSpeechRecognitionNativeModule,
+  type SpeechRecognitionEventMap,
+} from "@/src/lib/speech-recognition";
 
 interface MovingCar {
   id: string;
@@ -163,41 +164,55 @@ export default function HomeScreen() {
       isHomeFocused && (isInlineAskVisible || isInlineAskListening);
   }, [isHomeFocused, isInlineAskListening, isInlineAskVisible]);
 
-  useSpeechRecognitionEvent("start", () => {
-    if (!inlineAskVoiceActiveRef.current) return;
-    setIsInlineAskListening(true);
-  });
-
-  useSpeechRecognitionEvent("end", () => {
-    if (!inlineAskVoiceActiveRef.current) return;
-    setIsInlineAskListening(false);
-  });
-
-  useSpeechRecognitionEvent("result", (event) => {
-    if (!inlineAskVoiceActiveRef.current) return;
-    const transcript = event.results?.[0]?.transcript?.trim();
-    if (!transcript) return;
-    setInlineAskInput(transcript);
-    if (event.isFinal) {
+  useEffect(() => {
+    const removeStart = addSpeechRecognitionListener("start", () => {
+      if (!inlineAskVoiceActiveRef.current) return;
+      setIsInlineAskListening(true);
+    });
+    const removeEnd = addSpeechRecognitionListener("end", () => {
+      if (!inlineAskVoiceActiveRef.current) return;
       setIsInlineAskListening(false);
-      ExpoSpeechRecognitionModule.stop();
-      inlineAskSendRef.current?.(transcript);
-    }
-  });
-
-  useSpeechRecognitionEvent("error", (event) => {
-    if (!inlineAskVoiceActiveRef.current) return;
-    setIsInlineAskListening(false);
-    appendInlineAskBotMessage(
-      tr(
-        `语音识别失败：${event.error}`,
-        `Speech recognition failed: ${event.error}`
-      )
+    });
+    const removeResult = addSpeechRecognitionListener(
+      "result",
+      (event: SpeechRecognitionEventMap["result"]) => {
+        if (!inlineAskVoiceActiveRef.current) return;
+        const transcript = event.results?.[0]?.transcript?.trim();
+        if (!transcript) return;
+        setInlineAskInput(transcript);
+        if (event.isFinal) {
+          setIsInlineAskListening(false);
+          getSpeechRecognitionNativeModule()?.stop?.();
+          inlineAskSendRef.current?.(transcript);
+        }
+      }
     );
-  });
+    const removeError = addSpeechRecognitionListener(
+      "error",
+      (event: SpeechRecognitionEventMap["error"]) => {
+        if (!inlineAskVoiceActiveRef.current) return;
+        setIsInlineAskListening(false);
+        appendInlineAskBotMessage(
+          tr(
+            `语音识别失败：${event.error}`,
+            `Speech recognition failed: ${event.error}`
+          )
+        );
+      }
+    );
+
+    return () => {
+      removeStart?.();
+      removeEnd?.();
+      removeResult?.();
+      removeError?.();
+    };
+  }, [appendInlineAskBotMessage, tr]);
 
   const sceneCars = useMemo<MovingCar[]>(() => {
-    const colors = ["#ef4444", "#3b82f6", "#facc15", "#1f2937", "#ffffff", "#f97316"];
+    const colors = isNeo
+      ? ["#ef4444", "#7dd3fc", "#c4b5fd", "#22c55e", "#facc15", "#f472b6"]
+      : ["#ef4444", "#3b82f6", "#facc15", "#1f2937", "#ffffff", "#f97316"];
     const list: MovingCar[] = [];
 
     ROAD_ROUTES.forEach((route, routeIndex) => {
@@ -216,7 +231,37 @@ export default function HomeScreen() {
     });
 
     return list;
-  }, []);
+  }, [isNeo]);
+
+  const worldPalette = useMemo(
+    () =>
+      isNeo
+        ? {
+            land: "#070a14",
+            coast: "#0f2b4f",
+            coastStroke: "#48a9ff",
+            mountainOuter: "rgba(56, 189, 248, 0.16)",
+            mountainInner: "rgba(14, 165, 233, 0.14)",
+            riverGlow: "#7dd3fc",
+            riverCore: "#38bdf8",
+            road: "rgba(88, 98, 125, 0.9)",
+            roadStripe: "rgba(255,255,255,0.7)",
+            lotStroke: "rgba(56,189,248,0.35)",
+          }
+        : {
+            land: "#7ec850",
+            coast: "#38bdf8",
+            coastStroke: "#bae6fd",
+            mountainOuter: "rgba(100,116,139,0.22)",
+            mountainInner: "rgba(71,85,105,0.18)",
+            riverGlow: "#a5f3fc",
+            riverCore: "#38bdf8",
+            road: "#555",
+            roadStripe: "#fff",
+            lotStroke: "rgba(255,255,255,0.5)",
+          },
+    [isNeo]
+  );
 
   useEffect(() => {
     const timer = setInterval(() => setClockMs(Date.now()), 33);
@@ -401,7 +446,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     return () => {
-      ExpoSpeechRecognitionModule.abort();
+      getSpeechRecognitionNativeModule()?.abort?.();
       Speech.stop();
     };
   }, []);
@@ -455,18 +500,27 @@ export default function HomeScreen() {
   }, [handleInlineAskSend]);
 
   const startInlineAskListening = useCallback(async () => {
-    setIsInlineAskVisible(true);
     setInlineAskInput("");
     try {
-      const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+      const speechModule = getSpeechRecognitionNativeModule();
+      if (!speechModule) {
+        appendInlineAskBotMessage(
+          tr(
+            "语音识别不可用，请安装最新版 TestFlight 或 Dev Build。",
+            "Speech recognition is unavailable. Please install the latest TestFlight or dev build."
+          )
+        );
+        return;
+      }
+      const available = speechModule.isRecognitionAvailable?.();
       if (!available) {
         appendInlineAskBotMessage(
           tr("当前设备不支持语音识别。", "Speech recognition is unavailable on this device.")
         );
         return;
       }
-      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!permission.granted) {
+      const permission = await speechModule.requestPermissionsAsync?.();
+      if (permission && !permission.granted) {
         appendInlineAskBotMessage(
           tr("未获得麦克风或语音识别权限。", "Microphone or speech permission not granted.")
         );
@@ -474,12 +528,22 @@ export default function HomeScreen() {
       }
       Speech.stop();
       setIsInlineAskListening(true);
-      ExpoSpeechRecognitionModule.start({
-        lang: voiceLocale,
-        interimResults: true,
-        continuous: false,
-        addsPunctuation: true,
-      });
+      if (speechModule.start) {
+        speechModule.start({
+          lang: voiceLocale,
+          interimResults: true,
+          continuous: false,
+          addsPunctuation: true,
+        });
+      } else {
+        setIsInlineAskListening(false);
+        appendInlineAskBotMessage(
+          tr(
+            "当前语音识别不可用，请稍后再试。",
+            "Speech recognition is unavailable right now. Please try again later."
+          )
+        );
+      }
     } catch (error) {
       appendInlineAskBotMessage(
         tr("无法启动语音识别，请稍后重试。", "Unable to start speech recognition. Please try again.")
@@ -488,7 +552,7 @@ export default function HomeScreen() {
   }, [appendInlineAskBotMessage, tr, voiceLocale]);
 
   const stopInlineAskListening = useCallback(() => {
-    ExpoSpeechRecognitionModule.stop();
+    getSpeechRecognitionNativeModule()?.stop?.();
   }, []);
 
   const toggleVoiceMode = useCallback(() => {
@@ -559,160 +623,158 @@ export default function HomeScreen() {
             </>
           ) : null}
 
-          {!isNeo ? (
-            <View style={[styles.sceneWorldLayer, worldLayerStyle]}>
-              <Svg
-                width={worldLayerStyle.width}
-                height={worldLayerStyle.height}
-                viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
-                preserveAspectRatio="none"
-                style={StyleSheet.absoluteFill}
-              >
-                <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill="#7ec850" />
-                <Path d={coastAreaPathForSvg()} fill="#38bdf8" opacity={0.96} />
-                <Path
-                  d={coastPathForSvg()}
-                  stroke="#bae6fd"
-                  strokeWidth={96}
-                  fill="none"
-                  strokeLinecap="round"
-                  opacity={0.75}
+          <View style={[styles.sceneWorldLayer, worldLayerStyle]}>
+            <Svg
+              width={worldLayerStyle.width}
+              height={worldLayerStyle.height}
+              viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`}
+              preserveAspectRatio="none"
+              style={StyleSheet.absoluteFill}
+            >
+              <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill={worldPalette.land} />
+              <Path d={coastAreaPathForSvg()} fill={worldPalette.coast} opacity={0.95} />
+              <Path
+                d={coastPathForSvg()}
+                stroke={worldPalette.coastStroke}
+                strokeWidth={isNeo ? 88 : 96}
+                fill="none"
+                strokeLinecap="round"
+                opacity={isNeo ? 0.85 : 0.75}
+              />
+
+              {MOUNTAIN_PEAKS.map((peak, index) => (
+                <Circle
+                  key={`home_mountain_${index}`}
+                  cx={peak.x}
+                  cy={peak.y}
+                  r={peak.radius}
+                  fill={worldPalette.mountainOuter}
                 />
-
-                {MOUNTAIN_PEAKS.map((peak, index) => (
-                  <Circle
-                    key={`home_mountain_${index}`}
-                    cx={peak.x}
-                    cy={peak.y}
-                    r={peak.radius}
-                    fill="rgba(100,116,139,0.22)"
-                  />
-                ))}
-                {MOUNTAIN_PEAKS.map((peak, index) => (
-                  <Circle
-                    key={`home_mountain_inner_${index}`}
-                    cx={peak.x}
-                    cy={peak.y}
-                    r={peak.radius * 0.62}
-                    fill="rgba(71,85,105,0.18)"
-                  />
-                ))}
-
-                <Path
-                  d={riverPathForSvg()}
-                  stroke="#a5f3fc"
-                  strokeWidth={RIVER_WIDTH + 80}
-                  fill="none"
-                  strokeLinecap="round"
-                  opacity={0.95}
+              ))}
+              {MOUNTAIN_PEAKS.map((peak, index) => (
+                <Circle
+                  key={`home_mountain_inner_${index}`}
+                  cx={peak.x}
+                  cy={peak.y}
+                  r={peak.radius * 0.62}
+                  fill={worldPalette.mountainInner}
                 />
+              ))}
+
+              <Path
+                d={riverPathForSvg()}
+                stroke={worldPalette.riverGlow}
+                strokeWidth={RIVER_WIDTH + (isNeo ? 76 : 80)}
+                fill="none"
+                strokeLinecap="round"
+                opacity={isNeo ? 0.9 : 0.95}
+              />
+              <Path
+                d={riverPathForSvg()}
+                stroke={worldPalette.riverCore}
+                strokeWidth={RIVER_WIDTH}
+                fill="none"
+                strokeLinecap="round"
+                opacity={isNeo ? 0.95 : 0.92}
+              />
+
+              {ROAD_ROUTES.map((route) => (
                 <Path
-                  d={riverPathForSvg()}
-                  stroke="#38bdf8"
-                  strokeWidth={RIVER_WIDTH}
-                  fill="none"
+                  key={`home_road_${route.id}`}
+                  d={route.svgPath}
+                  stroke={worldPalette.road}
+                  strokeWidth={58}
                   strokeLinecap="round"
-                  opacity={0.92}
+                  fill="none"
                 />
+              ))}
 
-                {ROAD_ROUTES.map((route) => (
-                  <Path
-                    key={`home_road_${route.id}`}
-                    d={route.svgPath}
-                    stroke="#555"
-                    strokeWidth={58}
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                ))}
+              {ROAD_ROUTES.map((route) => (
+                <Path
+                  key={`home_stripe_${route.id}`}
+                  d={route.svgPath}
+                  stroke={worldPalette.roadStripe}
+                  strokeWidth={isNeo ? 1.8 : 2.3}
+                  strokeDasharray="17 18"
+                  strokeLinecap="round"
+                  fill="none"
+                  opacity={isNeo ? 0.52 : 0.62}
+                />
+              ))}
+            </Svg>
 
-                {ROAD_ROUTES.map((route) => (
-                  <Path
-                    key={`home_stripe_${route.id}`}
-                    d={route.svgPath}
-                    stroke="#fff"
-                    strokeWidth={2.3}
-                    strokeDasharray="17 18"
-                    strokeLinecap="round"
-                    fill="none"
-                    opacity={0.62}
-                  />
-                ))}
-              </Svg>
+            {sceneCars.map((car) => {
+              const route = routeLookup.get(car.routeId);
+              if (!route) return null;
 
-              {sceneCars.map((car) => {
-                const route = routeLookup.get(car.routeId);
-                if (!route) return null;
+              const elapsed = (clockMs / 1000) * car.speed + car.delay;
+              const baseProgress = ((elapsed % 1) + 1) % 1;
+              const t = car.direction === 1 ? baseProgress : 1 - baseProgress;
+              const point = routePoint(route, t);
+              const angle = car.direction === 1 ? point.angle : point.angle + 180;
 
-                const elapsed = (clockMs / 1000) * car.speed + car.delay;
-                const baseProgress = ((elapsed % 1) + 1) % 1;
-                const t = car.direction === 1 ? baseProgress : 1 - baseProgress;
-                const point = routePoint(route, t);
-                const angle = car.direction === 1 ? point.angle : point.angle + 180;
-
-                return (
-                  <View
-                    key={car.id}
-                    pointerEvents="none"
-                    style={[
-                      styles.carWrap,
-                      {
-                        left: point.x * SCENE_SCALE,
-                        top: point.y * SCENE_SCALE,
-                        transform: [
-                          { translateX: -5 },
-                          { translateY: -4 },
-                          { rotate: `${angle}deg` },
-                          { scale: 0.92 },
-                        ],
-                      },
-                    ]}
-                  >
-                    <View style={[styles.carBody, { backgroundColor: car.color }]}>
-                      <View style={styles.carGlass} />
-                      <View style={styles.wheelLeft} />
-                      <View style={styles.wheelRight} />
-                    </View>
-                  </View>
-                );
-              })}
-
-              {nearbyTrees.map((tree, index) => (
+              return (
                 <View
-                  key={`home_tree_${index}_${Math.round(tree.x)}_${Math.round(tree.y)}`}
-                  style={[
-                    styles.treeWrap,
-                    {
-                      left: tree.x * SCENE_SCALE,
-                      top: tree.y * SCENE_SCALE,
-                      transform: [{ scale: 0.7 + tree.scale * 0.16 }],
-                    },
-                  ]}
+                  key={car.id}
                   pointerEvents="none"
-                >
-                  <View style={styles.treeLeaf} />
-                  <View style={styles.treeTrunk} />
-                  <View style={styles.treeShadow} />
-                </View>
-              ))}
-
-              {nearbyLots.map((lot) => (
-                <Pressable
-                  key={lot.id}
                   style={[
-                    styles.sceneLotWrap,
+                    styles.carWrap,
                     {
-                      left: lot.x * SCENE_SCALE,
-                      top: lot.y * SCENE_SCALE,
+                      left: point.x * SCENE_SCALE,
+                      top: point.y * SCENE_SCALE,
+                      transform: [
+                        { translateX: -5 },
+                        { translateY: -4 },
+                        { rotate: `${angle}deg` },
+                        { scale: 0.92 },
+                      ],
                     },
                   ]}
-                  onPress={() => router.push("/town-map")}
                 >
-                  <TownHouseNode type={lot.visualType} scale={0.92} />
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
+                  <View style={[styles.carBody, { backgroundColor: car.color }]}>
+                    <View style={styles.carGlass} />
+                    <View style={styles.wheelLeft} />
+                    <View style={styles.wheelRight} />
+                  </View>
+                </View>
+              );
+            })}
+
+            {nearbyTrees.map((tree, index) => (
+              <View
+                key={`home_tree_${index}_${Math.round(tree.x)}_${Math.round(tree.y)}`}
+                style={[
+                  styles.treeWrap,
+                  {
+                    left: tree.x * SCENE_SCALE,
+                    top: tree.y * SCENE_SCALE,
+                    transform: [{ scale: 0.7 + tree.scale * 0.16 }],
+                  },
+                ]}
+                pointerEvents="none"
+              >
+                <View style={styles.treeLeaf} />
+                <View style={styles.treeTrunk} />
+                <View style={styles.treeShadow} />
+              </View>
+            ))}
+
+            {nearbyLots.map((lot) => (
+              <Pressable
+                key={lot.id}
+                style={[
+                  styles.sceneLotWrap,
+                  {
+                    left: lot.x * SCENE_SCALE,
+                    top: lot.y * SCENE_SCALE,
+                  },
+                ]}
+                onPress={() => router.push("/town-map")}
+              >
+                <TownHouseNode type={lot.visualType} scale={0.92} />
+              </Pressable>
+            ))}
+          </View>
 
           <View style={[styles.topBar, isNeo && styles.topBarNeo]}>
             <Pressable
@@ -847,7 +909,7 @@ export default function HomeScreen() {
           </View>
 
           {shouldShowAskBar ? (
-            <Pressable
+            <View
               style={[
                 styles.neoAskBar,
                 !isNeo && styles.askBarClassic,
@@ -857,7 +919,6 @@ export default function HomeScreen() {
                   borderColor: theme.askBarBorder,
                 },
               ]}
-              onPress={openInlineAsk}
             >
               <View style={[styles.neoAskPlus, !isNeo && styles.askPlusClassic]}>
                 <Ionicons name="add" size={20} color={isNeo ? "white" : "#0f172a"} />
@@ -872,13 +933,15 @@ export default function HomeScreen() {
                   },
                 ]}
               >
-                <Text style={[styles.neoAskText, { color: theme.askBarInputText }]}>
-                  {tr("随便问我", "Ask anything")}
-                </Text>
+                <Pressable style={styles.askTextTap} onPress={openInlineAsk}>
+                  <Text style={[styles.neoAskText, { color: theme.askBarInputText }]}>
+                    {tr("随便问我", "Ask anything")}
+                  </Text>
+                </Pressable>
                 <View style={styles.neoAskIcons}>
                   <Pressable
-                    onPress={(event) => {
-                      event.stopPropagation?.();
+                    style={[styles.askIconBtn, !isNeo && styles.askIconBtnClassic]}
+                    onPress={() => {
                       if (isInlineAskListening) {
                         stopInlineAskListening();
                       } else {
@@ -888,25 +951,23 @@ export default function HomeScreen() {
                   >
                     <Ionicons
                       name={isInlineAskListening ? "stop-circle" : "mic-outline"}
-                      size={16}
+                      size={22}
                       color={askMicColor}
                     />
                   </Pressable>
                   <Pressable
-                    onPress={(event) => {
-                      event.stopPropagation?.();
-                      toggleVoiceMode();
-                    }}
+                    style={[styles.askIconBtn, !isNeo && styles.askIconBtnClassic]}
+                    onPress={toggleVoiceMode}
                   >
                     <Ionicons
                       name={voiceModeEnabled ? "pulse" : "pulse-outline"}
-                      size={16}
+                      size={22}
                       color={askPulseColor}
                     />
                   </Pressable>
                 </View>
               </View>
-            </Pressable>
+            </View>
           ) : null}
 
           {isInlineAskVisible ? (
@@ -1001,7 +1062,7 @@ export default function HomeScreen() {
                     onChangeText={setInlineAskInput}
                     returnKeyType="send"
                     blurOnSubmit={false}
-                    onSubmitEditing={handleInlineAskSend}
+                    onSubmitEditing={() => handleInlineAskSend()}
                   />
                   <Ionicons
                     name="happy-outline"
@@ -1497,7 +1558,22 @@ const styles = StyleSheet.create({
   neoAskIcons: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 6,
+  },
+  askTextTap: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  askIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.08)",
+  },
+  askIconBtnClassic: {
+    backgroundColor: "#e2e8f0",
   },
   inlineAskPanel: {
     position: "absolute",

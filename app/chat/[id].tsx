@@ -3,10 +3,6 @@ import { useIsFocused } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Speech from "expo-speech";
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from "expo-speech-recognition";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
@@ -30,6 +26,11 @@ import {
 } from "@/src/features/chat/chat-helpers";
 import { tx } from "@/src/i18n/translate";
 import { generateGeminiJson, generateGeminiText } from "@/src/lib/gemini";
+import {
+  addSpeechRecognitionListener,
+  getSpeechRecognitionNativeModule,
+  type SpeechRecognitionEventMap,
+} from "@/src/lib/speech-recognition";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { AiContextState, ConversationMessage, TaskItem } from "@/src/types";
 
@@ -160,7 +161,7 @@ export default function ChatDetailScreen() {
       ? botConfig.systemInstruction
       : `You are participating in ${isGroupChat ? "a group chat" : "a private chat"} named "${thread.name}". Reply naturally as a helpful colleague. Keep it brief.`;
 
-  const appendSystemMessage = (content: string) => {
+  const appendSystemMessage = useCallback((content: string) => {
     const systemMessage: ConversationMessage = {
       id: `${Date.now()}-system-${Math.random().toString(16).slice(2, 6)}`,
       senderName: tr("系统", "System"),
@@ -172,7 +173,7 @@ export default function ChatDetailScreen() {
     };
 
     setMessages((prev) => [...prev, systemMessage]);
-  };
+  }, [tr]);
 
   const speakText = useCallback(
     (text: string) => {
@@ -195,46 +196,58 @@ export default function ChatDetailScreen() {
 
   useEffect(() => {
     if (!isFocused && isVoiceListening) {
-      ExpoSpeechRecognitionModule.abort();
+      getSpeechRecognitionNativeModule()?.abort?.();
     }
   }, [isFocused, isVoiceListening]);
 
-  useSpeechRecognitionEvent("start", () => {
-    if (!chatVoiceActiveRef.current) return;
-    setIsVoiceListening(true);
-  });
-
-  useSpeechRecognitionEvent("end", () => {
-    if (!chatVoiceActiveRef.current) return;
-    setIsVoiceListening(false);
-  });
-
-  useSpeechRecognitionEvent("result", (event) => {
-    if (!chatVoiceActiveRef.current) return;
-    const transcript = event.results?.[0]?.transcript?.trim();
-    if (!transcript) return;
-    setInputValue(transcript);
-    if (event.isFinal) {
+  useEffect(() => {
+    const removeStart = addSpeechRecognitionListener("start", () => {
+      if (!chatVoiceActiveRef.current) return;
+      setIsVoiceListening(true);
+    });
+    const removeEnd = addSpeechRecognitionListener("end", () => {
+      if (!chatVoiceActiveRef.current) return;
       setIsVoiceListening(false);
-      ExpoSpeechRecognitionModule.stop();
-      handleSendRef.current?.(transcript);
-    }
-  });
-
-  useSpeechRecognitionEvent("error", (event) => {
-    if (!chatVoiceActiveRef.current) return;
-    setIsVoiceListening(false);
-    appendSystemMessage(
-      tr(
-        `语音识别失败：${event.error}`,
-        `Speech recognition failed: ${event.error}`
-      )
+    });
+    const removeResult = addSpeechRecognitionListener(
+      "result",
+      (event: SpeechRecognitionEventMap["result"]) => {
+        if (!chatVoiceActiveRef.current) return;
+        const transcript = event.results?.[0]?.transcript?.trim();
+        if (!transcript) return;
+        setInputValue(transcript);
+        if (event.isFinal) {
+          setIsVoiceListening(false);
+          getSpeechRecognitionNativeModule()?.stop?.();
+          handleSendRef.current?.(transcript);
+        }
+      }
     );
-  });
+    const removeError = addSpeechRecognitionListener(
+      "error",
+      (event: SpeechRecognitionEventMap["error"]) => {
+        if (!chatVoiceActiveRef.current) return;
+        setIsVoiceListening(false);
+        appendSystemMessage(
+          tr(
+            `语音识别失败：${event.error}`,
+            `Speech recognition failed: ${event.error}`
+          )
+        );
+      }
+    );
+
+    return () => {
+      removeStart?.();
+      removeEnd?.();
+      removeResult?.();
+      removeError?.();
+    };
+  }, [appendSystemMessage, tr]);
 
   useEffect(() => {
     return () => {
-      ExpoSpeechRecognitionModule.abort();
+      getSpeechRecognitionNativeModule()?.abort?.();
       Speech.stop();
     };
   }, []);
@@ -334,15 +347,25 @@ export default function ChatDetailScreen() {
 
   const startVoiceInput = useCallback(async () => {
     try {
-      const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+      const speechModule = getSpeechRecognitionNativeModule();
+      if (!speechModule) {
+        appendSystemMessage(
+          tr(
+            "语音识别不可用，请安装最新版 TestFlight 或 Dev Build。",
+            "Speech recognition is unavailable. Please install the latest TestFlight or dev build."
+          )
+        );
+        return;
+      }
+      const available = speechModule.isRecognitionAvailable?.();
       if (!available) {
         appendSystemMessage(
           tr("当前设备不支持语音识别。", "Speech recognition is unavailable on this device.")
         );
         return;
       }
-      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!permission.granted) {
+      const permission = await speechModule.requestPermissionsAsync?.();
+      if (permission && !permission.granted) {
         appendSystemMessage(
           tr("未获得麦克风或语音识别权限。", "Microphone or speech permission not granted.")
         );
@@ -350,12 +373,22 @@ export default function ChatDetailScreen() {
       }
       Speech.stop();
       setIsVoiceListening(true);
-      ExpoSpeechRecognitionModule.start({
-        lang: voiceLocale,
-        interimResults: true,
-        continuous: false,
-        addsPunctuation: true,
-      });
+      if (speechModule.start) {
+        speechModule.start({
+          lang: voiceLocale,
+          interimResults: true,
+          continuous: false,
+          addsPunctuation: true,
+        });
+      } else {
+        setIsVoiceListening(false);
+        appendSystemMessage(
+          tr(
+            "当前语音识别不可用，请稍后再试。",
+            "Speech recognition is unavailable right now. Please try again later."
+          )
+        );
+      }
     } catch {
       appendSystemMessage(
         tr("无法启动语音识别，请稍后重试。", "Unable to start speech recognition. Please try again.")
@@ -364,7 +397,7 @@ export default function ChatDetailScreen() {
   }, [appendSystemMessage, tr, voiceLocale]);
 
   const stopVoiceInput = useCallback(() => {
-    ExpoSpeechRecognitionModule.stop();
+    getSpeechRecognitionNativeModule()?.stop?.();
   }, []);
 
   const toggleVoiceMode = useCallback(() => {

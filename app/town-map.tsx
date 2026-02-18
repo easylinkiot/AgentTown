@@ -8,6 +8,7 @@ import {
   PixelRatio,
   Platform,
   Pressable,
+  PanResponder,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -42,6 +43,7 @@ import {
 import { TownHouseNode } from "@/src/components/TownHouseNode";
 import { tx } from "@/src/i18n/translate";
 import { generateGeminiText } from "@/src/lib/gemini";
+import { getThemeTokens } from "@/src/theme/ui-theme";
 import { useAgentTown } from "@/src/state/agenttown-context";
 
 interface TownMapMessage {
@@ -191,8 +193,10 @@ function buildInitialWorldGroupMessages(
 
 export default function TownMapScreen() {
   const router = useRouter();
-  const { myHouseType, botConfig, language } = useAgentTown();
+  const { myHouseType, botConfig, language, uiTheme } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
+  const theme = getThemeTokens(uiTheme);
+  const isNeo = uiTheme === "neo";
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isAndroid = Platform.OS === "android";
@@ -200,7 +204,9 @@ export default function TownMapScreen() {
   const [selectedLot, setSelectedLot] = useState<LotData | null>(null);
 
   const maxScale = 1.35;
+  const minScale = 0.12;
   const [scale, setScale] = useState(0.48);
+  const [isPinching, setIsPinching] = useState(false);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<TownMapMessage[]>([]);
@@ -221,6 +227,14 @@ export default function TownMapScreen() {
   const scrollXRef = useRef(0);
   const scrollYRef = useRef(0);
   const worldGroupCursorRef = useRef(0);
+  const scaleRef = useRef(0.48);
+  const pinchStateRef = useRef({
+    active: false,
+    startDistance: 0,
+    startScale: 0,
+    focusX: 0,
+    focusY: 0,
+  });
 
   const horizontalRef = useRef<ScrollView | null>(null);
   const verticalRef = useRef<ScrollView | null>(null);
@@ -279,15 +293,17 @@ export default function TownMapScreen() {
   );
 
   const cars = useMemo<MovingCar[]>(() => {
-    const colors = [
-      "#ef4444",
-      "#3b82f6",
-      "#facc15",
-      "#1f2937",
-      "#ffffff",
-      "#f97316",
-      "#14b8a6",
-    ];
+    const colors = isNeo
+      ? ["#ef4444", "#7dd3fc", "#c4b5fd", "#22c55e", "#facc15", "#f472b6"]
+      : [
+          "#ef4444",
+          "#3b82f6",
+          "#facc15",
+          "#1f2937",
+          "#ffffff",
+          "#f97316",
+          "#14b8a6",
+        ];
 
     const result: MovingCar[] = [];
 
@@ -307,7 +323,45 @@ export default function TownMapScreen() {
     });
 
     return result;
-  }, []);
+  }, [isNeo]);
+
+  const worldPalette = useMemo(
+    () =>
+      isNeo
+        ? {
+            land: "#070a14",
+            coast: "#0f2b4f",
+            coastStroke: "#48a9ff",
+            mountainOuter: "rgba(56,189,248,0.16)",
+            mountainInner: "rgba(14,165,233,0.14)",
+            riverGlow: "#7dd3fc",
+            riverCore: "#38bdf8",
+            road: "rgba(88,98,125,0.9)",
+            roadStripe: "rgba(255,255,255,0.7)",
+            lotStroke: "rgba(56,189,248,0.35)",
+            grid: "rgba(148,163,184,0.12)",
+            lakeShadow: "rgba(13,18,35,0.24)",
+            miniMap: "#091226",
+            miniChunk: "rgba(255,255,255,0.14)",
+          }
+        : {
+            land: "#7ec850",
+            coast: "#38bdf8",
+            coastStroke: "#bae6fd",
+            mountainOuter: "rgba(100,116,139,0.22)",
+            mountainInner: "rgba(71,85,105,0.18)",
+            riverGlow: "#a5f3fc",
+            riverCore: "#38bdf8",
+            road: "#555",
+            roadStripe: "#ffffff",
+            lotStroke: "rgba(255,255,255,0.5)",
+            grid: "rgba(255,255,255,0.08)",
+            lakeShadow: "rgba(30,58,138,0.16)",
+            miniMap: "#89ce5f",
+            miniChunk: "rgba(255,255,255,0.26)",
+          },
+    [isNeo]
+  );
 
   const centerOnHome = useCallback(
     (animated: boolean) => {
@@ -325,6 +379,10 @@ export default function TownMapScreen() {
     },
     [mapHeightScaled, mapWidthScaled, scale, windowHeight, windowWidth]
   );
+
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
 
   useEffect(() => {
     const timer = setInterval(() => setClockMs(Date.now()), 33);
@@ -405,34 +463,122 @@ export default function TownMapScreen() {
     };
   }, [groupPanelVisible, language, worldGroupCandidates]);
 
-  const applyZoom = (delta: number) => {
-    const nextScale = clamp(scale + delta, 0.12, maxScale);
-    if (Math.abs(nextScale - scale) < 0.001) return;
+  const applyZoomAtPoint = useCallback(
+    (nextScale: number, focusX: number, focusY: number) => {
+      const clampedScale = clamp(nextScale, minScale, maxScale);
+      const currentScale = scaleRef.current;
+      if (Math.abs(clampedScale - currentScale) < 0.001) return;
 
-    const worldCenterX = (scrollXRef.current + windowWidth / 2) / scale;
-    const worldCenterY = (scrollYRef.current + windowHeight / 2) / scale;
+      const worldCenterX = (scrollXRef.current + focusX) / currentScale;
+      const worldCenterY = (scrollYRef.current + focusY) / currentScale;
 
-    const nextMaxX = Math.max(0, WORLD_WIDTH * nextScale - windowWidth);
-    const nextMaxY = Math.max(0, WORLD_HEIGHT * nextScale - windowHeight);
+      const nextMaxX = Math.max(0, WORLD_WIDTH * clampedScale - windowWidth);
+      const nextMaxY = Math.max(0, WORLD_HEIGHT * clampedScale - windowHeight);
 
-    const nextX = clamp(worldCenterX * nextScale - windowWidth / 2, 0, nextMaxX);
-    const nextY = clamp(worldCenterY * nextScale - windowHeight / 2, 0, nextMaxY);
+      const nextX = clamp(worldCenterX * clampedScale - focusX, 0, nextMaxX);
+      const nextY = clamp(worldCenterY * clampedScale - focusY, 0, nextMaxY);
 
-    setScale(nextScale);
+      setScale(clampedScale);
+      requestAnimationFrame(() => {
+        horizontalRef.current?.scrollTo({ x: nextX, animated: false });
+        verticalRef.current?.scrollTo({ y: nextY, animated: false });
+        scrollXRef.current = nextX;
+        scrollYRef.current = nextY;
+        setScrollX(nextX);
+        setScrollY(nextY);
+      });
+    },
+    [maxScale, minScale, windowHeight, windowWidth]
+  );
 
-    setTimeout(() => {
-      horizontalRef.current?.scrollTo({ x: nextX, animated: false });
-      verticalRef.current?.scrollTo({ y: nextY, animated: false });
-      scrollXRef.current = nextX;
-      scrollYRef.current = nextY;
-      setScrollX(nextX);
-      setScrollY(nextY);
-    }, 24);
+  const applyZoom = useCallback(
+    (delta: number, focusX = windowWidth / 2, focusY = windowHeight / 2) => {
+      applyZoomAtPoint(scaleRef.current + delta, focusX, focusY);
+    },
+    [applyZoomAtPoint, windowHeight, windowWidth]
+  );
+
+  const getPinchState = (event: {
+    nativeEvent?: {
+      touches?: {
+        pageX?: number;
+        pageY?: number;
+      }[];
+    };
+  }) => {
+    const touches = event.nativeEvent?.touches ?? [];
+    const first = touches[0];
+    const second = touches[1];
+    if (
+      !first ||
+      !second ||
+      first.pageX == null ||
+      first.pageY == null ||
+      second.pageX == null ||
+      second.pageY == null
+    ) {
+      return null;
+    }
+
+    const dx = first.pageX - second.pageX;
+    const dy = first.pageY - second.pageY;
+    return {
+      distance: Math.sqrt(dx * dx + dy * dy),
+      focusX: (first.pageX + second.pageX) / 2,
+      focusY: (first.pageY + second.pageY) / 2,
+    };
   };
 
+  const mapPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+          gestureState.numberActiveTouches >= 2,
+        onPanResponderGrant: (event) => {
+          const pinch = getPinchState(event);
+          if (!pinch) return;
+
+          pinchStateRef.current = {
+            active: true,
+            startDistance: pinch.distance,
+            startScale: scaleRef.current,
+            focusX: pinch.focusX,
+            focusY: pinch.focusY,
+          };
+          setIsPinching(true);
+        },
+        onPanResponderMove: (event) => {
+          if (!pinchStateRef.current.active) return;
+
+          const pinch = getPinchState(event);
+          if (!pinch) {
+            pinchStateRef.current.active = false;
+            setIsPinching(false);
+            return;
+          }
+
+          const nextScale =
+            pinchStateRef.current.startScale * (pinch.distance / pinchStateRef.current.startDistance);
+          applyZoomAtPoint(nextScale, pinch.focusX, pinch.focusY);
+        },
+        onPanResponderRelease: () => {
+          if (!pinchStateRef.current.active) return;
+          pinchStateRef.current.active = false;
+          setIsPinching(false);
+        },
+        onPanResponderTerminate: () => {
+          if (!pinchStateRef.current.active) return;
+          pinchStateRef.current.active = false;
+          setIsPinching(false);
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [applyZoomAtPoint]
+  );
+
   useEffect(() => {
-    setScale((prev) => clamp(prev, 0.12, maxScale));
-  }, [maxScale]);
+    setScale((prev) => clamp(prev, minScale, maxScale));
+  }, [maxScale, minScale]);
 
   const openChat = () => {
     if (!selectedLot) return;
@@ -587,24 +733,57 @@ export default function TownMapScreen() {
   const svgTranslateY = (svgHeight * (svgDownsample - 1)) / 2;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.safeArea }]}>
       <View style={[styles.mapHeader, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
         <View style={styles.headerLeft}>
-          <Pressable style={styles.headerCircle} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={24} color="#fff" />
+          <Pressable
+            style={[
+              styles.headerCircle,
+              {
+                backgroundColor: theme.iconCircleBg,
+                borderColor: isNeo ? "rgba(255,255,255,0.25)" : styles.headerCircle.borderColor,
+              },
+            ]}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="chevron-back" size={24} color={theme.iconCircleText} />
           </Pressable>
-          <View style={styles.mapPill}>
-            <Ionicons name="earth" size={14} color="#16a34a" />
-            <Text style={styles.mapPillText}>{tr("智界", "Agent World")}</Text>
+          <View
+            style={[
+              styles.mapPill,
+              {
+                backgroundColor: theme.topPillBg,
+                borderColor: theme.topPillBorder,
+              },
+            ]}
+          >
+            <Ionicons name="earth" size={14} color={isNeo ? "#8ae28b" : "#16a34a"} />
+            <Text style={[styles.mapPillText, { color: theme.topPillText }]}>
+              {tr("智界", "Agent World")}
+            </Text>
           </View>
         </View>
 
         <View style={styles.headerRight}>
-          <View style={styles.headerDarkCircle}>
-            <Ionicons name="location-outline" size={17} color="#fff" />
+          <View
+            style={[
+              styles.headerDarkCircle,
+              {
+                backgroundColor: theme.iconCircleBg,
+                borderColor: isNeo ? "rgba(255,255,255,0.25)" : styles.headerDarkCircle.borderColor,
+              },
+            ]}
+          >
+            <Ionicons name="location-outline" size={17} color={theme.iconCircleText} />
           </View>
           <Pressable
-            style={styles.headerDarkCircle}
+            style={[
+              styles.headerDarkCircle,
+              {
+                backgroundColor: theme.iconCircleBg,
+                borderColor: isNeo ? "rgba(255,255,255,0.25)" : styles.headerDarkCircle.borderColor,
+              },
+            ]}
             onPress={() => {
               if (!groupPanelVisible) {
                 setGroupPanelVisible(true);
@@ -614,69 +793,108 @@ export default function TownMapScreen() {
               setGroupPanelMode((prev) => (prev === "expanded" ? "minimized" : "expanded"));
             }}
           >
-            <Ionicons name="people-outline" size={17} color="#fff" />
+            <Ionicons name="people-outline" size={17} color={theme.iconCircleText} />
           </Pressable>
         </View>
       </View>
 
-      <View style={[styles.worldStatus, { top: insets.top + 66 }]}>
-        <Text style={styles.worldStatusTitle}>{tr("无引擎世界模式", "No-Engine World Mode")}</Text>
-        <Text style={styles.worldStatusText}>
+      <View
+        style={[
+          styles.worldStatus,
+          {
+            top: insets.top + 66,
+            backgroundColor: theme.previewCardBg,
+            borderColor: theme.previewCardBorder,
+          },
+        ]}
+      >
+        <Text style={[styles.worldStatusTitle, { color: theme.previewText }]}>
+          {tr("无引擎世界模式", "No-Engine World Mode")}
+        </Text>
+        <Text style={[styles.worldStatusText, { color: theme.previewSubtext }]}>
           {language === "zh"
             ? `已加载 ${visibleChunks.length} 个区块 · 中心 C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1}`
             : `Loaded ${visibleChunks.length} chunks · Center C${centerChunk.chunkX + 1}-${centerChunk.chunkY + 1}`}
         </Text>
-        <Text style={styles.worldStatusTextMinor}>
+        <Text style={[styles.worldStatusTextMinor, { color: theme.previewSubtext }]}>
           {language === "zh" ? `可见房源: ${visibleLots.length}` : `Visible homes: ${visibleLots.length}`}
         </Text>
       </View>
 
       <View style={[styles.zoomWrap, { bottom: zoomControlsBottom }]}>
         {showWorldScale ? (
-          <View style={styles.scaleInfoPill}>
-            <Text style={styles.scaleInfoText}>{`${WORLD_WIDTH} x ${WORLD_HEIGHT}`}</Text>
+          <View
+            style={[
+              styles.scaleInfoPill,
+              {
+                backgroundColor: theme.askBarBg,
+                borderColor: theme.askBarBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.scaleInfoText, { color: theme.previewText }]}>{`${WORLD_WIDTH} x ${WORLD_HEIGHT}`}</Text>
           </View>
         ) : null}
-        <Pressable style={styles.zoomBtn} onPress={() => applyZoom(0.14)}>
-          <Ionicons name="add" size={20} color="#374151" />
+        <Pressable
+          style={[styles.zoomBtn, { backgroundColor: theme.askBarBg, borderColor: theme.askBarBorder }]}
+          onPress={() => applyZoom(0.14)}
+        >
+          <Ionicons name="add" size={20} color={theme.askBarInputText} />
         </Pressable>
-        <Pressable style={styles.zoomBtn} onPress={() => applyZoom(-0.14)}>
-          <Ionicons name="remove" size={20} color="#374151" />
+        <Pressable
+          style={[styles.zoomBtn, { backgroundColor: theme.askBarBg, borderColor: theme.askBarBorder }]}
+          onPress={() => applyZoom(-0.14)}
+        >
+          <Ionicons name="remove" size={20} color={theme.askBarInputText} />
         </Pressable>
-        <Pressable style={styles.zoomBtn} onPress={() => setShowWorldScale((prev) => !prev)}>
+        <Pressable
+          style={[styles.zoomBtn, { backgroundColor: theme.askBarBg, borderColor: theme.askBarBorder }]}
+          onPress={() => setShowWorldScale((prev) => !prev)}
+        >
           <Ionicons
             name={showWorldScale ? "close-outline" : "search-outline"}
             size={18}
-            color="#374151"
+            color={theme.askBarInputText}
           />
         </Pressable>
-        <Pressable style={styles.zoomBtn} onPress={() => centerOnHome(true)}>
-          <Ionicons name="navigate" size={18} color="#374151" />
+        <Pressable
+          style={[styles.zoomBtn, { backgroundColor: theme.askBarBg, borderColor: theme.askBarBorder }]}
+          onPress={() => centerOnHome(true)}
+        >
+          <Ionicons name="navigate" size={18} color={theme.askBarInputText} />
         </Pressable>
       </View>
 
-      <ScrollView
-        horizontal
-        style={styles.outerScroll}
-        ref={horizontalRef}
-        onScroll={(event) => {
-          const next = event.nativeEvent.contentOffset.x;
-          setScrollX(next);
-          scrollXRef.current = next;
-        }}
-        scrollEventThrottle={16}
-      >
+      <View style={styles.mapScrollWrap} {...mapPanResponder.panHandlers}>
         <ScrollView
-          style={styles.innerScroll}
-          ref={verticalRef}
+          horizontal
+          style={styles.outerScroll}
+          ref={horizontalRef}
+          scrollEnabled={!isPinching}
           onScroll={(event) => {
-            const next = event.nativeEvent.contentOffset.y;
-            setScrollY(next);
-            scrollYRef.current = next;
+            const next = event.nativeEvent.contentOffset.x;
+            setScrollX(next);
+            scrollXRef.current = next;
           }}
           scrollEventThrottle={16}
         >
-          <View style={[styles.mapCanvas, { width: mapWidthScaled, height: mapHeightScaled }]}>
+          <ScrollView
+            style={styles.innerScroll}
+            ref={verticalRef}
+            scrollEnabled={!isPinching}
+            onScroll={(event) => {
+              const next = event.nativeEvent.contentOffset.y;
+              setScrollY(next);
+              scrollYRef.current = next;
+            }}
+            scrollEventThrottle={16}
+          >
+            <View
+              style={[
+                styles.mapCanvas,
+                { width: mapWidthScaled, height: mapHeightScaled, backgroundColor: worldPalette.land },
+              ]}
+            >
             <Svg
               width={svgWidth}
               height={svgHeight}
@@ -693,15 +911,15 @@ export default function TownMapScreen() {
                 },
               ]}
             >
-              <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill="#7ec850" />
-              <Path d={coastAreaPathForSvg()} fill="#38bdf8" opacity={0.95} />
+              <Rect x={0} y={0} width={WORLD_WIDTH} height={WORLD_HEIGHT} fill={worldPalette.land} />
+              <Path d={coastAreaPathForSvg()} fill={worldPalette.coast} opacity={isNeo ? 0.85 : 0.95} />
               <Path
                 d={coastPathForSvg()}
-                stroke="#bae6fd"
-                strokeWidth={96}
+                stroke={worldPalette.coastStroke}
+                strokeWidth={isNeo ? 88 : 96}
                 fill="none"
                 strokeLinecap="round"
-                opacity={0.75}
+                opacity={isNeo ? 0.85 : 0.75}
               />
 
               {MOUNTAIN_PEAKS.map((peak, index) => (
@@ -710,7 +928,7 @@ export default function TownMapScreen() {
                   cx={peak.x}
                   cy={peak.y}
                   r={peak.radius}
-                  fill="rgba(100,116,139,0.22)"
+                  fill={worldPalette.mountainOuter}
                 />
               ))}
               {MOUNTAIN_PEAKS.map((peak, index) => (
@@ -719,32 +937,32 @@ export default function TownMapScreen() {
                   cx={peak.x}
                   cy={peak.y}
                   r={peak.radius * 0.62}
-                  fill="rgba(71,85,105,0.18)"
+                  fill={worldPalette.mountainInner}
                 />
               ))}
 
               <Path
                 d={riverPathForSvg()}
-                stroke="#a5f3fc"
-                strokeWidth={RIVER_WIDTH + 80}
+                stroke={worldPalette.riverGlow}
+                strokeWidth={RIVER_WIDTH + (isNeo ? 76 : 80)}
                 fill="none"
                 strokeLinecap="round"
-                opacity={0.95}
+                opacity={isNeo ? 0.9 : 0.95}
               />
               <Path
                 d={riverPathForSvg()}
-                stroke="#38bdf8"
+                stroke={worldPalette.riverCore}
                 strokeWidth={RIVER_WIDTH}
                 fill="none"
                 strokeLinecap="round"
-                opacity={0.92}
+                opacity={isNeo ? 0.95 : 0.92}
               />
 
               {ROAD_ROUTES.map((route) => (
                 <Path
                   key={`road_${route.id}`}
                   d={route.svgPath}
-                  stroke="#555"
+                  stroke={worldPalette.road}
                   strokeWidth={58}
                   strokeLinecap="round"
                   fill="none"
@@ -755,12 +973,12 @@ export default function TownMapScreen() {
                 <Path
                   key={`road_stripe_${route.id}`}
                   d={route.svgPath}
-                  stroke="#ffffff"
-                  strokeWidth={2.3}
+                  stroke={worldPalette.roadStripe}
+                  strokeWidth={isNeo ? 1.8 : 2.3}
                   strokeDasharray="17 18"
                   strokeLinecap="round"
                   fill="none"
-                  opacity={0.62}
+                  opacity={isNeo ? 0.52 : 0.62}
                 />
               ))}
 
@@ -770,7 +988,7 @@ export default function TownMapScreen() {
                   <Path
                     key={`grid_x_${index}`}
                     d={`M ${x} 0 L ${x} ${WORLD_HEIGHT}`}
-                    stroke="rgba(255,255,255,0.08)"
+                    stroke={worldPalette.grid}
                     strokeWidth={2}
                   />
                 );
@@ -782,7 +1000,7 @@ export default function TownMapScreen() {
                   <Path
                     key={`grid_y_${index}`}
                     d={`M 0 ${y} L ${WORLD_WIDTH} ${y}`}
-                    stroke="rgba(255,255,255,0.08)"
+                    stroke={worldPalette.grid}
                     strokeWidth={2}
                   />
                 );
@@ -818,11 +1036,11 @@ export default function TownMapScreen() {
                   ]}
                 >
                   <View style={[styles.carBody, { backgroundColor: car.color }]}>
-                    <View style={styles.carGlass} />
-                    <View style={styles.wheelLeft} />
-                    <View style={styles.wheelRight} />
-                  </View>
-                </View>
+                <View style={[styles.carGlass, isNeo ? { backgroundColor: "rgba(255,255,255,0.55)" } : {}]} />
+                <View style={styles.wheelLeft} />
+                <View style={styles.wheelRight} />
+              </View>
+            </View>
               );
             })}
 
@@ -838,9 +1056,24 @@ export default function TownMapScreen() {
                   },
                 ]}
               >
-                <View style={styles.treeLeaf} />
-                <View style={styles.treeTrunk} />
-                <View style={styles.treeShadow} />
+                <View
+                  style={[
+                    styles.treeLeaf,
+                    isNeo ? { backgroundColor: "rgba(33,197,94,0.9)" } : {},
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.treeTrunk,
+                    isNeo ? { backgroundColor: "rgba(120,85,65,0.85)" } : {},
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.treeShadow,
+                    isNeo ? { backgroundColor: worldPalette.lakeShadow } : {},
+                  ]}
+                />
               </View>
             ))}
 
@@ -859,17 +1092,39 @@ export default function TownMapScreen() {
                   onPress={() => setSelectedLot(lot)}
                 >
                   {selected ? (
-                    <View style={styles.avatarBubble}>
+                    <View
+                      style={[
+                        styles.avatarBubble,
+                        {
+                          backgroundColor: theme.previewCardBg,
+                          borderColor: theme.previewCardBorder,
+                        },
+                      ]}
+                    >
                       <Image source={{ uri: lot.npc.avatar }} style={styles.avatarBubbleImage} />
                       <View>
-                        <Text style={styles.avatarBubbleName}>{lot.label}</Text>
-                        <Text style={styles.avatarBubbleRole}>{lot.npc.role}</Text>
+                        <Text style={[styles.avatarBubbleName, { color: theme.previewText }]}>
+                          {lot.label}
+                        </Text>
+                        <Text style={[styles.avatarBubbleRole, { color: theme.previewSubtext }]}>
+                          {lot.npc.role}
+                        </Text>
                       </View>
                     </View>
                   ) : !lot.isMarket ? (
                     <>
-                      <View style={styles.labelPill}>
-                        <Text style={styles.labelPillText}>{lot.label}</Text>
+                      <View
+                        style={[
+                          styles.labelPill,
+                          {
+                            backgroundColor: theme.previewCardBg,
+                            borderColor: theme.previewCardBorder,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.labelPillText, { color: theme.previewText }]}>
+                          {lot.label}
+                        </Text>
                       </View>
                     </>
                   ) : null}
@@ -885,9 +1140,11 @@ export default function TownMapScreen() {
                 { left: HOME_POSITION.x * scale, top: HOME_POSITION.y * scale },
               ]}
             >
-              <View style={styles.myHomePill}>
-                <Ionicons name="home" size={10} color="#3b82f6" />
-                <Text style={styles.myHomeText}>{tr("我的家", "My Home")}</Text>
+              <View style={[styles.myHomePill, { backgroundColor: theme.chatSheetBg }]}>
+                <Ionicons name="home" size={10} color={theme.accent} />
+                <Text style={[styles.myHomeText, { color: isNeo ? "rgba(248,250,252,0.95)" : "#1f2937" }]}>
+                  {tr("我的家", "My Home")}
+                </Text>
               </View>
               <TownHouseNode
                 type={mapMyHouseTypeToVisual(myHouseType)}
@@ -895,14 +1152,29 @@ export default function TownMapScreen() {
                 scale={lotScale}
               />
             </View>
-          </View>
+            </View>
+          </ScrollView>
         </ScrollView>
-      </ScrollView>
+      </View>
 
       {showWorldScale ? (
         <View style={styles.miniMapWrap} pointerEvents="none">
-          <View style={styles.miniMapCard}>
-            <View style={[styles.miniMap, { width: miniSize, height: miniSize }]}>
+          <View
+            style={[
+              styles.miniMapCard,
+              { backgroundColor: theme.chatSheetBg, borderColor: theme.chatSheetBorder },
+            ]}
+          >
+            <View
+              style={[
+                styles.miniMap,
+                {
+                  width: miniSize,
+                  height: miniSize,
+                  backgroundColor: isNeo ? worldPalette.miniMap : worldPalette.miniMap,
+                },
+              ]}
+            >
               {visibleChunks.map((chunk) => {
                 const chunkWidth = miniSize / WORLD_CHUNKS_X;
                 const chunkHeight = miniSize / WORLD_CHUNKS_Y;
@@ -916,6 +1188,8 @@ export default function TownMapScreen() {
                         top: chunk.chunkY * chunkHeight,
                         width: chunkWidth,
                         height: chunkHeight,
+                        borderColor: worldPalette.miniChunk,
+                        backgroundColor: isNeo ? "rgba(255,255,255,0.03)" : "rgba(17,24,39,0.08)",
                       },
                     ]}
                   />
@@ -930,6 +1204,8 @@ export default function TownMapScreen() {
                     top: miniViewport.top,
                     width: miniViewport.width,
                     height: miniViewport.height,
+                    borderColor: theme.accent,
+                    backgroundColor: isNeo ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.16)",
                   },
                 ]}
               />
@@ -940,6 +1216,7 @@ export default function TownMapScreen() {
                   {
                     left: (HOME_POSITION.x / WORLD_WIDTH) * miniSize - 3,
                     top: (HOME_POSITION.y / WORLD_HEIGHT) * miniSize - 3,
+                    backgroundColor: "#ef4444",
                   },
                 ]}
               />
@@ -951,35 +1228,43 @@ export default function TownMapScreen() {
       {groupPanelVisible ? (
         groupPanelMode === "expanded" ? (
           <View style={styles.worldGroupWrap} pointerEvents="box-none">
-            <View style={styles.worldGroupCard}>
+            <View
+              style={[
+                styles.worldGroupCard,
+                {
+                  backgroundColor: theme.chatSheetBg,
+                  borderColor: theme.chatSheetBorder,
+                },
+              ]}
+            >
               <View style={styles.worldGroupHeader}>
                 <View style={styles.worldGroupHeaderLeft}>
-                  <View style={styles.worldGroupBadge}>
+                  <View style={[styles.worldGroupBadge, { backgroundColor: theme.accent }]}>
                     <Ionicons name="people" size={12} color="white" />
                   </View>
                   <View>
-                    <Text style={styles.worldGroupTitle}>
+                    <Text style={[styles.worldGroupTitle, { color: theme.sheetTitle }]}>
                       {language === "zh"
                         ? `Agent 团队（Bot ${Math.min(worldGroupCursorRef.current, 99) + 1}/100）`
                         : `Agent Team (Bot ${Math.min(worldGroupCursorRef.current, 99) + 1}/100)`}
                     </Text>
-                    <Text style={styles.worldGroupSub}>
+                    <Text style={[styles.worldGroupSub, { color: theme.accent }]}>
                       {tr("普通用户 Mini App 需求脑暴", "Mini App ideation from user perspective")}
                     </Text>
                   </View>
                 </View>
                 <View style={styles.worldGroupActions}>
                   <Pressable
-                    style={styles.worldGroupActionBtn}
+                    style={[styles.worldGroupActionBtn, { backgroundColor: theme.askBarBg }]}
                     onPress={() => setGroupPanelMode("minimized")}
                   >
-                    <Ionicons name="remove" size={16} color="#64748b" />
+                    <Ionicons name="remove" size={16} color={theme.chatHeaderText} />
                   </Pressable>
                   <Pressable
-                    style={styles.worldGroupActionBtn}
+                    style={[styles.worldGroupActionBtn, { backgroundColor: theme.askBarBg }]}
                     onPress={() => setGroupPanelVisible(false)}
                   >
-                    <Ionicons name="close" size={14} color="#64748b" />
+                    <Ionicons name="close" size={14} color={theme.chatHeaderText} />
                   </Pressable>
                 </View>
               </View>
@@ -992,33 +1277,74 @@ export default function TownMapScreen() {
               >
                 {worldGroupMessages.length === 0 ? (
                   <View style={styles.worldGroupEmptyWrap}>
-                    <Text style={styles.worldGroupEmptyText}>
+                    <Text style={[styles.worldGroupEmptyText, { color: theme.previewSubtext }]}>
                       {tr("暂无消息，正在等待 Agent 发言...", "No messages yet, waiting for agents...")}
                     </Text>
                   </View>
                 ) : (
                   worldGroupMessages.map((msg) =>
                     msg.role === "system" ? (
-                      <View key={msg.id} style={styles.worldGroupSystemWrap}>
-                        <Text style={styles.worldGroupSystemText}>{msg.text}</Text>
+                      <View
+                        key={msg.id}
+                        style={[
+                          styles.worldGroupSystemWrap,
+                          { alignItems: "center" },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.worldGroupSystemChip,
+                            isNeo
+                              ? {
+                                  borderColor: "rgba(255,255,255,0.18)",
+                                  backgroundColor: "rgba(255,255,255,0.05)",
+                                }
+                              : {},
+                          ]}
+                        >
+                          <Text style={[styles.worldGroupSystemText, { color: theme.previewSubtext }]}>
+                            {msg.text}
+                          </Text>
+                        </View>
                       </View>
                     ) : (
                       <View key={msg.id} style={styles.worldGroupRow}>
                         <Image
                           source={{ uri: msg.senderAvatar || botConfig.avatar }}
-                          style={styles.worldGroupAvatar}
+                          style={[
+                            styles.worldGroupAvatar,
+                            isNeo ? { backgroundColor: "rgba(255,255,255,0.16)" } : {},
+                          ]}
                         />
                         <View style={styles.worldGroupBubbleWrap}>
                           <View style={styles.worldGroupNameRow}>
-                            <Text style={styles.worldGroupName} numberOfLines={1}>
+                            <Text
+                              style={[
+                                styles.worldGroupName,
+                                { color: isNeo ? "rgba(226,232,240,0.96)" : "#1f2937" },
+                              ]}
+                              numberOfLines={1}
+                            >
                               {msg.senderName}
                             </Text>
-                            <Text style={styles.worldGroupRole} numberOfLines={1}>
+                            <Text style={[styles.worldGroupRole, { color: theme.previewSubtext }]} numberOfLines={1}>
                               {msg.senderRole}
                             </Text>
                           </View>
-                          <View style={styles.worldGroupBubble}>
-                            <Text style={styles.worldGroupText}>{msg.text}</Text>
+                          <View
+                            style={[
+                              styles.worldGroupBubble,
+                              isNeo
+                                ? {
+                                    borderColor: "rgba(255,255,255,0.16)",
+                                    backgroundColor: "rgba(255,255,255,0.06)",
+                                  }
+                                : {},
+                            ]}
+                          >
+                            <Text style={[styles.worldGroupText, { color: isNeo ? "rgba(226,232,240,0.95)" : "#334155" }]}>
+                              {msg.text}
+                            </Text>
                           </View>
                         </View>
                       </View>
@@ -1027,9 +1353,19 @@ export default function TownMapScreen() {
                 )}
 
                 {isWorldGroupThinking ? (
-                  <View style={styles.worldThinkingRow}>
-                    <Ionicons name="sync-outline" size={12} color="#2563eb" />
-                    <Text style={styles.worldThinkingText}>
+                  <View
+                    style={[
+                      styles.worldThinkingRow,
+                      isNeo
+                        ? {
+                            borderColor: "rgba(56,189,248,0.28)",
+                            backgroundColor: "rgba(59,130,246,0.18)",
+                          }
+                        : {},
+                    ]}
+                  >
+                    <Ionicons name="sync-outline" size={12} color={theme.accent} />
+                    <Text style={[styles.worldThinkingText, { color: isNeo ? theme.accent : "#1d4ed8" }]}>
                       {language === "zh"
                         ? `Bot ${Math.min(worldGroupCursorRef.current, 99) + 1} 构思中...`
                         : `Bot ${Math.min(worldGroupCursorRef.current, 99) + 1} is thinking...`}
@@ -1038,26 +1374,42 @@ export default function TownMapScreen() {
                 ) : null}
               </ScrollView>
 
-              <View style={styles.worldGroupFooter}>
-                <Ionicons name="mic-outline" size={13} color="#9ca3af" />
-                <Text style={styles.worldGroupFooterText}>
+              <View
+                style={[
+                  styles.worldGroupFooter,
+                  {
+                    borderTopColor: isNeo ? "rgba(255,255,255,0.12)" : "#e5e7eb",
+                    backgroundColor: isNeo ? "rgba(15,23,42,0.72)" : "#f8fafc",
+                  },
+                ]}
+              >
+                <Ionicons name="mic-outline" size={13} color={theme.chatHeaderText} />
+                <Text style={[styles.worldGroupFooterText, { color: theme.chatHeaderText }]}>
                   {tr("旁观模式（Team Lead 已锁定议题）", "Observer mode (topic locked by Team Lead)")}
                 </Text>
-                <Ionicons name="add" size={14} color="#9ca3af" />
+                <Ionicons name="add" size={14} color={theme.chatHeaderText} />
               </View>
             </View>
           </View>
         ) : (
           <Pressable
-            style={styles.worldGroupMini}
+            style={[
+              styles.worldGroupMini,
+              {
+                backgroundColor: theme.chatSheetBg,
+                borderColor: theme.chatSheetBorder,
+              },
+            ]}
             onPress={() => setGroupPanelMode("expanded")}
           >
-            <View style={styles.worldGroupMiniBadge}>
+            <View style={[styles.worldGroupMiniBadge, { backgroundColor: theme.accent }]}>
               <Ionicons name="bulb-outline" size={14} color="white" />
             </View>
             <View>
-              <Text style={styles.worldGroupMiniTitle}>{tr("用户需求脑暴", "User Needs Brainstorm")}</Text>
-              <Text style={styles.worldGroupMiniSub}>
+              <Text style={[styles.worldGroupMiniTitle, { color: theme.sheetTitle }]}>
+                {tr("用户需求脑暴", "User Needs Brainstorm")}
+              </Text>
+              <Text style={[styles.worldGroupMiniSub, { color: theme.previewSubtext }]}>
                 {language === "zh"
                   ? `Agent ${Math.min(worldGroupCursorRef.current, 99) + 1} 思考中...`
                   : `Agent ${Math.min(worldGroupCursorRef.current, 99) + 1} thinking...`}
@@ -1081,9 +1433,26 @@ export default function TownMapScreen() {
                 {language === "zh" ? `访问 ${selectedLot.label}` : `Visit ${selectedLot.label}`}
               </Text>
             </Pressable>
-            <Pressable style={[styles.visitBtn, styles.groupVisitBtn]} onPress={openGroupChat}>
-              <Ionicons name="people" size={16} color="#111827" />
-              <Text style={styles.groupVisitBtnText}>{tr("群聊", "Group Chat")}</Text>
+            <Pressable
+              style={[
+                styles.visitBtn,
+                styles.groupVisitBtn,
+                {
+                  backgroundColor: isNeo ? theme.chatSheetBg : "rgba(255,255,255,0.92)",
+                  borderColor: isNeo ? theme.previewCardBorder : "rgba(255,255,255,0.65)",
+                },
+              ]}
+              onPress={openGroupChat}
+            >
+              <Ionicons name="people" size={16} color={isNeo ? theme.previewText : "#111827"} />
+              <Text
+                style={[
+                  styles.groupVisitBtnText,
+                  { color: isNeo ? theme.previewText : "#111827" },
+                ]}
+              >
+                {tr("群聊", "Group Chat")}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -1100,19 +1469,21 @@ export default function TownMapScreen() {
           keyboardVerticalOffset={Platform.OS === "ios" ? 6 : 0}
           style={styles.modalOverlay}
         >
-          <View style={styles.chatSheet}>
-            <View style={styles.chatHeader}>
+          <View style={[styles.chatSheet, { backgroundColor: theme.chatSheetBg }]}>
+            <View
+              style={[styles.chatHeader, { borderBottomColor: isNeo ? "rgba(255,255,255,0.14)" : "#f3f4f6" }]}
+            >
               <View style={styles.chatHeaderLeft}>
                 {selectedLot ? (
                   <Image source={{ uri: selectedLot.npc.avatar }} style={styles.chatAvatar} />
                 ) : null}
                 <View>
-                  <Text style={styles.chatName}>
+                  <Text style={[styles.chatName, { color: theme.sheetTitle }]}>
                     {chatMode === "group"
                       ? `${selectedLot?.label ?? tr("小镇", "Town")} ${tr("群聊", "Group")}`
                       : selectedLot?.npc.name ?? tr("邻居", "NPC")}
                   </Text>
-                  <Text style={styles.chatRole}>
+                  <Text style={[styles.chatRole, { color: theme.chatHeaderText }]}>
                     {chatMode === "group"
                       ? language === "zh"
                         ? `${Math.max(2, groupMemberNames.length)} 人 · 群聊`
@@ -1122,10 +1493,13 @@ export default function TownMapScreen() {
                 </View>
               </View>
               <Pressable
-                style={styles.headerCircleWhite}
+                style={[
+                  styles.headerCircleWhite,
+                  { backgroundColor: isNeo ? "rgba(255,255,255,0.14)" : "#f3f4f6" },
+                ]}
                 onPress={() => setIsChatOpen(false)}
               >
-                <Ionicons name="close" size={18} color="#374151" />
+                <Ionicons name="close" size={18} color={theme.chatHeaderText} />
               </Pressable>
             </View>
 
@@ -1137,7 +1511,9 @@ export default function TownMapScreen() {
               {chatMessages.map((msg, index) => (
                 msg.role === "system" ? (
                   <View key={`${msg.role}_${index}`} style={styles.systemRow}>
-                    <Text style={styles.systemText}>{msg.text}</Text>
+                    <Text style={[styles.systemText, { color: theme.chatHeaderText }]}>
+                      {msg.text}
+                    </Text>
                   </View>
                 ) : (
                   <View
@@ -1151,21 +1527,55 @@ export default function TownMapScreen() {
                       style={[
                         styles.chatBubble,
                         msg.role === "user" ? styles.chatBubbleMe : styles.chatBubbleBot,
+                        msg.role === "user"
+                          ? { backgroundColor: isNeo ? theme.accent : styles.chatBubbleMe.backgroundColor }
+                          : {
+                              backgroundColor: isNeo ? "rgba(255,255,255,0.06)" : "#f3f4f6",
+                              borderColor: isNeo ? "rgba(255,255,255,0.16)" : "#e5e7eb",
+                            },
                       ]}
                     >
                       {chatMode === "group" && msg.role === "model" && msg.senderName ? (
-                        <Text style={styles.chatSender}>{msg.senderName}</Text>
+                        <Text
+                          style={[
+                            styles.chatSender,
+                            { color: isNeo ? "rgba(148,163,184,0.9)" : "#64748b" },
+                          ]}
+                        >
+                          {msg.senderName}
+                        </Text>
                       ) : null}
-                      <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                      <Text
+                        style={[
+                          styles.chatBubbleText,
+                          {
+                            color:
+                              msg.role === "user"
+                                ? isNeo
+                                  ? "#052e16"
+                                  : "#111827"
+                                : "rgba(226,232,240,0.95)",
+                          },
+                        ]}
+                      >
+                        {msg.text}
+                      </Text>
                     </View>
                   </View>
                 )
               ))}
             </ScrollView>
 
-            <View style={styles.chatInputWrap}>
+            <View style={[styles.chatInputWrap, { backgroundColor: isNeo ? "rgba(30,37,55,0.86)" : "#f9fafb", borderColor: isNeo ? "rgba(255,255,255,0.12)" : "#e5e7eb" }]}>
               <TextInput
-                style={styles.chatInput}
+                style={[
+                  styles.chatInput,
+                  {
+                    backgroundColor: isNeo ? "rgba(15,19,32,0.7)" : "#fff",
+                    borderColor: isNeo ? "rgba(255,255,255,0.16)" : "#d1d5db",
+                    color: isNeo ? "rgba(226,232,240,0.92)" : "#111827",
+                  },
+                ]}
                 value={inputValue}
                 onChangeText={setInputValue}
                 placeholder={
@@ -1173,10 +1583,14 @@ export default function TownMapScreen() {
                     ? tr("发送群消息...", "Message the group...")
                     : tr("输入消息...", "Type a message...")
                 }
+                placeholderTextColor={theme.askBarInputText}
                 onSubmitEditing={sendChat}
               />
-              <Pressable style={styles.chatSendBtn} onPress={sendChat}>
-                <Ionicons name="send" size={16} color="#374151" />
+              <Pressable
+                style={[styles.chatSendBtn, { backgroundColor: isNeo ? "rgba(255,255,255,0.16)" : "#e5e7eb" }]}
+                onPress={sendChat}
+              >
+                <Ionicons name="send" size={16} color={isNeo ? "rgba(226,232,240,0.95)" : "#374151"} />
               </Pressable>
             </View>
           </View>
@@ -1275,6 +1689,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: "#cbd5e1",
     fontSize: 10,
+  },
+  mapScrollWrap: {
+    flex: 1,
   },
   zoomWrap: {
     position: "absolute",
@@ -1579,6 +1996,14 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 11,
     textAlign: "center",
+  },
+  worldGroupSystemChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   worldGroupSystemWrap: {
     alignItems: "center",

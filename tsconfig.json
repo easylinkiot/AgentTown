@@ -8,6 +8,9 @@
       ]
     }
   },
+  "exclude": [
+    "design/**"
+  ],
   "include": [
     "**/*.ts",
     "**/*.tsx",

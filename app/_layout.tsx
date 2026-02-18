@@ -36,7 +36,7 @@ function RootStack() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: "#f3f4f6" },
+        contentStyle: { backgroundColor: "#070a14" },
         animation: "slide_from_right",
       }}
     >
@@ -65,6 +65,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#070a14",
   },
 });
