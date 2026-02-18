@@ -40,7 +40,7 @@ export function AddBotFriendModal({
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
   const [avatar, setAvatar] = useState(() => randomAvatar());
-  const [isGroup, setIsGroup] = useState(false);
+  const [chatMode, setChatMode] = useState<"human" | "group">("human");
 
   const summary = useMemo(() => {
     const rolePart = role.trim();
@@ -48,7 +48,7 @@ export function AddBotFriendModal({
     if (rolePart && companyPart) return `${rolePart} · ${companyPart}`;
     if (rolePart) return rolePart;
     if (companyPart) return companyPart;
-    return language === "zh" ? "新 Bot 好友" : "New Bot Friend";
+    return language === "zh" ? "新联系人" : "New Contact";
   }, [company, language, role]);
 
   const reset = () => {
@@ -56,7 +56,7 @@ export function AddBotFriendModal({
     setRole("");
     setCompany("");
     setAvatar(randomAvatar());
-    setIsGroup(false);
+    setChatMode("human");
   };
 
   const handleClose = () => {
@@ -69,13 +69,13 @@ export function AddBotFriendModal({
     if (!safeName) return;
 
     const created: ChatThread = {
-      id: `bot_${Date.now()}`,
+      id: `${chatMode}_${Date.now()}`,
       name: safeName,
       avatar,
       message: summary,
       time: "Now",
-      isGroup,
-      memberCount: isGroup ? 6 : undefined,
+      isGroup: chatMode === "group",
+      memberCount: chatMode === "group" ? 6 : undefined,
       supportsVideo: true,
     };
     onAdd(created);
@@ -98,7 +98,7 @@ export function AddBotFriendModal({
                 <Ionicons name="person-add-outline" size={14} color="white" />
               </View>
               <Text style={[styles.title, isNeo && styles.titleNeo]}>
-                {tr("添加 Bot 好友", "Add Bot Friend")}
+                {tr("添加联系人 / 群聊", "Add Contact / Group")}
               </Text>
             </View>
             <Pressable style={styles.closeBtn} onPress={handleClose}>
@@ -158,17 +158,34 @@ export function AddBotFriendModal({
                 style={[
                   styles.secondaryBtn,
                   isNeo && styles.secondaryBtnNeo,
-                  isGroup && styles.secondaryBtnActive,
+                  chatMode === "human" && styles.secondaryBtnActive,
                 ]}
-                onPress={() => setIsGroup((v) => !v)}
+                onPress={() => setChatMode("human")}
               >
                 <Ionicons
-                  name={isGroup ? "people" : "person-outline"}
+                  name="person-outline"
                   size={14}
                   color={isNeo ? "#e2e8f0" : "#1f2937"}
                 />
                 <Text style={[styles.secondaryBtnText, isNeo && styles.secondaryBtnTextNeo]}>
-                  {isGroup ? tr("群聊", "Group") : tr("私聊", "Direct")}
+                  {tr("人类", "Human")}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.secondaryBtn,
+                  isNeo && styles.secondaryBtnNeo,
+                  chatMode === "group" && styles.secondaryBtnActive,
+                ]}
+                onPress={() => setChatMode("group")}
+              >
+                <Ionicons
+                  name="people-outline"
+                  size={14}
+                  color={isNeo ? "#e2e8f0" : "#1f2937"}
+                />
+                <Text style={[styles.secondaryBtnText, isNeo && styles.secondaryBtnTextNeo]}>
+                  {tr("群聊", "Group")}
                 </Text>
               </Pressable>
             </View>

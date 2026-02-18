@@ -1,16 +1,20 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
+import { authGuest, authMe, authProvider, setAuthToken } from "@/src/lib/api";
+
 export type AuthMethod = "guest" | "google" | "apple" | "phone";
 
 export interface AuthUser {
   id: string;
-  provider: AuthMethod;
+  provider: AuthMethod | string;
   displayName: string;
   email?: string;
   phone?: string;
   avatar?: string;
+  role?: "admin" | "member" | "guest";
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface PhoneOtpState {
@@ -22,6 +26,7 @@ interface PhoneOtpState {
 interface AuthContextValue {
   isHydrated: boolean;
   user: AuthUser | null;
+  token: string | null;
   isSignedIn: boolean;
   signInAsGuest: () => Promise<void>;
   signInWithGoogle: (input: {
@@ -29,26 +34,29 @@ interface AuthContextValue {
     name?: string | null;
     email?: string | null;
     avatar?: string | null;
+    idToken?: string | null;
   }) => Promise<void>;
   signInWithApple: (input: {
     id: string;
     name?: string | null;
     email?: string | null;
+    identityToken?: string | null;
   }) => Promise<void>;
   sendPhoneCode: (phone: string) => Promise<{ expiresAt: number; devCode?: string }>;
   verifyPhoneCode: (phone: string, code: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-const SESSION_KEY = "agenttown.auth.session.v1";
+interface PersistedSession {
+  token: string;
+  user: AuthUser;
+}
+
+const SESSION_KEY = "agenttown.auth.session.v2";
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function randomId(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 11)}`;
-}
 
 export function normalizePhone(phone: string) {
   const value = phone.trim().replace(/[^\d+]/g, "");
@@ -64,94 +72,134 @@ export function displayNameFromEmail(email?: string | null) {
   return local || null;
 }
 
+function mapBackendUser(input: {
+  id: string;
+  provider: string;
+  displayName: string;
+  email?: string;
+  role?: "admin" | "member" | "guest";
+  createdAt: string;
+  updatedAt?: string;
+}): AuthUser {
+  return {
+    id: input.id,
+    provider: (input.provider as AuthMethod) || "guest",
+    displayName: input.displayName,
+    email: input.email,
+    role: input.role,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const otpMapRef = useRef<Map<string, PhoneOtpState>>(new Map());
 
-  const persistUser = useCallback(async (nextUser: AuthUser | null) => {
-    if (nextUser) {
-      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+  const persistSession = useCallback(async (next: PersistedSession | null) => {
+    if (!next) {
+      await AsyncStorage.removeItem(SESSION_KEY);
       return;
     }
-    await AsyncStorage.removeItem(SESSION_KEY);
+    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(next));
   }, []);
+
+  const applySession = useCallback(
+    async (next: PersistedSession | null, persist = true) => {
+      setUser(next?.user || null);
+      setToken(next?.token || null);
+      setAuthToken(next?.token || null);
+      if (persist) {
+        await persistSession(next);
+      }
+    },
+    [persistSession]
+  );
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(SESSION_KEY);
-        if (!raw || !alive) return;
-        const parsed = JSON.parse(raw) as Partial<AuthUser>;
-        if (!parsed?.id || !parsed?.provider || !parsed?.displayName) return;
-        setUser({
-          id: parsed.id,
-          provider: parsed.provider,
-          displayName: parsed.displayName,
-          email: parsed.email,
-          phone: parsed.phone,
-          avatar: parsed.avatar,
-          createdAt: parsed.createdAt || new Date().toISOString(),
-        });
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw) as Partial<PersistedSession>;
+        if (!parsed?.token || !parsed?.user?.id) {
+          await AsyncStorage.removeItem(SESSION_KEY);
+          return;
+        }
+
+        await applySession(
+          {
+            token: parsed.token,
+            user: parsed.user,
+          },
+          false
+        );
+
+        try {
+          const me = await authMe();
+          if (!alive) return;
+          await applySession({ token: parsed.token, user: mapBackendUser(me) });
+        } catch {
+          if (!alive) return;
+          await applySession(null);
+        }
       } catch {
         await AsyncStorage.removeItem(SESSION_KEY);
       } finally {
-        if (alive) setIsHydrated(true);
+        if (alive) {
+          setIsHydrated(true);
+        }
       }
     })();
 
     return () => {
       alive = false;
     };
-  }, []);
+  }, [applySession]);
 
   const signInAsGuest = useCallback(async () => {
-    const nextUser: AuthUser = {
-      id: randomId("guest"),
-      provider: "guest",
-      displayName: "Guest Explorer",
-      createdAt: new Date().toISOString(),
-    };
-    setUser(nextUser);
-    await persistUser(nextUser);
-  }, [persistUser]);
+    const session = await authGuest("Guest Explorer");
+    await applySession({
+      token: session.token,
+      user: mapBackendUser(session.user),
+    });
+  }, [applySession]);
 
   const signInWithGoogle = useCallback<AuthContextValue["signInWithGoogle"]>(
     async (input) => {
-      const nextUser: AuthUser = {
-        id: input.id || randomId("google"),
+      const session = await authProvider({
         provider: "google",
-        displayName:
-          input.name?.trim() ||
-          displayNameFromEmail(input.email) ||
-          "Google User",
+        providerUserId: input.id,
+        idToken: input.idToken || undefined,
         email: input.email || undefined,
-        avatar: input.avatar || undefined,
-        createdAt: new Date().toISOString(),
-      };
-      setUser(nextUser);
-      await persistUser(nextUser);
+        displayName:
+          input.name?.trim() || displayNameFromEmail(input.email) || "Google User",
+      });
+      const mapped = mapBackendUser(session.user);
+      mapped.avatar = input.avatar || undefined;
+      await applySession({ token: session.token, user: mapped });
     },
-    [persistUser]
+    [applySession]
   );
 
   const signInWithApple = useCallback<AuthContextValue["signInWithApple"]>(
     async (input) => {
-      const nextUser: AuthUser = {
-        id: input.id || randomId("apple"),
+      const session = await authProvider({
         provider: "apple",
-        displayName:
-          input.name?.trim() ||
-          displayNameFromEmail(input.email) ||
-          "Apple User",
+        providerUserId: input.id,
+        idToken: input.identityToken || undefined,
         email: input.email || undefined,
-        createdAt: new Date().toISOString(),
-      };
-      setUser(nextUser);
-      await persistUser(nextUser);
+        displayName:
+          input.name?.trim() || displayNameFromEmail(input.email) || "Apple User",
+      });
+      await applySession({ token: session.token, user: mapBackendUser(session.user) });
     },
-    [persistUser]
+    [applySession]
   );
 
   const sendPhoneCode = useCallback<AuthContextValue["sendPhoneCode"]>(async (phone) => {
@@ -194,29 +242,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       otpMapRef.current.delete(normalizedPhone);
-      const nextUser: AuthUser = {
-        id: normalizedPhone,
+      const session = await authProvider({
         provider: "phone",
+        providerUserId: normalizedPhone,
         displayName: `User-${normalizedPhone.slice(-4)}`,
-        phone: normalizedPhone,
-        createdAt: new Date().toISOString(),
-      };
-      setUser(nextUser);
-      await persistUser(nextUser);
+      });
+
+      const mapped = mapBackendUser(session.user);
+      mapped.phone = normalizedPhone;
+      await applySession({ token: session.token, user: mapped });
     },
-    [persistUser]
+    [applySession]
   );
 
   const signOut = useCallback(async () => {
-    setUser(null);
-    await persistUser(null);
-  }, [persistUser]);
+    await applySession(null);
+  }, [applySession]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       isHydrated,
       user,
-      isSignedIn: Boolean(user),
+      token,
+      isSignedIn: Boolean(user && token),
       signInAsGuest,
       signInWithGoogle,
       signInWithApple,
@@ -226,13 +274,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       isHydrated,
-      sendPhoneCode,
-      signInAsGuest,
-      signInWithApple,
-      signInWithGoogle,
-      signOut,
       user,
+      token,
+      signInAsGuest,
+      signInWithGoogle,
+      signInWithApple,
+      sendPhoneCode,
       verifyPhoneCode,
+      signOut,
     ]
   );
 

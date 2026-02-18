@@ -17,6 +17,11 @@ export function ChatListItem({
   language = "en",
 }: ChatListItemProps) {
   const isNeo = theme === "neo";
+  const preview = chat.isVoiceCall
+    ? language === "zh"
+      ? "[语音通话]"
+      : "[Voice Call]"
+    : chat.message;
 
   return (
     <Pressable style={[styles.container, isNeo && styles.containerNeo]} onPress={onPress}>
@@ -63,7 +68,7 @@ export function ChatListItem({
               ? `[${chat.unreadCount} 条通知] `
               : `[${chat.unreadCount} notifications] `
             : ""}
-          {chat.message}
+          {preview}
         </Text>
       </View>
     </Pressable>
@@ -81,8 +86,14 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(0,0,0,0.05)",
   },
   containerNeo: {
-    borderBottomColor: "rgba(255,255,255,0.05)",
-    backgroundColor: "transparent",
+    borderBottomWidth: 0,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(15,23,42,0.55)",
   },
   avatarWrap: {
     position: "relative",
@@ -94,6 +105,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#d1d5db",
   },
   avatarNeo: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.18)",
   },

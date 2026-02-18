@@ -43,6 +43,10 @@ function RootStack() {
       <Stack.Screen name="sign-in" options={{ animation: "fade" }} />
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="tasks" />
+      <Stack.Screen name="agents" />
+      <Stack.Screen name="groups" />
+      <Stack.Screen name="miniapps" />
       <Stack.Screen name="config" />
       <Stack.Screen name="town-map" />
       <Stack.Screen name="living-room" />
