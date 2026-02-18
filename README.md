@@ -2,6 +2,31 @@
 
 AgentTown is an Expo-based, AI-ready application that runs on iOS, Android, and Web from one TypeScript codebase.
 
+## Backend (Go + Postgres + Redis)
+
+The repository now includes a production-oriented backend under `backend/` for non-`Agent World` features:
+
+- Chat threads and message persistence
+- Task persistence
+- Bot config persistence
+- Unified AI proxy endpoints
+
+Start backend infra and API:
+
+```bash
+docker compose -f docker-compose.backend.yml up --build
+```
+
+AWS EC2 deployment notes:
+
+- `backend/DEPLOY_AWS_EC2.md`
+
+Frontend env should point to backend:
+
+```bash
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8080
+```
+
 ## Migrated Features
 
 - Home dashboard with Town entry + WeChat-style chat list
@@ -149,7 +174,9 @@ cp .env.example .env.local
 Then set:
 
 ```bash
-EXPO_PUBLIC_GEMINI_API_KEY=your_key_here
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8080
+AGENTTOWN_OPENAI_API_KEY=your_openai_key
+AGENTTOWN_OPENAI_MODEL=gpt-4.1-mini
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=...
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...
 EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...

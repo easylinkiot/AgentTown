@@ -10,19 +10,11 @@ interface GenerateTextInput {
   responseMimeType?: "text/plain" | "application/json";
 }
 
-const MODEL = "gemini-2.0-flash";
+const DEFAULT_BACKEND_BASE_URL = "http://localhost:8080";
 
-function getApiKey(): string | null {
-  const key = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-  if (!key) return null;
-  return key;
-}
-
-function parseCandidateText(payload: any): string {
-  const part = payload?.candidates?.[0]?.content?.parts?.find(
-    (p: any) => typeof p?.text === "string"
-  );
-  return part?.text?.trim() ?? "";
+function getBackendBaseUrl(): string {
+  const raw = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_BACKEND_BASE_URL;
+  return raw.replace(/\/+$/, "");
 }
 
 export async function generateGeminiText({
@@ -31,45 +23,31 @@ export async function generateGeminiText({
   history = [],
   responseMimeType = "text/plain",
 }: GenerateTextInput): Promise<string | null> {
-  const apiKey = getApiKey();
-  if (!apiKey) return null;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-
-  const body: any = {
-    contents: [
-      ...history.map((item) => ({
-        role: item.role,
-        parts: [{ text: item.text }],
-      })),
-      { role: "user", parts: [{ text: prompt }] },
-    ],
-    generationConfig: {
-      temperature: 0.7,
-      responseMimeType,
-    },
-  };
-
-  if (systemInstruction) {
-    body.systemInstruction = {
-      parts: [{ text: systemInstruction }],
-    };
-  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3_000);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(`${getBackendBaseUrl()}/v1/ai/text`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt,
+        systemInstruction,
+        history,
+        responseMimeType,
+      }),
+      signal: controller.signal,
     });
 
     if (!response.ok) return null;
-
     const payload = await response.json();
-    const text = parseCandidateText(payload);
-    return text || null;
+    return typeof payload?.text === "string" ? payload.text.trim() || null : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -108,3 +86,4 @@ export async function generateGeminiJson<T>(
   const parsed = parseGeminiJson<T>(text);
   return parsed ?? fallback;
 }
+

@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agenttown-postgres
+    environment:
+      POSTGRES_DB: agenttown
+      POSTGRES_USER: agenttown
+      POSTGRES_PASSWORD: agenttown
+    ports:
+      - "5432:5432"
+    volumes:
+      - agenttown-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenttown -d agenttown"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: agenttown-redis
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agenttown-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      AGENTTOWN_API_ADDR: ":8080"
+      AGENTTOWN_DATABASE_URL: "postgres://agenttown:agenttown@postgres:5432/agenttown?sslmode=disable"
+      AGENTTOWN_ALLOWED_ORIGINS: "*"
+      AGENTTOWN_OPENAI_API_KEY: "${AGENTTOWN_OPENAI_API_KEY:-}"
+      AGENTTOWN_OPENAI_MODEL: "${AGENTTOWN_OPENAI_MODEL:-gpt-4.1-mini}"
+    ports:
+      - "8080:8080"
+
+volumes:
+  agenttown-postgres:

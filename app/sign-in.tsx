@@ -116,6 +116,11 @@ export default function SignInScreen() {
       (typeof googleResponse.params?.access_token === "string"
         ? googleResponse.params.access_token
         : null);
+    const idToken =
+      googleResponse.authentication?.idToken ||
+      (typeof googleResponse.params?.id_token === "string"
+        ? googleResponse.params.id_token
+        : null);
 
     if (!accessToken) {
       Alert.alert(
@@ -134,6 +139,7 @@ export default function SignInScreen() {
           name: profile.name,
           email: profile.email,
           avatar: profile.picture,
+          idToken,
         });
         router.replace("/");
       } catch {
@@ -210,6 +216,7 @@ export default function SignInScreen() {
         id: credential.user,
         name: fullName || null,
         email: credential.email,
+        identityToken: credential.identityToken || null,
       });
       router.replace("/");
     } catch (error) {
