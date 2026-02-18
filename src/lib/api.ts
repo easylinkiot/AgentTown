@@ -207,7 +207,26 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `API request failed (${response.status})`);
+    const base = getApiBaseUrl();
+    const method = init?.method || "GET";
+    const prefix = `${response.status} ${method} ${path} @ ${base}`;
+
+    if (text) {
+      let canonical = "";
+      try {
+        const parsed = JSON.parse(text) as { message?: unknown };
+        if (parsed && typeof parsed === "object" && typeof parsed.message === "string") {
+          canonical = parsed.message.trim();
+        }
+      } catch {
+        // ignore JSON parse errors
+      }
+      if (canonical) {
+        throw new Error(`${prefix}: ${canonical}`);
+      }
+      throw new Error(`${prefix}: ${text}`);
+    }
+    throw new Error(`${prefix}: API request failed`);
   }
 
   if (response.status === 204) {

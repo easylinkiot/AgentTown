@@ -317,6 +317,28 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshThreadMessages = useCallback(async (threadId: string) => {
+    if (!threadId) return;
+    const messages = await listThreadMessagesApi(threadId);
+    setMessagesByThread((prev) => ({
+      ...prev,
+      [threadId]: messages,
+    }));
+  }, []);
+
+  const listMembers = useCallback(async (threadId: string) => {
+    if (!threadId) return;
+    try {
+      const members = await listThreadMembersApi(threadId);
+      setThreadMembers((prev) => ({
+        ...prev,
+        [threadId]: members,
+      }));
+    } catch {
+      // Ignore loading failure.
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -546,14 +568,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       updateLanguage: setLanguage,
       updateVoiceModeEnabled: setVoiceModeEnabled,
       refreshAll,
-      refreshThreadMessages: async (threadId) => {
-        if (!threadId) return;
-        const messages = await listThreadMessagesApi(threadId);
-        setMessagesByThread((prev) => ({
-          ...prev,
-          [threadId]: messages,
-        }));
-      },
+      refreshThreadMessages,
       sendMessage: async (threadId, payload) => {
         if (!threadId) return null;
         try {
@@ -634,18 +649,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           return draft;
         }
       },
-      listMembers: async (threadId) => {
-        if (!threadId) return;
-        try {
-          const members = await listThreadMembersApi(threadId);
-          setThreadMembers((prev) => ({
-            ...prev,
-            [threadId]: members,
-          }));
-        } catch {
-          // Ignore loading failure.
-        }
-      },
+      listMembers,
       addMember: async (threadId, input) => {
         if (!threadId) return;
         try {
@@ -942,12 +946,14 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     customSkills,
     friends,
     language,
+    listMembers,
     messagesByThread,
     miniAppTemplates,
     miniAppGeneration,
     miniApps,
     myHouseType,
     refreshAll,
+    refreshThreadMessages,
     skillCatalog,
     tasks,
     threadMembers,
