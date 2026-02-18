@@ -142,7 +142,7 @@ function safeThreadKey(threadId: string) {
 }
 
 function cacheDir() {
-  const base = FileSystem.documentDirectory;
+  const base = FileSystem.Paths?.document?.uri;
   if (!base) return null;
   return `${base}agenttown_cache/messages`;
 }

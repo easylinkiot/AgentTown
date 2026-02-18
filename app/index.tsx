@@ -270,11 +270,23 @@ export default function HomeScreen() {
           <Pressable style={styles.modalOverlay} onPress={() => setPeopleModal(false)}>
             <Pressable style={styles.actionSheet} onPress={() => null}>
               <Text style={styles.sheetTitle}>{tr("快捷入口", "Quick Actions")}</Text>
-              <Pressable style={styles.sheetItem} onPress={() => setFriendModal(true)}>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => {
+                  setPeopleModal(false);
+                  setTimeout(() => setFriendModal(true), 120);
+                }}
+              >
                 <Ionicons name="person-add-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("添加朋友", "Add Friend")}</Text>
               </Pressable>
-              <Pressable style={styles.sheetItem} onPress={() => setGroupModal(true)}>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => {
+                  setPeopleModal(false);
+                  setTimeout(() => setGroupModal(true), 120);
+                }}
+              >
                 <Ionicons name="people-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("新建群聊", "New Group")}</Text>
               </Pressable>
