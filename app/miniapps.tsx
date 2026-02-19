@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
@@ -20,6 +20,46 @@ export default function MiniAppsScreen() {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const confirmUninstall = (appId: string, appName: string) => {
+    Alert.alert(
+      tr("卸载 Mini App", "Uninstall mini app"),
+      tr(
+        `确认卸载 ${appName || "Mini App"} 吗？`,
+        `Uninstall ${appName || "this mini app"}?`
+      ),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("卸载", "Uninstall"),
+          style: "destructive",
+          onPress: () => {
+            void installMiniApp(appId, false).catch((err) => setError(String(err)));
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmDeleteMiniApp = (appId: string, appName: string) => {
+    Alert.alert(
+      tr("删除 Mini App", "Delete mini app"),
+      tr(
+        `确认删除 ${appName || "Mini App"} 吗？此操作不可撤销。`,
+        `Delete ${appName || "this mini app"}? This cannot be undone.`
+      ),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("删除", "Delete"),
+          style: "destructive",
+          onPress: () => {
+            void removeMiniApp(appId).catch((err) => setError(String(err)));
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <KeyframeBackground>
@@ -83,7 +123,7 @@ export default function MiniAppsScreen() {
                     </Pressable>
                     <Pressable
                       style={[styles.ghostBtn, styles.ghostBtnWarn]}
-                      onPress={() => void installMiniApp(app.id, false).catch((err) => setError(String(err)))}
+                      onPress={() => confirmUninstall(app.id, app.name)}
                     >
                       <Text style={styles.ghostText}>{tr("卸载", "Uninstall")}</Text>
                     </Pressable>
@@ -111,7 +151,7 @@ export default function MiniAppsScreen() {
                     </Pressable>
                     <Pressable
                       style={styles.ghostBtn}
-                      onPress={() => void removeMiniApp(app.id).catch((err) => setError(String(err)))}
+                      onPress={() => confirmDeleteMiniApp(app.id, app.name)}
                     >
                       <Text style={styles.ghostText}>{tr("删除", "Delete")}</Text>
                     </Pressable>
@@ -265,4 +305,3 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
-

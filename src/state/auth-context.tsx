@@ -172,13 +172,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = useCallback<AuthContextValue["signInWithGoogle"]>(
     async (input) => {
+      const normalizedName = input.name?.trim() || displayNameFromEmail(input.email) || undefined;
       const session = await authProvider({
         provider: "google",
         providerUserId: input.id,
         idToken: input.idToken || undefined,
         email: input.email || undefined,
-        displayName:
-          input.name?.trim() || displayNameFromEmail(input.email) || "Google User",
+        displayName: normalizedName,
       });
       const mapped = mapBackendUser(session.user);
       mapped.avatar = input.avatar || undefined;
@@ -189,13 +189,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithApple = useCallback<AuthContextValue["signInWithApple"]>(
     async (input) => {
+      const normalizedName = input.name?.trim() || displayNameFromEmail(input.email) || undefined;
       const session = await authProvider({
         provider: "apple",
         providerUserId: input.id,
         idToken: input.identityToken || undefined,
         email: input.email || undefined,
-        displayName:
-          input.name?.trim() || displayNameFromEmail(input.email) || "Apple User",
+        displayName: normalizedName,
       });
       await applySession({ token: session.token, user: mapBackendUser(session.user) });
     },

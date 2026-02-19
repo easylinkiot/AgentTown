@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
+  Alert,
   Image,
   Modal,
   Platform,
@@ -118,6 +119,51 @@ export default function AgentsScreen() {
     }
   };
 
+  const confirmRemoveSkillFromAgent = (skillId: string, skillName: string) => {
+    if (!selectedAgent) return;
+    Alert.alert(
+      tr("移除 Skill", "Remove skill"),
+      tr(
+        `确认从 ${selectedAgent.name} 移除 ${skillName} 吗？`,
+        `Remove ${skillName} from ${selectedAgent.name}?`
+      ),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("移除", "Remove"),
+          style: "destructive",
+          onPress: () => {
+            void toggleAgentSkill(selectedAgent.id, skillId, false).catch((err) =>
+              setError(err instanceof Error ? err.message : String(err))
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmDeleteCustomSkill = (skillId: string, skillName: string) => {
+    Alert.alert(
+      tr("删除 Skill", "Delete skill"),
+      tr(
+        `确认删除 ${skillName} 吗？此操作不可撤销。`,
+        `Delete ${skillName}? This cannot be undone.`
+      ),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("删除", "Delete"),
+          style: "destructive",
+          onPress: () => {
+            void removeCustomSkill(skillId).catch((err) =>
+              setError(err instanceof Error ? err.message : String(err))
+            );
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <KeyframeBackground>
       <SafeAreaView style={styles.safeArea}>
@@ -202,7 +248,11 @@ export default function AgentsScreen() {
                         disabled={!selectedAgent}
                         onPress={() => {
                           if (!selectedAgent) return;
-                          void toggleAgentSkill(selectedAgent.id, skill.id, !installed).catch((err) =>
+                          if (installed) {
+                            confirmRemoveSkillFromAgent(skill.id, skill.name);
+                            return;
+                          }
+                          void toggleAgentSkill(selectedAgent.id, skill.id, true).catch((err) =>
                             setError(err instanceof Error ? err.message : String(err))
                           );
                         }}
@@ -267,11 +317,7 @@ export default function AgentsScreen() {
                       </Pressable>
                       <Pressable
                         style={styles.deleteBtn}
-                        onPress={() => {
-                          void removeCustomSkill(skill.id).catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err))
-                          );
-                        }}
+                        onPress={() => confirmDeleteCustomSkill(skill.id, skill.name)}
                       >
                         <Text style={styles.deleteBtnText}>{tr("删除", "Delete")}</Text>
                       </Pressable>

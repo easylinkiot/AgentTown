@@ -113,12 +113,22 @@ export interface RunMiniAppOutput {
 }
 
 export interface CreateFriendInput {
-  name: string;
+  userId: string;
+  name?: string;
   avatar?: string;
   kind?: "human" | "bot";
   role?: string;
   company?: string;
   threadId?: string;
+}
+
+export interface DiscoverUser {
+  id: string;
+  displayName: string;
+  email?: string;
+  provider: string;
+  role: "admin" | "member" | "guest";
+  avatar: string;
 }
 
 export interface AddThreadMemberInput {
@@ -207,7 +217,26 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `API request failed (${response.status})`);
+    const base = getApiBaseUrl();
+    const method = init?.method || "GET";
+    const prefix = `${response.status} ${method} ${path} @ ${base}`;
+
+    if (text) {
+      let canonical = "";
+      try {
+        const parsed = JSON.parse(text) as { message?: unknown };
+        if (parsed && typeof parsed === "object" && typeof parsed.message === "string") {
+          canonical = parsed.message.trim();
+        }
+      } catch {
+        // ignore JSON parse errors
+      }
+      if (canonical) {
+        throw new Error(`${prefix}: ${canonical}`);
+      }
+      throw new Error(`${prefix}: ${text}`);
+    }
+    throw new Error(`${prefix}: API request failed`);
   }
 
   if (response.status === 204) {
@@ -316,9 +345,22 @@ export async function createChatThread(payload: ChatThread) {
   });
 }
 
-export async function listThreadMessages(threadId: string) {
+export async function deleteChatThread(threadId: string) {
+  return apiFetch<{ ok: boolean; id: string }>(`/v1/chat/threads/${encodeURIComponent(threadId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listThreadMessages(
+  threadId: string,
+  options?: { limit?: number; before?: string }
+) {
+  const params = new URLSearchParams();
+  if (options?.limit && options.limit > 0) params.set("limit", String(options.limit));
+  if (options?.before) params.set("before", options.before);
+  const qs = params.toString();
   return apiFetch<ConversationMessage[]>(
-    `/v1/chat/threads/${encodeURIComponent(threadId)}/messages`
+    `/v1/chat/threads/${encodeURIComponent(threadId)}/messages${qs ? `?${qs}` : ""}`
   );
 }
 
@@ -351,6 +393,13 @@ export async function createFriend(payload: CreateFriendInput) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function discoverUsers(query?: string) {
+  const params = new URLSearchParams();
+  if (query?.trim()) params.set("q", query.trim());
+  const qs = params.toString();
+  return apiFetch<DiscoverUser[]>(`/v1/users/discover${qs ? `?${qs}` : ""}`);
 }
 
 export async function deleteFriend(friendId: string) {

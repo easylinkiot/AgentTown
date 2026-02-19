@@ -71,6 +71,8 @@ export type FriendKind = "human" | "bot";
 
 export interface Friend {
   id: string;
+  ownerId?: string;
+  userId?: string;
   name: string;
   avatar: string;
   kind: FriendKind;

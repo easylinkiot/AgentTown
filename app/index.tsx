@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Modal,
@@ -13,18 +14,22 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
-import { createChatThread } from "@/src/lib/api";
+import { createChatThread, discoverUsers, type DiscoverUser } from "@/src/lib/api";
 import { tx } from "@/src/i18n/translate";
+import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { ChatThread } from "@/src/types";
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const {
     chatThreads,
     friends,
@@ -43,12 +48,10 @@ export default function HomeScreen() {
   const [groupModal, setGroupModal] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
 
-  const [friendName, setFriendName] = useState("");
-  const [friendRole, setFriendRole] = useState("");
-  const [friendCompany, setFriendCompany] = useState("");
-  const [friendAvatar, setFriendAvatar] = useState("");
-  const [friendKind, setFriendKind] = useState<"human" | "bot">("human");
-  const [creatingFriend, setCreatingFriend] = useState(false);
+  const [friendQuery, setFriendQuery] = useState("");
+  const [friendCandidates, setFriendCandidates] = useState<DiscoverUser[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [addingUserId, setAddingUserId] = useState<string | null>(null);
 
   const [groupName, setGroupName] = useState("");
   const [groupAvatar, setGroupAvatar] = useState("");
@@ -66,15 +69,58 @@ export default function HomeScreen() {
   }, [chatThreads]);
 
   const presence = useMemo(() => {
+    const displayName = (user?.displayName || "").trim();
+    const assistantNameEN = displayName ? `${displayName}'s Bot` : "";
+    const assistantNameZH = displayName ? `${displayName}的助理` : "";
+
     const items = [
-      ...friends.map((f) => ({ id: `friend:${f.id}`, avatar: f.avatar })),
-      ...agents.map((a) => ({ id: `agent:${a.id}`, avatar: a.avatar })),
+      ...friends
+        .filter((f) => {
+          const uid = (f.userId || "").trim();
+          return !uid || uid !== (user?.id || "").trim();
+        })
+        .map((f) => ({ id: `friend:${f.id}`, avatar: f.avatar })),
+      ...agents
+        .filter((a) => {
+          const name = (a.name || "").trim();
+          if (a.id === "agent_mybot") return false;
+          if (assistantNameEN && name === assistantNameEN) return false;
+          if (assistantNameZH && name === assistantNameZH) return false;
+          return true;
+        })
+        .map((a) => ({ id: `agent:${a.id}`, avatar: a.avatar })),
     ].filter((x) => !!x.avatar);
-    if (!items.length) {
-      return [{ id: "me", avatar: botConfig.avatar }];
-    }
     return items.slice(0, 9);
-  }, [agents, botConfig.avatar, friends]);
+  }, [agents, friends, user?.displayName, user?.id]);
+
+  useEffect(() => {
+    if (!friendModal) return;
+    let cancelled = false;
+
+    const run = async () => {
+      setLoadingCandidates(true);
+      try {
+        const list = await discoverUsers(friendQuery.trim());
+        if (!cancelled) {
+          setFriendCandidates(Array.isArray(list) ? list : []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setFriendCandidates([]);
+          setUiError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingCandidates(false);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [friendModal, friendQuery]);
 
   const handleOpenThread = (thread: ChatThread) => {
     router.push({
@@ -88,25 +134,20 @@ export default function HomeScreen() {
     });
   };
 
-  const handleCreateFriend = async () => {
-    const safeName = friendName.trim();
-    if (!safeName || creatingFriend) return;
+  const handleCreateFriend = async (candidate: DiscoverUser) => {
+    if (!candidate?.id || addingUserId) return;
     setUiError(null);
-    setCreatingFriend(true);
+    setAddingUserId(candidate.id);
 
     try {
       const threadId = `dm_${Date.now()}`;
-      const avatar =
-        friendAvatar.trim() ||
-        (friendKind === "bot"
-          ? "https://img.freepik.com/premium-psd/3d-cartoon-character-avatar-isolated-3d-rendering_235528-554.jpg?w=200"
-          : "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200");
+      const avatar = candidate.avatar?.trim() || "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200";
 
       const thread: ChatThread = {
         id: threadId,
-        name: safeName,
+        name: candidate.displayName,
         avatar,
-        message: friendRole.trim() || tr("新联系人", "New contact"),
+        message: tr("新联系人", "New contact"),
         time: "Now",
         isGroup: false,
         supportsVideo: true,
@@ -115,26 +156,22 @@ export default function HomeScreen() {
       const created = await createChatThread(thread);
       addChatThread(created);
       await createFriend({
-        name: safeName,
-        role: friendRole.trim() || undefined,
-        company: friendCompany.trim() || undefined,
-        kind: friendKind,
+        userId: candidate.id,
+        name: candidate.displayName,
+        kind: "human",
         avatar: created.avatar,
         threadId: created.id,
       });
 
       setFriendModal(false);
       setPeopleModal(false);
-      setFriendName("");
-      setFriendRole("");
-      setFriendCompany("");
-      setFriendAvatar("");
-      setFriendKind("human");
+      setFriendQuery("");
+      setFriendCandidates([]);
       handleOpenThread(created);
     } catch (err) {
       setUiError(err instanceof Error ? err.message : String(err));
     } finally {
-      setCreatingFriend(false);
+      setAddingUserId(null);
     }
   };
 
@@ -238,18 +275,29 @@ export default function HomeScreen() {
             />
           )}
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.presenceRow}
-          >
-            {presence.map((item) => (
-              <View key={item.id} style={styles.presenceItem}>
-                <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
-                <View style={styles.presenceDot} />
-              </View>
-            ))}
-          </ScrollView>
+          <View style={[styles.presenceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            {presence.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.presenceScroll}
+                contentContainerStyle={styles.presenceRow}
+              >
+                {presence.map((item) => (
+                  <View key={item.id} style={styles.presenceItem}>
+                    <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
+                    <View style={styles.presenceDot} />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.presenceSpacer} />
+            )}
+
+            <Pressable style={styles.presenceAdd} onPress={() => setPeopleModal(true)}>
+              <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
+            </Pressable>
+          </View>
         </View>
 
         <Modal
@@ -261,11 +309,23 @@ export default function HomeScreen() {
           <Pressable style={styles.modalOverlay} onPress={() => setPeopleModal(false)}>
             <Pressable style={styles.actionSheet} onPress={() => null}>
               <Text style={styles.sheetTitle}>{tr("快捷入口", "Quick Actions")}</Text>
-              <Pressable style={styles.sheetItem} onPress={() => setFriendModal(true)}>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => {
+                  setPeopleModal(false);
+                  setTimeout(() => setFriendModal(true), 120);
+                }}
+              >
                 <Ionicons name="person-add-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("添加朋友", "Add Friend")}</Text>
               </Pressable>
-              <Pressable style={styles.sheetItem} onPress={() => setGroupModal(true)}>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => {
+                  setPeopleModal(false);
+                  setTimeout(() => setGroupModal(true), 120);
+                }}
+              >
                 <Ionicons name="people-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("新建群聊", "New Group")}</Text>
               </Pressable>
@@ -289,60 +349,52 @@ export default function HomeScreen() {
             <Pressable style={styles.formCard} onPress={() => null}>
               <Text style={styles.formTitle}>{tr("添加朋友", "Add Friend")}</Text>
               <TextInput
-                value={friendName}
-                onChangeText={setFriendName}
-                placeholder={tr("名称", "Name")}
-                placeholderTextColor="rgba(148,163,184,0.9)"
-                style={styles.input}
-              />
-              <TextInput
-                value={friendRole}
-                onChangeText={setFriendRole}
-                placeholder={tr("角色（可选）", "Role (optional)")}
-                placeholderTextColor="rgba(148,163,184,0.9)"
-                style={styles.input}
-              />
-              <TextInput
-                value={friendCompany}
-                onChangeText={setFriendCompany}
-                placeholder={tr("公司（可选）", "Company (optional)")}
-                placeholderTextColor="rgba(148,163,184,0.9)"
-                style={styles.input}
-              />
-              <TextInput
-                value={friendAvatar}
-                onChangeText={setFriendAvatar}
-                placeholder={tr("头像 URL（可选）", "Avatar URL (optional)")}
+                value={friendQuery}
+                onChangeText={setFriendQuery}
+                placeholder={tr("搜索系统账户（名字或邮箱）", "Search account by name or email")}
                 placeholderTextColor="rgba(148,163,184,0.9)"
                 style={styles.input}
               />
 
-              <View style={styles.choiceRow}>
-                <Pressable
-                  style={[styles.choiceBtn, friendKind === "human" && styles.choiceBtnActive]}
-                  onPress={() => setFriendKind("human")}
-                >
-                  <Text style={styles.choiceText}>{tr("真人", "Human")}</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.choiceBtn, friendKind === "bot" && styles.choiceBtnActive]}
-                  onPress={() => setFriendKind("bot")}
-                >
-                  <Text style={styles.choiceText}>Bot</Text>
-                </Pressable>
+              <View style={styles.candidateList}>
+                {loadingCandidates ? (
+                  <View style={styles.candidateLoading}>
+                    <ActivityIndicator color="#93c5fd" />
+                  </View>
+                ) : friendCandidates.length ? (
+                  <ScrollView showsVerticalScrollIndicator={false}>
+                    {friendCandidates.map((candidate) => (
+                      <Pressable
+                        key={candidate.id}
+                        style={styles.candidateItem}
+                        disabled={Boolean(addingUserId)}
+                        onPress={() => handleCreateFriend(candidate)}
+                      >
+                        <Image source={{ uri: candidate.avatar }} style={styles.candidateAvatar} />
+                        <View style={styles.candidateBody}>
+                          <Text numberOfLines={1} style={styles.candidateName}>
+                            {candidate.displayName}
+                          </Text>
+                          <Text numberOfLines={1} style={styles.candidateMeta}>
+                            {candidate.email || candidate.provider}
+                          </Text>
+                        </View>
+                        <Text style={styles.candidateAction}>
+                          {addingUserId === candidate.id ? tr("添加中...", "Adding...") : tr("添加", "Add")}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <Text style={styles.candidateEmpty}>
+                    {tr("没有可添加的系统账户。请先让对方注册登录。", "No discoverable accounts. Ask your friend to sign up first.")}
+                  </Text>
+                )}
               </View>
 
               <View style={styles.formFooter}>
                 <Pressable style={styles.formGhost} onPress={() => setFriendModal(false)}>
                   <Text style={styles.formGhostText}>{tr("取消", "Cancel")}</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.formCta, (!friendName.trim() || creatingFriend) && styles.formCtaDisabled]}
-                  onPress={handleCreateFriend}
-                >
-                  <Text style={styles.formCtaText}>
-                    {creatingFriend ? tr("创建中...", "Creating...") : tr("创建", "Create")}
-                  </Text>
                 </Pressable>
               </View>
             </Pressable>
@@ -504,6 +556,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 4,
   },
+  presenceBar: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  presenceScroll: {
+    flex: 1,
+  },
+  presenceSpacer: {
+    flex: 1,
+  },
   presenceItem: {
     width: 46,
     height: 46,
@@ -518,6 +580,17 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+  },
+  presenceAdd: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
   },
   presenceDot: {
     position: "absolute",
@@ -601,6 +674,65 @@ const styles = StyleSheet.create({
     color: "#e2e8f0",
     paddingHorizontal: 12,
     fontSize: 13,
+  },
+  candidateList: {
+    minHeight: 180,
+    maxHeight: 320,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    padding: 8,
+  },
+  candidateLoading: {
+    minHeight: 120,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  candidateItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  candidateAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  candidateBody: {
+    flex: 1,
+  },
+  candidateName: {
+    color: "rgba(226,232,240,0.94)",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  candidateMeta: {
+    color: "rgba(148,163,184,0.9)",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  candidateAction: {
+    color: "#bfdbfe",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  candidateEmpty: {
+    color: "rgba(148,163,184,0.92)",
+    fontSize: 12,
+    fontWeight: "700",
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    lineHeight: 18,
   },
   choiceRow: {
     flexDirection: "row",
