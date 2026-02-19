@@ -144,6 +144,11 @@ function safeThreadKey(threadId: string) {
   return threadId.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+function safeUserKey(userId: string) {
+  const key = userId.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+  return key || "anonymous";
+}
+
 function cacheDir() {
   const base = FileSystem.Paths?.document?.uri;
   if (!base) return null;
@@ -164,14 +169,14 @@ async function ensureCacheDir() {
   return dir;
 }
 
-function cachePath(threadId: string) {
+function cachePath(userId: string, threadId: string) {
   const dir = cacheDir();
   if (!dir) return null;
-  return `${dir}/${safeThreadKey(threadId)}.json`;
+  return `${dir}/${safeUserKey(userId)}__${safeThreadKey(threadId)}.json`;
 }
 
-async function readThreadCache(threadId: string): Promise<ConversationMessage[] | null> {
-  const path = cachePath(threadId);
+async function readThreadCache(userId: string, threadId: string): Promise<ConversationMessage[] | null> {
+  const path = cachePath(userId, threadId);
   if (!path) return null;
   try {
     const info = await FileSystem.getInfoAsync(path);
@@ -185,9 +190,9 @@ async function readThreadCache(threadId: string): Promise<ConversationMessage[] 
   }
 }
 
-async function writeThreadCache(threadId: string, messages: ConversationMessage[]) {
+async function writeThreadCache(userId: string, threadId: string, messages: ConversationMessage[]) {
   const dir = await ensureCacheDir();
-  const path = cachePath(threadId);
+  const path = cachePath(userId, threadId);
   if (!dir || !path) return;
   const next = messages.length > MESSAGE_CACHE_LIMIT ? messages.slice(-MESSAGE_CACHE_LIMIT) : messages;
   try {
@@ -221,11 +226,11 @@ function mergePrependUnique(base: ConversationMessage[], incoming: ConversationM
   return [...head, ...base];
 }
 
-async function upsertThreadCache(threadId: string, messages: ConversationMessage[]) {
+async function upsertThreadCache(userId: string, threadId: string, messages: ConversationMessage[]) {
   if (!threadId || messages.length === 0) return;
-  const cached = (await readThreadCache(threadId)) || [];
+  const cached = (await readThreadCache(userId, threadId)) || [];
   const merged = mergeAppendUnique(cached, messages);
-  await writeThreadCache(threadId, merged);
+  await writeThreadCache(userId, threadId, merged);
 }
 
 const defaultBotConfig: BotConfig = {
@@ -238,58 +243,9 @@ const defaultBotConfig: BotConfig = {
   knowledgeKeywords: ["startup", "product", "execution"],
 };
 
-const defaultTasks: TaskItem[] = [
-  {
-    id: "seed-task",
-    title: "Review UI Prototype",
-    assignee: "Jason",
-    priority: "High",
-    status: "Pending",
-    owner: "Jason",
-  },
-];
-
-const defaultChatThreads: ChatThread[] = [
-  {
-    id: "group_14",
-    name: "powerhoo AIR 项目沟通群(14)",
-    avatar:
-      "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200",
-    message: "子非鱼: 👌",
-    time: "3:30 AM",
-    highlight: true,
-    unreadCount: 2,
-    isGroup: true,
-    memberCount: 4,
-    supportsVideo: true,
-  },
-  {
-    id: "mybot",
-    name: "MyBot",
-    avatar: DEFAULT_MYBOT_AVATAR,
-    message: "Ask me anything",
-    time: "Now",
-    isGroup: false,
-    supportsVideo: false,
-  },
-];
-
-const defaultMessagesByThread: Record<string, ConversationMessage[]> = {
-  mybot: [
-    {
-      id: "mybot-welcome",
-      threadId: "mybot",
-      senderId: "agent_mybot",
-      senderName: "MyBot",
-      senderAvatar: DEFAULT_MYBOT_AVATAR,
-      senderType: "agent",
-      content: "Hi! I'm your AI startup copilot. Let's talk about your project.",
-      type: "text",
-      isMe: false,
-      time: "Just now",
-    },
-  ],
-};
+const defaultTasks: TaskItem[] = [];
+const defaultChatThreads: ChatThread[] = [];
+const defaultMessagesByThread: Record<string, ConversationMessage[]> = {};
 
 const defaultFriends: Friend[] = [];
 const defaultThreadMembers: Record<string, ThreadMember[]> = {};
@@ -341,7 +297,8 @@ function previewMessage(message: ConversationMessage): string {
 }
 
 export function AgentTownProvider({ children }: { children: React.ReactNode }) {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, user } = useAuth();
+  const userID = (user?.id || "").trim();
 
   const [botConfig, setBotConfig] = useState<BotConfig>(defaultBotConfig);
   const [tasks, setTasks] = useState<TaskItem[]>(defaultTasks);
@@ -377,7 +334,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
 
     if (payload.botConfig) setBotConfig(payload.botConfig);
     if (Array.isArray(payload.tasks)) setTasks(payload.tasks);
-    if (Array.isArray(payload.chatThreads) && payload.chatThreads.length > 0) {
+    if (Array.isArray(payload.chatThreads)) {
       setChatThreads(payload.chatThreads);
     }
     if (payload.messages && typeof payload.messages === "object") {
@@ -422,7 +379,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     if (!threadId) return;
 
     // Load from local cache first for instant paint.
-    const cached = await readThreadCache(threadId);
+    const cached = await readThreadCache(userID, threadId);
     if (cached && cached.length > 0) {
       setMessagesByThread((prev) => ({
         ...prev,
@@ -434,13 +391,13 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     const latest = Array.isArray(latestRaw) ? latestRaw : [];
     const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
     const safeMerged = Array.isArray(merged) ? merged : [];
-    void writeThreadCache(threadId, safeMerged);
+    void writeThreadCache(userID, threadId, safeMerged);
 
     setMessagesByThread((prev) => ({
       ...prev,
       [threadId]: safeMerged.slice(-MESSAGE_RENDER_WINDOW),
     }));
-  }, []);
+  }, [userID]);
 
   const loadOlderMessages = useCallback(async (threadId: string) => {
     if (!threadId) return 0;
@@ -450,7 +407,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     if (!oldest) return 0;
 
     // Try local cache first.
-    const cached = await readThreadCache(threadId);
+    const cached = await readThreadCache(userID, threadId);
     if (cached && cached.length > 0) {
       const idx = cached.findIndex((m) => m.id === oldest);
       if (idx > 0) {
@@ -481,13 +438,13 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       };
     });
     void (async () => {
-      const base = (await readThreadCache(threadId)) || [];
+      const base = (await readThreadCache(userID, threadId)) || [];
       const merged = mergePrependUnique(base, older);
-      await writeThreadCache(threadId, merged);
+      await writeThreadCache(userID, threadId, merged);
     })();
 
     return older.length;
-  }, []);
+  }, [userID]);
 
   const listMembers = useCallback(async (threadId: string) => {
     if (!threadId) return;
@@ -506,6 +463,17 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     if (!isSignedIn) {
+      setBotConfig(defaultBotConfig);
+      setTasks(defaultTasks);
+      setChatThreads(defaultChatThreads);
+      setMessagesByThread(defaultMessagesByThread);
+      setFriends(defaultFriends);
+      setThreadMembers(defaultThreadMembers);
+      setAgents(defaultAgents);
+      setSkillCatalog(defaultSkills);
+      setCustomSkills(defaultCustomSkills);
+      setMiniApps(defaultMiniApps);
+      setMiniAppTemplates(defaultMiniAppTemplates);
       setBootstrapReady(true);
       return () => {
         cancelled = true;
@@ -527,7 +495,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, refreshAll]);
+  }, [isSignedIn, refreshAll, userID]);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -576,7 +544,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             };
           });
 
-          void upsertThreadCache(threadId, [{ ...payload, threadId }]);
+          void upsertThreadCache(userID, threadId, [{ ...payload, threadId }]);
           setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(payload)));
           break;
         }
@@ -711,7 +679,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unsubscribe();
     };
-  }, [isSignedIn]);
+  }, [isSignedIn, userID]);
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {
@@ -795,7 +763,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
               ...prev,
               [threadId]: result.messages,
             }));
-            void upsertThreadCache(threadId, result.messages);
+            void upsertThreadCache(userID, threadId, result.messages);
           }
           const preview = result.aiMessage
             ? previewMessage(result.aiMessage)
@@ -1071,7 +1039,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           if (Array.isArray(result.replies) && result.replies.length) {
             cacheBatch.push(...result.replies);
           }
-          void upsertThreadCache(threadId, cacheBatch);
+          void upsertThreadCache(userID, threadId, cacheBatch);
 
           const latest = result.replies?.[result.replies.length - 1];
           if (latest) {
@@ -1201,6 +1169,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     threadMembers,
     uiTheme,
     voiceModeEnabled,
+    userID,
   ]);
 
   return <AgentTownContext.Provider value={value}>{children}</AgentTownContext.Provider>;

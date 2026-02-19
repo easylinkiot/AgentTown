@@ -20,7 +20,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { tx } from "@/src/i18n/translate";
-import { aiText, listAgents as listAgentsApi, listFriends as listFriendsApi } from "@/src/lib/api";
+import {
+  aiText,
+  discoverUsers as discoverUsersApi,
+  listAgents as listAgentsApi,
+  listFriends as listFriendsApi,
+  type DiscoverUser,
+} from "@/src/lib/api";
 import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { Agent, ConversationMessage, Friend, ThreadMember } from "@/src/types";
@@ -71,6 +77,7 @@ export default function ChatDetailScreen() {
     loadOlderMessages,
     sendMessage,
     createTaskFromMessage,
+    createFriend,
     listMembers,
     addMember,
     removeMember,
@@ -145,6 +152,7 @@ export default function ChatDetailScreen() {
   const [memberFilter, setMemberFilter] = useState<MemberFilter>("all");
   const [memberPoolFriends, setMemberPoolFriends] = useState<Friend[]>([]);
   const [memberPoolAgents, setMemberPoolAgents] = useState<Agent[]>([]);
+  const [memberPoolDiscover, setMemberPoolDiscover] = useState<DiscoverUser[]>([]);
   const [memberPoolBusy, setMemberPoolBusy] = useState(false);
   const [memberPoolError, setMemberPoolError] = useState<string | null>(null);
   const [memberPoolNonce, setMemberPoolNonce] = useState(0);
@@ -184,11 +192,16 @@ export default function ChatDetailScreen() {
     // Keep the current member list fresh when the modal is opened.
     void listMembers(chatId);
 
-    Promise.all([listFriendsApi(), listAgentsApi()])
-      .then(([nextFriends, nextAgents]) => {
+    Promise.all([
+      listFriendsApi(),
+      listAgentsApi(),
+      discoverUsersApi(memberQuery.trim() ? memberQuery : undefined),
+    ])
+      .then(([nextFriends, nextAgents, nextDiscover]) => {
         if (!alive) return;
         setMemberPoolFriends(Array.isArray(nextFriends) ? nextFriends : []);
         setMemberPoolAgents(Array.isArray(nextAgents) ? nextAgents : []);
+        setMemberPoolDiscover(Array.isArray(nextDiscover) ? nextDiscover : []);
       })
       .catch((err) => {
         if (!alive) return;
@@ -202,16 +215,32 @@ export default function ChatDetailScreen() {
     return () => {
       alive = false;
     };
-  }, [chatId, listMembers, memberModal, memberPoolNonce]);
+  }, [chatId, listMembers, memberModal, memberPoolNonce, memberQuery]);
 
   const candidates = useMemo(() => {
     const friendPool = memberPoolFriends.length ? memberPoolFriends : friends;
     const agentPool = memberPoolAgents.length ? memberPoolAgents : agents;
-    const usedFriendIds = new Set(members.map((m) => m.friendId).filter(Boolean));
+    const usedFriendIds = new Set(
+      members
+        .map((m) => (m.friendId || "").trim())
+        .filter(Boolean)
+    );
+    const usedHumanUserIDs = new Set(
+      members
+        .filter((m) => m.memberType === "human")
+        .map((m) => (m.friendId || "").trim())
+        .filter(Boolean)
+    );
     const usedAgentIds = new Set(members.map((m) => m.agentId).filter(Boolean));
 
     const friendItems = friendPool
-      .filter((f) => !usedFriendIds.has(f.id))
+      .filter((f) => {
+        if (f.kind === "human") {
+          const uid = (f.userId || "").trim();
+          if (uid && usedHumanUserIDs.has(uid)) return false;
+        }
+        return !usedFriendIds.has(f.id);
+      })
       .map((f) => ({
         key: `friend:${f.id}`,
         type: f.kind === "bot" ? ("role" as const) : ("human" as const),
@@ -238,7 +267,48 @@ export default function ChatDetailScreen() {
         },
       }));
 
-    const all = [...friendItems, ...agentItems];
+    const friendUserIDs = new Set(
+      friendPool
+        .map((f) => (f.userId || "").trim())
+        .filter(Boolean)
+    );
+    const discoverItems = memberPoolDiscover
+      .filter((u) => {
+        const uid = (u.id || "").trim();
+        if (!uid) return false;
+        if (friendUserIDs.has(uid)) return false;
+        if (usedHumanUserIDs.has(uid)) return false;
+        return true;
+      })
+      .map((u) => ({
+        key: `discover:${u.id}`,
+        type: "human" as const,
+        label: u.displayName || "User",
+        desc: [u.email, u.provider].filter(Boolean).join(" · ") || "User",
+        onAdd: async () => {
+          setMemberPoolError(null);
+          try {
+            let friend = friendPool.find((f) => (f.userId || "").trim() === u.id);
+            if (!friend) {
+              friend = await createFriend({
+                userId: u.id,
+                name: u.displayName,
+                kind: "human",
+              });
+            }
+            if (!friend) {
+              throw new Error("create friend failed");
+            }
+            await addMember(chatId, { friendId: friend.id, memberType: "human" });
+            await listMembers(chatId);
+            setMemberModal(false);
+          } catch (err) {
+            setMemberPoolError(err instanceof Error ? err.message : String(err));
+          }
+        },
+      }));
+
+    const all = [...friendItems, ...agentItems, ...discoverItems];
     const keyword = memberQuery.trim().toLowerCase();
 
     return all.filter((item) => {
@@ -250,10 +320,12 @@ export default function ChatDetailScreen() {
     addMember,
     agents,
     chatId,
+    createFriend,
     friends,
     listMembers,
     memberFilter,
     memberPoolAgents,
+    memberPoolDiscover,
     memberPoolFriends,
     memberQuery,
     members,
@@ -415,6 +487,28 @@ export default function ChatDetailScreen() {
           onPress: () => {
             setThreadMenuModal(false);
             void removeChatThread(chatId).finally(() => router.back());
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmRemoveThreadMember = (member: ThreadMember) => {
+    Alert.alert(
+      tr("移除成员", "Remove member"),
+      tr(
+        `确认移除 ${member.name || tr("该成员", "this member")} 吗？`,
+        `Remove ${member.name || "this member"} from this chat?`
+      ),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("移除", "Remove"),
+          style: "destructive",
+          onPress: () => {
+            void removeMember(chatId, member.id).catch((err) =>
+              setMemberPoolError(err instanceof Error ? err.message : String(err))
+            );
           },
         },
       ]
@@ -730,7 +824,33 @@ export default function ChatDetailScreen() {
                   </Pressable>
                 ))}
                 {candidates.length === 0 ? (
-                  <EmptyState title={tr("没有可添加对象", "No candidates")} hint={tr("换个关键词试试", "Try another search")} icon="person-add-outline" />
+                  <View style={{ gap: 10 }}>
+                    <EmptyState
+                      title={tr("没有可添加对象", "No candidates")}
+                      hint={tr(
+                        "可直接搜索系统用户并添加；若仍为空，请检查对方是否已注册。",
+                        "You can search and add any registered user directly. If still empty, check whether the user has signed up."
+                      )}
+                      icon="person-add-outline"
+                    />
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <Pressable
+                        style={[styles.filterBtn, { flex: 1, minHeight: 42, alignItems: "center", justifyContent: "center" }]}
+                        onPress={() => {
+                          setMemberModal(false);
+                          router.push("/" as never);
+                        }}
+                      >
+                        <Text style={[styles.filterText, styles.filterTextActive]}>{tr("去添加好友", "Go add friend")}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.filterBtn, { flex: 1, minHeight: 42, alignItems: "center", justifyContent: "center" }]}
+                        onPress={() => setMemberPoolNonce((n) => n + 1)}
+                      >
+                        <Text style={styles.filterText}>{tr("刷新候选", "Refresh candidates")}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
                 ) : null}
               </ScrollView>
 
@@ -740,7 +860,7 @@ export default function ChatDetailScreen() {
                   {members.map((m) => (
                     <View key={m.id} style={styles.currentChip}>
                       <Text style={styles.currentChipText}>{m.name}</Text>
-                      <Pressable onPress={() => void removeMember(chatId, m.id)}>
+                      <Pressable onPress={() => confirmRemoveThreadMember(m)}>
                         <Ionicons name="close" size={12} color="rgba(248,113,113,0.95)" />
                       </Pressable>
                     </View>
