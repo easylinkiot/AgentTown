@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Modal,
   Pressable,
   SafeAreaView,
@@ -94,6 +95,28 @@ export default function GroupsScreen() {
     });
   }, [addMember, agents, candidateQuery, friends, inviteFilter, listMembers, members, selectedGroupId]);
 
+  const confirmRemoveMember = (groupId: string, memberId: string, memberName: string) => {
+    Alert.alert(
+      tr("移除成员", "Remove member"),
+      tr(
+        `确认将 ${memberName || tr("该成员", "this member")} 移出群聊吗？`,
+        `Remove ${memberName || "this member"} from this group?`
+      ),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("移除", "Remove"),
+          style: "destructive",
+          onPress: () => {
+            void removeMember(groupId, memberId).catch((err) =>
+              setError(err instanceof Error ? err.message : String(err))
+            );
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <KeyframeBackground>
       <SafeAreaView style={styles.safeArea}>
@@ -164,11 +187,7 @@ export default function GroupsScreen() {
                         </View>
                         <Pressable
                           style={styles.removeBtn}
-                          onPress={() =>
-                            void removeMember(selectedGroup.id, m.id).catch((err) =>
-                              setError(err instanceof Error ? err.message : String(err))
-                            )
-                          }
+                          onPress={() => confirmRemoveMember(selectedGroup.id, m.id, m.name)}
                         >
                           <Ionicons name="trash-outline" size={16} color="rgba(248,113,113,0.95)" />
                         </Pressable>
@@ -458,4 +477,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-

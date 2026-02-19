@@ -22,12 +22,14 @@ import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/State
 import { MiniAppDock } from "@/src/components/MiniAppDock";
 import { createChatThread, discoverUsers, type DiscoverUser } from "@/src/lib/api";
 import { tx } from "@/src/i18n/translate";
+import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { ChatThread } from "@/src/types";
 
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const {
     chatThreads,
     friends,
@@ -67,14 +69,29 @@ export default function HomeScreen() {
   }, [chatThreads]);
 
   const presence = useMemo(() => {
+    const displayName = (user?.displayName || "").trim();
+    const assistantNameEN = displayName ? `${displayName}'s Bot` : "";
+    const assistantNameZH = displayName ? `${displayName}的助理` : "";
+
     const items = [
-      ...friends.map((f) => ({ id: `friend:${f.id}`, avatar: f.avatar })),
+      ...friends
+        .filter((f) => {
+          const uid = (f.userId || "").trim();
+          return !uid || uid !== (user?.id || "").trim();
+        })
+        .map((f) => ({ id: `friend:${f.id}`, avatar: f.avatar })),
       ...agents
-        .filter((a) => a.id !== "agent_mybot")
+        .filter((a) => {
+          const name = (a.name || "").trim();
+          if (a.id === "agent_mybot") return false;
+          if (assistantNameEN && name === assistantNameEN) return false;
+          if (assistantNameZH && name === assistantNameZH) return false;
+          return true;
+        })
         .map((a) => ({ id: `agent:${a.id}`, avatar: a.avatar })),
     ].filter((x) => !!x.avatar);
     return items.slice(0, 9);
-  }, [agents, friends]);
+  }, [agents, friends, user?.displayName, user?.id]);
 
   useEffect(() => {
     if (!friendModal) return;
