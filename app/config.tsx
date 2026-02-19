@@ -9,16 +9,17 @@ import {
   Image,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AVATAR_PRESETS } from "@/src/constants/avatars";
 import { MARKET_DATA } from "@/src/constants/marketplace";
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { generateGeminiJson } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
@@ -182,7 +183,7 @@ export default function ConfigScreen() {
 
   if (isNeo) {
     return (
-      <SafeAreaView style={[styles.safeArea, styles.safeAreaNeo]}>
+      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, styles.safeAreaNeo]}>
         <View style={[styles.header, styles.headerNeo]}>
           <Pressable style={[styles.headerBtn, styles.headerBtnNeo]} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={22} color="#e2e8f0" />
@@ -469,7 +470,7 @@ export default function ConfigScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
       <View style={styles.header}>
         <Pressable style={styles.headerBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#111827" />

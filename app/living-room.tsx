@@ -4,14 +4,15 @@ import React, { useMemo, useState } from "react";
 import {
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { HousePreview } from "@/src/components/HousePreview";
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { tx } from "@/src/i18n/translate";
 
@@ -68,7 +69,7 @@ export default function LivingRoomScreen() {
   }, [activePanel, language]);
 
   return (
-    <SafeAreaView style={[styles.safeArea, !isNeo && styles.safeAreaClassic]}>
+    <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, !isNeo && styles.safeAreaClassic]}>
       <View style={styles.header}>
         <Pressable style={[styles.headerBtn, !isNeo && styles.headerBtnClassic]} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color={isNeo ? "#fff" : "#111827"} />

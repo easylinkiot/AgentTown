@@ -7,19 +7,19 @@ import {
   Image,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { createChatThread, discoverUsers, type DiscoverUser } from "@/src/lib/api";
 import { tx } from "@/src/i18n/translate";
 import { useAuth } from "@/src/state/auth-context";
@@ -202,7 +202,7 @@ export default function HomeScreen() {
 
   return (
     <KeyframeBackground>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.topBar}>
             <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>

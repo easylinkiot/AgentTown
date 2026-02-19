@@ -9,7 +9,6 @@ import {
   Platform,
   Pressable,
   PanResponder,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,8 +17,9 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import {
   CHUNK_SIZE,
   chunkForWorldPoint,
@@ -733,7 +733,7 @@ export default function TownMapScreen() {
   const svgTranslateY = (svgHeight * (svgDownsample - 1)) / 2;
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.safeArea }]}>
+    <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, { backgroundColor: theme.safeArea }]}>
       <View style={[styles.mapHeader, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
         <View style={styles.headerLeft}>
           <Pressable
