@@ -1,12 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Dimensions,
-  FlatList,
   GestureResponderEvent,
+  Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -15,6 +17,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { GiftedChat, IMessage, MessageProps, SystemMessageProps } from "react-native-gifted-chat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
@@ -27,11 +30,15 @@ import {
   listFriends as listFriendsApi,
   type DiscoverUser,
 } from "@/src/lib/api";
-import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { useAuth } from "@/src/state/auth-context";
 import { Agent, ConversationMessage, Friend, ThreadMember } from "@/src/types";
 
 type MemberFilter = "all" | "human" | "agent" | "role";
+type GiftedMessage = IMessage & { raw: ConversationMessage };
+type SystemMessageRenderProps = { currentMessage?: GiftedMessage | null };
+
+const MESSAGE_FALLBACK_GAP = 1000;
 
 function mentionMemberIDs(text: string, members: ThreadMember[]) {
   const safe = text.trim();
@@ -46,6 +53,38 @@ function mentionMemberIDs(text: string, members: ThreadMember[]) {
     }
   }
   return ids;
+}
+
+function toGiftedMessage(
+  message: ConversationMessage,
+  currentUserId: string,
+  fallbackTime: number
+): GiftedMessage {
+  const isMe = message.isMe || (currentUserId && (message.senderId || "").trim() === currentUserId);
+  const parsedTime = message.time ? Date.parse(message.time) : Number.NaN;
+  const createdAt = Number.isFinite(parsedTime) ? new Date(parsedTime) : new Date(fallbackTime);
+
+  return {
+    _id: message.id || `${fallbackTime}`,
+    text: message.content || "",
+    createdAt,
+    user: {
+      _id: isMe ? currentUserId || "me" : message.senderId || message.senderName || "other",
+      name: message.senderName,
+      avatar: message.senderAvatar,
+    },
+    system: message.type === "system",
+    raw: message,
+  };
+}
+
+function isLikelySameMessage(a: GiftedMessage, b: GiftedMessage) {
+  if (a.text !== b.text) return false;
+  const aSender = a.raw.senderId || a.user._id;
+  const bSender = b.raw.senderId || b.user._id;
+  if (aSender && bSender && aSender !== bSender) return false;
+  const diff = Math.abs(new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return diff < 120000;
 }
 
 export default function ChatDetailScreen() {
@@ -106,6 +145,31 @@ export default function ChatDetailScreen() {
   const members = threadMembers[chatId] || [];
   const messages = messagesByThread[chatId] || [];
   const linkedFriend = useMemo(() => friends.find((item) => item.threadId === chatId), [chatId, friends]);
+  const currentUserId = (user?.id || "").trim() || "me";
+  const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
+
+  const baseGiftedMessages = useMemo(() => {
+    const baseTime = Date.now();
+    const reversed = [...messages].reverse();
+    return reversed.map((message, index) =>
+      toGiftedMessage(message, currentUserId, baseTime - index * MESSAGE_FALLBACK_GAP)
+    );
+  }, [currentUserId, messages]);
+
+  useEffect(() => {
+    if (pendingMessages.length === 0) return;
+    setPendingMessages((prev) =>
+      prev.filter((pending) => !baseGiftedMessages.some((msg) => isLikelySameMessage(pending, msg)))
+    );
+  }, [baseGiftedMessages, pendingMessages.length]);
+
+  const giftedMessages = useMemo(() => {
+    if (pendingMessages.length === 0) return baseGiftedMessages;
+    const filteredPending = pendingMessages.filter(
+      (pending) => !baseGiftedMessages.some((msg) => isLikelySameMessage(pending, msg))
+    );
+    return GiftedChat.append(baseGiftedMessages, filteredPending);
+  }, [baseGiftedMessages, pendingMessages]);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -114,24 +178,11 @@ export default function ChatDetailScreen() {
   const [failedDraft, setFailedDraft] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const listRef = useRef<FlatList<ConversationMessage> | null>(null);
-  const autoFollowUntilRef = useRef(0);
 
   useEffect(() => {
     setHasMore(true);
     setLoadingOlder(false);
-  }, [chatId]);
-
-  useEffect(() => {
-    if (Date.now() > autoFollowUntilRef.current) return;
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    });
-  }, [messages.length]);
-
-  useEffect(() => {
-    setHasMore(true);
-    setLoadingOlder(false);
+    setPendingMessages([]);
   }, [chatId]);
 
   const [actionModal, setActionModal] = useState(false);
@@ -331,8 +382,6 @@ export default function ChatDetailScreen() {
     members,
   ]);
 
-  const listData = useMemo(() => [...messages].reverse(), [messages]);
-
   const requestOlder = async () => {
     if (loadingOlder || !hasMore || !chatId) return;
     setLoadingOlder(true);
@@ -346,18 +395,35 @@ export default function ChatDetailScreen() {
     }
   };
 
-  const handleSend = async () => {
-    const content = input.trim();
+  const handleSend = async (override?: string) => {
+    const content = (override ?? input).trim();
     if (!content || submitting || !chatId) return;
+
+    const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const localMessage: ConversationMessage = {
+      id: localId,
+      threadId: chatId,
+      senderId: user?.id,
+      senderName: user?.displayName || "Me",
+      senderAvatar: user?.avatar || botConfig.avatar,
+      senderType: "human",
+      content,
+      type: "text",
+      isMe: true,
+      time: tr("刚刚", "Now"),
+    };
+    setPendingMessages((prev) => GiftedChat.append(prev, [toGiftedMessage(localMessage, currentUserId, Date.now())]));
 
     setSubmitting(true);
     setFailedDraft(null);
-    autoFollowUntilRef.current = Date.now() + 6000;
+    setInput("");
 
+    let ok = false;
     try {
       if (thread.isGroup) {
         const ids = mentionMemberIDs(content, members);
         await generateRoleReplies(chatId, content, ids.length ? ids : undefined);
+        ok = true;
       } else {
         const result = await sendMessage(chatId, {
           content,
@@ -372,16 +438,17 @@ export default function ChatDetailScreen() {
         });
         if (!result) {
           setFailedDraft(content);
+        } else {
+          ok = true;
         }
       }
-      setInput("");
     } catch (err) {
       setFailedDraft(content);
     } finally {
       setSubmitting(false);
-      setTimeout(() => {
-        listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      }, 80);
+      if (!ok) {
+        setPendingMessages((prev) => prev.filter((msg) => msg._id !== localId));
+      }
     }
   };
 
@@ -400,10 +467,13 @@ export default function ChatDetailScreen() {
       const h = bubbleHeightsRef.current[message.id] || 56;
       const top = ev.nativeEvent.pageY - ev.nativeEvent.locationY;
       const bottom = top + h;
+      const meFinal =
+        message.isMe ||
+        ((message.senderId || "").trim() !== "" && (message.senderId || "").trim() === currentUserId);
       setActionAnchor({
         yTop: top,
         yBottom: bottom,
-        align: message.isMe ? "right" : "left",
+        align: meFinal ? "right" : "left",
       });
     } else {
       setActionAnchor(null);
@@ -515,9 +585,103 @@ export default function ChatDetailScreen() {
     );
   };
 
+  const renderSystemMessage = useCallback((props: SystemMessageProps<IMessage>) => {
+    const text = props.currentMessage?.text?.trim();
+    if (!text) return <></>;
+    return (
+      <View style={styles.sysRow}>
+        <View style={styles.sysPill}>
+          <Text style={styles.sysText}>{text}</Text>
+        </View>
+      </View>
+    );
+  }, []);
+
+  const renderMessage = useCallback(
+    (props: MessageProps<GiftedMessage>) => {
+      const current = props.currentMessage;
+      if (!current) return <></>;
+      const raw = current.raw;
+      const actorID = currentUserId;
+      const meFinal = raw.isMe || ((raw.senderId || "").trim() !== "" && (raw.senderId || "").trim() === actorID);
+      const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
+
+      const messageBody = () => {
+        if (raw.type === "voice") {
+          const voiceLabel = raw.voiceDuration
+            ? tr(`语音 · ${raw.voiceDuration}`, `Voice · ${raw.voiceDuration}`)
+            : tr("语音消息", "Voice message");
+          return (
+            <View style={styles.voiceRow}>
+              <Ionicons
+                name="mic-outline"
+                size={14}
+                color={meFinal ? "rgba(248,250,252,0.95)" : "rgba(226,232,240,0.92)"}
+              />
+              <Text style={[styles.voiceText, meFinal && styles.msgTextMe]}>{voiceLabel}</Text>
+            </View>
+          );
+        }
+
+        return (
+          <View style={styles.messageBody}>
+            {raw.replyContext ? (
+              <View style={styles.replyContext}>
+                <Text style={styles.replyText} numberOfLines={2}>
+                  {raw.replyContext}
+                </Text>
+              </View>
+            ) : null}
+            {raw.imageUri ? (
+              <View style={styles.imageWrap}>
+                <Image source={{ uri: raw.imageUri }} style={styles.imagePreview} />
+                {raw.imageName ? <Text style={styles.imageLabel}>{raw.imageName}</Text> : null}
+              </View>
+            ) : null}
+            {raw.content ? (
+              <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{raw.content}</Text>
+            ) : null}
+          </View>
+        );
+      };
+
+      return (
+        <View style={[styles.msgRow, meFinal && styles.msgRowMe]}>
+          <Pressable
+            onLayout={(e) => {
+              bubbleHeightsRef.current[raw.id] = e.nativeEvent.layout.height;
+            }}
+            onPress={(e) => handleMessagePress(raw, e)}
+            onLongPress={() => handleLongPress(raw)}
+            style={[
+              styles.bubble,
+              meFinal ? styles.bubbleMe : styles.bubbleOther,
+              highlighted && styles.bubbleHighlight,
+            ]}
+          >
+            {!meFinal && raw.senderName ? (
+              <Text style={styles.sender} numberOfLines={1}>
+                {raw.senderName}
+              </Text>
+            ) : null}
+            {messageBody()}
+            {raw.time ? <Text style={styles.time}>{raw.time}</Text> : null}
+          </Pressable>
+        </View>
+      );
+    },
+    [currentUserId, handleLongPress, handleMessagePress, highlightMessageId, tr]
+  );
+
+
   return (
     <KeyframeBackground>
       <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        >
         <View style={styles.container}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
@@ -573,77 +737,42 @@ export default function ChatDetailScreen() {
 
           {loading ? (
             <LoadingSkeleton kind="messages" />
-          ) : messages.length === 0 ? (
-            <EmptyState title={tr("暂无消息", "No messages yet")} hint={tr("从底部输入开始对话", "Start typing below")} icon="chatbox-ellipses-outline" />
+          ) : giftedMessages.length === 0 ? (
+            <EmptyState
+              title={tr("暂无消息", "No messages yet")}
+              hint={tr("从底部输入开始对话", "Start typing below")}
+              icon="chatbox-ellipses-outline"
+            />
           ) : (
-            <FlatList
-              ref={(ref) => {
-                listRef.current = ref;
-              }}
-              data={listData}
-              keyExtractor={(item) => item.id}
-              inverted
-              style={styles.messageList}
-              contentContainerStyle={styles.messageContent}
-              onEndReachedThreshold={0.2}
-              onEndReached={() => void requestOlder()}
-              onScrollBeginDrag={() => {
-                isDraggingRef.current = true;
-              }}
-              onScrollEndDrag={() => {
-                setTimeout(() => {
+            <GiftedChat
+              messages={giftedMessages}
+              user={{ _id: currentUserId, name: user?.displayName || "Me" }}
+              renderInputToolbar={() => null}
+              minInputToolbarHeight={0}
+              renderMessage={renderMessage}
+              renderSystemMessage={renderSystemMessage}
+              messagesContainerStyle={styles.messageContainer}
+              listViewProps={{
+                style: styles.messageList,
+                contentContainerStyle: styles.messageContent,
+                onEndReachedThreshold: 0.2,
+                onEndReached: () => void requestOlder(),
+                onScrollBeginDrag: () => {
+                  isDraggingRef.current = true;
+                },
+                onScrollEndDrag: () => {
+                  setTimeout(() => {
+                    isDraggingRef.current = false;
+                  }, 120);
+                },
+                onMomentumScrollEnd: () => {
                   isDraggingRef.current = false;
-                }, 120);
-              }}
-              onMomentumScrollEnd={() => {
-                isDraggingRef.current = false;
-              }}
-              ListFooterComponent={
-                loadingOlder ? (
+                },
+                ListFooterComponent: loadingOlder ? (
                   <Text style={styles.memberHint}>{tr("加载更早消息...", "Loading older...")}</Text>
                 ) : hasMore ? (
                   <Text style={styles.memberHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
-                ) : null
-              }
-              renderItem={({ item: msg }) => {
-                if (msg.type === "system") {
-                  return (
-                    <View style={styles.sysRow}>
-                      <View style={styles.sysPill}>
-                        <Text style={styles.sysText}>{msg.content}</Text>
-                      </View>
-                    </View>
-                  );
-                }
-
-                const me = !!msg.isMe;
-                const actorID = user?.id?.trim() || "";
-                const meBySender = actorID !== "" && (msg.senderId || "").trim() === actorID;
-                const meFinal = actorID !== "" ? meBySender : me;
-                const highlighted = highlightMessageId !== "" && msg.id === highlightMessageId;
-                return (
-                  <View style={[styles.msgRow, meFinal && styles.msgRowMe]}>
-                    <Pressable
-                      onLayout={(e) => {
-                        bubbleHeightsRef.current[msg.id] = e.nativeEvent.layout.height;
-                      }}
-                      onPress={(e) => handleMessagePress(msg, e)}
-                      style={[
-                        styles.bubble,
-                        meFinal ? styles.bubbleMe : styles.bubbleOther,
-                        highlighted && styles.bubbleHighlight,
-                      ]}
-                    >
-                      {!meFinal && msg.senderName ? (
-                        <Text style={styles.sender} numberOfLines={1}>
-                          {msg.senderName}
-                        </Text>
-                      ) : null}
-                      <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{msg.content}</Text>
-                      {msg.time ? <Text style={styles.time}>{msg.time}</Text> : null}
-                    </Pressable>
-                  </View>
-                );
+                ) : null,
               }}
             />
           )}
@@ -669,11 +798,16 @@ export default function ChatDetailScreen() {
             <Pressable style={styles.inputIcon} onPress={() => null}>
               <Ionicons name="mic-outline" size={18} color="rgba(226,232,240,0.78)" />
             </Pressable>
-            <Pressable style={[styles.sendBtn, submitting && styles.sendBtnDisabled]} onPress={handleSend}>
+            <Pressable
+              style={[styles.sendBtn, (submitting || !input.trim()) && styles.sendBtnDisabled]}
+              onPress={() => void handleSend()}
+              disabled={submitting || !input.trim()}
+            >
               <Ionicons name="arrow-up" size={18} color="#0b1220" />
             </Pressable>
           </View>
         </View>
+        </KeyboardAvoidingView>
 
         <Modal visible={actionModal} transparent animationType="fade" onRequestClose={() => setActionModal(false)}>
           <Pressable style={styles.actionOverlay} onPress={() => setActionModal(false)}>
@@ -903,6 +1037,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "transparent",
   },
+  keyboardAvoid: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     paddingHorizontal: 14,
@@ -956,6 +1093,9 @@ const styles = StyleSheet.create({
     flex: 1,
     marginTop: 4,
   },
+  messageContainer: {
+    flex: 1,
+  },
   messageContent: {
     paddingVertical: 8,
     gap: 10,
@@ -1006,6 +1146,43 @@ const styles = StyleSheet.create({
     color: "rgba(226,232,240,0.86)",
     fontSize: 11,
     fontWeight: "900",
+  },
+  messageBody: {
+    gap: 6,
+  },
+  replyContext: {
+    borderLeftWidth: 2,
+    borderLeftColor: "rgba(148,163,184,0.7)",
+    paddingLeft: 8,
+  },
+  replyText: {
+    color: "rgba(203,213,225,0.9)",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  voiceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  voiceText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  imageWrap: {
+    gap: 6,
+  },
+  imagePreview: {
+    width: 200,
+    height: 130,
+    borderRadius: 12,
+  },
+  imageLabel: {
+    color: "rgba(148,163,184,0.9)",
+    fontSize: 11,
+    fontWeight: "700",
   },
   msgText: {
     color: "rgba(226,232,240,0.92)",
