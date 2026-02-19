@@ -1,0 +1,2637 @@
+openapi: 3.0.3
+info:
+  title: AgentTown Backend API
+  version: 0.1.0
+  description: |
+    Contract skeleton for Bot / Tasks / Agents / Skills / Knowledge.
+    This file is designed as a Swagger-ready OpenAPI baseline and can be expanded incrementally.
+
+servers:
+  - url: https://agenttown-api.kittens.cloud
+    description: Production
+  - url: http://localhost:8080
+    description: Local
+
+tags:
+  - name: System
+  - name: Auth
+  - name: Admin
+  - name: AI
+  - name: Bot
+  - name: Tasks
+  - name: Agents
+  - name: Skills
+  - name: Knowledge
+  - name: Chat
+  - name: Social
+  - name: MiniApps
+  - name: Realtime
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /readyz:
+    get:
+      tags: [System]
+      summary: Ready check
+      operationId: readyz
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      operationId: metrics
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register with email/password
+      operationId: authRegister
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRegisterRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email/password
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/auth/guest:
+    post:
+      tags: [Auth]
+      summary: Guest sign-in
+      operationId: authGuest
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthGuestRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/auth/provider:
+    post:
+      tags: [Auth]
+      summary: OAuth/provider login
+      operationId: authProvider
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthProviderRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current authenticated user
+      operationId: authMe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/backup:
+    get:
+      tags: [Admin]
+      summary: Export full app state (admin only)
+      operationId: adminBackup
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppStateAdmin"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/restore:
+    post:
+      tags: [Admin]
+      summary: Restore full app state (admin only)
+      operationId: adminRestore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppStateAdmin"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: List audit logs (admin only)
+      operationId: adminAuditLogs
+      parameters:
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/metrics:
+    get:
+      tags: [Admin]
+      summary: Prometheus metrics (admin only)
+      operationId: adminMetrics
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/ai/text:
+    post:
+      tags: [AI]
+      summary: Generate text using backend AI gateway
+      operationId: aiText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIPromptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AITextResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/ai/json:
+    post:
+      tags: [AI]
+      summary: Generate JSON text using backend AI gateway
+      operationId: aiJson
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIPromptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIJsonResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/bot-config:
+    get:
+      tags: [Bot]
+      summary: Get bot config
+      operationId: getBotConfig
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      tags: [Bot]
+      summary: Update bot config
+      operationId: updateBotConfig
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotConfigUpdateRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/bot/skills/{skillId}:
+    post:
+      tags: [Bot]
+      summary: Install skill to bot
+      operationId: installBotSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+      responses:
+        "200":
+          description: Installed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Bot]
+      summary: Uninstall skill from bot
+      operationId: uninstallBotSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+      responses:
+        "200":
+          description: Uninstalled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/bootstrap:
+    get:
+      tags: [Realtime]
+      summary: Bootstrap all visible app state for current user
+      operationId: bootstrap
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapState"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/realtime/ws:
+    get:
+      tags: [Realtime]
+      summary: Realtime websocket endpoint
+      description: |
+        WebSocket endpoint. Use query `threadId` for scoped subscription, or omit for global user-visible stream.
+      operationId: realtimeWebsocket
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdQuery"
+      responses:
+        "101":
+          description: Switching Protocols
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/threads:
+    get:
+      tags: [Chat]
+      summary: List visible chat threads
+      operationId: listChatThreads
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatThread"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Chat]
+      summary: Create chat thread
+      operationId: createChatThread
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChatThreadRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatThread"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/threads/{threadId}:
+    delete:
+      tags: [Chat]
+      summary: Delete chat thread
+      operationId: deleteChatThread
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/threads/{threadId}/messages:
+    get:
+      tags: [Chat]
+      summary: List thread messages
+      operationId: listThreadMessages
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+        - $ref: "#/components/parameters/BeforeQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConversationMessage"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Chat]
+      summary: Send message in thread
+      operationId: sendThreadMessage
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/threads/{threadId}/role-replies:
+    post:
+      tags: [Chat]
+      summary: Generate role/agent replies in a thread
+      operationId: createRoleReplies
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleRepliesRequest"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleRepliesResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/threads/{threadId}/members:
+    get:
+      tags: [Chat]
+      summary: List thread members
+      operationId: listThreadMembers
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ThreadMember"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Chat]
+      summary: Add thread member
+      operationId: addThreadMember
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddThreadMemberRequest"
+      responses:
+        "200":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadMember"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/threads/{threadId}/members/{memberId}:
+    delete:
+      tags: [Chat]
+      summary: Remove thread member
+      operationId: removeThreadMember
+      parameters:
+        - $ref: "#/components/parameters/ThreadIdPath"
+        - $ref: "#/components/parameters/MemberIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friends:
+    get:
+      tags: [Social]
+      summary: List friends
+      operationId: listFriends
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Friend"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Social]
+      summary: Add friend
+      operationId: createFriend
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFriendRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Friend"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friends/{friendId}:
+    delete:
+      tags: [Social]
+      summary: Delete friend
+      operationId: deleteFriend
+      parameters:
+        - $ref: "#/components/parameters/FriendIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendDeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/users/discover:
+    get:
+      tags: [Social]
+      summary: Discover users for adding friend/member
+      operationId: discoverUsers
+      parameters:
+        - $ref: "#/components/parameters/QueryQ"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiscoverUserItem"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps:
+    get:
+      tags: [MiniApps]
+      summary: List miniapps
+      operationId: listMiniApps
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MiniApp"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/templates:
+    get:
+      tags: [MiniApps]
+      summary: List miniapp templates
+      operationId: listMiniAppTemplates
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MiniAppTemplate"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/generate:
+    post:
+      tags: [MiniApps]
+      summary: Generate miniapp
+      operationId: generateMiniApp
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateMiniAppRequest"
+      responses:
+        "200":
+          description: Generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MiniApp"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/{miniAppId}/install:
+    post:
+      tags: [MiniApps]
+      summary: Install or uninstall miniapp
+      operationId: installMiniApp
+      parameters:
+        - $ref: "#/components/parameters/MiniAppIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallMiniAppRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MiniApp"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/{miniAppId}/run:
+    post:
+      tags: [MiniApps]
+      summary: Run miniapp
+      operationId: runMiniApp
+      parameters:
+        - $ref: "#/components/parameters/MiniAppIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunMiniAppRequest"
+      responses:
+        "200":
+          description: Ran
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunMiniAppResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/{miniAppId}:
+    delete:
+      tags: [MiniApps]
+      summary: Delete miniapp
+      operationId: deleteMiniApp
+      parameters:
+        - $ref: "#/components/parameters/MiniAppIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks
+      operationId: listTasks
+      parameters:
+        - $ref: "#/components/parameters/OwnerIdQuery"
+        - $ref: "#/components/parameters/AssigneeQuery"
+        - $ref: "#/components/parameters/TaskStatusQuery"
+        - $ref: "#/components/parameters/TaskPriorityQuery"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Tasks]
+      summary: Create task
+      operationId: createTask
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/tasks/from-message:
+    post:
+      tags: [Tasks]
+      summary: Create task from message
+      operationId: createTaskFromMessage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskFromMessageRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/tasks/batch:
+    post:
+      tags: [Tasks]
+      summary: Batch patch tasks
+      operationId: batchPatchTasks
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskBatchPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/tasks/{taskId}:
+    patch:
+      tags: [Tasks]
+      summary: Patch task
+      operationId: patchTask
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchTaskRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Tasks]
+      summary: Delete task
+      operationId: deleteTask
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/agents:
+    get:
+      tags: [Agents]
+      summary: List agents
+      operationId: listAgents
+      parameters:
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agent"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Agents]
+      summary: Create agent
+      operationId: createAgent
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/agents/{agentId}:
+    patch:
+      tags: [Agents]
+      summary: Patch agent
+      operationId: patchAgent
+      parameters:
+        - $ref: "#/components/parameters/AgentIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAgentRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Agents]
+      summary: Delete agent
+      operationId: deleteAgent
+      parameters:
+        - $ref: "#/components/parameters/AgentIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/agents/{agentId}/skills/{skillId}:
+    post:
+      tags: [Agents]
+      summary: Install/uninstall skill for agent
+      operationId: toggleAgentSkill
+      parameters:
+        - $ref: "#/components/parameters/AgentIdPath"
+        - $ref: "#/components/parameters/SkillIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                install:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/agents/{agentId}/chat:
+    post:
+      tags: [Agents]
+      summary: Agent chat
+      operationId: chatWithAgent
+      parameters:
+        - $ref: "#/components/parameters/AgentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentChatRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentChatResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/agents/{agentId}/actions/plan-and-execute:
+    post:
+      tags: [Agents]
+      summary: Plan and execute multi-step action
+      operationId: planAndExecute
+      parameters:
+        - $ref: "#/components/parameters/AgentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanAndExecuteRequest"
+      responses:
+        "200":
+          description: Completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanAndExecuteResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/catalog:
+    get:
+      tags: [Skills]
+      summary: List skill catalog
+      operationId: listSkillCatalog
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SkillCatalogItem"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/custom:
+    get:
+      tags: [Skills]
+      summary: List custom skills
+      operationId: listCustomSkills
+      parameters:
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomSkill"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Skills]
+      summary: Create custom skill
+      operationId: createCustomSkill
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomSkillRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomSkill"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/custom/{skillId}:
+    patch:
+      tags: [Skills]
+      summary: Patch custom skill
+      operationId: patchCustomSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchCustomSkillRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomSkill"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Skills]
+      summary: Delete custom skill
+      operationId: deleteCustomSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/custom/{skillId}/execute:
+    post:
+      tags: [Skills]
+      summary: Execute custom skill
+      operationId: executeCustomSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteCustomSkillRequest"
+      responses:
+        "200":
+          description: Executed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecuteCustomSkillResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/custom/{skillId}/runs:
+    get:
+      tags: [Skills]
+      summary: List runs of a custom skill
+      operationId: listCustomSkillRuns
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SkillRun"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/knowledge/files:
+    post:
+      tags: [Knowledge]
+      summary: Upload knowledge file
+      operationId: uploadKnowledgeFile
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeUploadRequest"
+      responses:
+        "201":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocument"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/knowledge/index:
+    post:
+      tags: [Knowledge]
+      summary: Start indexing document
+      operationId: startKnowledgeIndex
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeIndexRequest"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeJob"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/knowledge/jobs/{jobId}:
+    get:
+      tags: [Knowledge]
+      summary: Get indexing job status
+      operationId: getKnowledgeJob
+      parameters:
+        - $ref: "#/components/parameters/JobIdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeJob"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/knowledge/documents:
+    get:
+      tags: [Knowledge]
+      summary: List knowledge documents
+      operationId: listKnowledgeDocuments
+      parameters:
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnowledgeDocument"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/knowledge/documents/{documentId}:
+    delete:
+      tags: [Knowledge]
+      summary: Delete knowledge document
+      operationId: deleteKnowledgeDocument
+      parameters:
+        - $ref: "#/components/parameters/DocumentIdPath"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      schema:
+        type: string
+      description: Optional idempotency key for write requests.
+    CursorQuery:
+      in: query
+      name: cursor
+      required: false
+      schema:
+        type: string
+    LimitQuery:
+      in: query
+      name: limit
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+    OwnerIdQuery:
+      in: query
+      name: ownerId
+      required: false
+      schema:
+        type: string
+    AssigneeQuery:
+      in: query
+      name: assignee
+      required: false
+      schema:
+        type: string
+    TaskStatusQuery:
+      in: query
+      name: status
+      required: false
+      schema:
+        $ref: "#/components/schemas/TaskStatus"
+    TaskPriorityQuery:
+      in: query
+      name: priority
+      required: false
+      schema:
+        $ref: "#/components/schemas/TaskPriority"
+    TaskIdPath:
+      in: path
+      name: taskId
+      required: true
+      schema:
+        type: string
+    AgentIdPath:
+      in: path
+      name: agentId
+      required: true
+      schema:
+        type: string
+    SkillIdPath:
+      in: path
+      name: skillId
+      required: true
+      schema:
+        type: string
+    JobIdPath:
+      in: path
+      name: jobId
+      required: true
+      schema:
+        type: string
+    DocumentIdPath:
+      in: path
+      name: documentId
+      required: true
+      schema:
+        type: string
+    ThreadIdPath:
+      in: path
+      name: threadId
+      required: true
+      schema:
+        type: string
+    ThreadIdQuery:
+      in: query
+      name: threadId
+      required: false
+      schema:
+        type: string
+    MemberIdPath:
+      in: path
+      name: memberId
+      required: true
+      schema:
+        type: string
+    FriendIdPath:
+      in: path
+      name: friendId
+      required: true
+      schema:
+        type: string
+    MiniAppIdPath:
+      in: path
+      name: miniAppId
+      required: true
+      schema:
+        type: string
+    BeforeQuery:
+      in: query
+      name: before
+      required: false
+      schema:
+        type: string
+    QueryQ:
+      in: query
+      name: q
+      required: false
+      schema:
+        type: string
+
+  responses:
+    ErrorResponse:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        service:
+          type: string
+        time:
+          type: string
+          format: date-time
+      required: [ok]
+
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+        provider:
+          type: string
+        providerUserId:
+          type: string
+        role:
+          type: string
+          enum: [admin, member, guest]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, displayName, provider, role, createdAt, updatedAt]
+
+    AuthSessionResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/AuthUser"
+      required: [token, user]
+
+    AuthRegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        displayName:
+          type: string
+      required: [email, password]
+
+    AuthLoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required: [email, password]
+
+    AuthGuestRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+
+    AuthProviderRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [google, apple]
+        providerUserId:
+          type: string
+        idToken:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+      required: [provider, providerUserId]
+
+    AIHistoryItem:
+      type: object
+      properties:
+        role:
+          type: string
+        text:
+          type: string
+      required: [role, text]
+
+    AIPromptRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+        systemInstruction:
+          type: string
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIHistoryItem"
+        fallback:
+          type: string
+        responseMimeType:
+          type: string
+      required: [prompt]
+
+    AITextResponse:
+      type: object
+      properties:
+        text:
+          type: string
+      required: [text]
+
+    AIJsonResponse:
+      type: object
+      properties:
+        jsonText:
+          type: string
+      required: [jsonText]
+
+    UserAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+        provider:
+          type: string
+        providerUserId:
+          type: string
+        role:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: true
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+        actorId:
+          type: string
+        actorRole:
+          type: string
+        action:
+          type: string
+        resource:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, action, resource, createdAt]
+
+    BootstrapState:
+      type: object
+      properties:
+        botConfig:
+          $ref: "#/components/schemas/BotConfig"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        chatThreads:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatThread"
+        messages:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/ConversationMessage"
+        friends:
+          type: array
+          items:
+            $ref: "#/components/schemas/Friend"
+        threadMembers:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/ThreadMember"
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        skillCatalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillCatalogItem"
+        customSkills:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomSkill"
+        miniApps:
+          type: array
+          items:
+            $ref: "#/components/schemas/MiniApp"
+        miniAppTemplates:
+          type: array
+          items:
+            $ref: "#/components/schemas/MiniAppTemplate"
+        installedSkillIds:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    AppStateAdmin:
+      type: object
+      properties:
+        botConfig:
+          $ref: "#/components/schemas/BotConfig"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        chatThreads:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatThread"
+        messages:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/ConversationMessage"
+        friends:
+          type: array
+          items:
+            $ref: "#/components/schemas/Friend"
+        threadMembers:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/ThreadMember"
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        skillCatalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillCatalogItem"
+        customSkills:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomSkill"
+        skillRuns:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillRun"
+        miniApps:
+          type: array
+          items:
+            $ref: "#/components/schemas/MiniApp"
+        miniAppTemplates:
+          type: array
+          items:
+            $ref: "#/components/schemas/MiniAppTemplate"
+        knowledgeDocuments:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeDocument"
+        knowledgeJobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeJob"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserAccount"
+        auditLogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"
+      additionalProperties: true
+
+    RealtimeEvent:
+      type: object
+      properties:
+        type:
+          type: string
+        threadId:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+        version:
+          type: integer
+      required: [type, sentAt]
+
+    TaskPriority:
+      type: string
+      enum: [High, Medium, Low]
+    TaskStatus:
+      type: string
+      enum: [Pending, In Progress, Done]
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            requestId:
+              type: string
+          required: [code, message]
+        message:
+          type: string
+
+    DeleteResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        id:
+          type: string
+      required: [ok]
+
+    FriendDeleteResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        id:
+          type: string
+        threadId:
+          type: string
+      required: [ok]
+
+    ChatThread:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        message:
+          type: string
+        time:
+          type: string
+        unreadCount:
+          type: integer
+        isVoiceCall:
+          type: boolean
+        isSystem:
+          type: boolean
+        highlight:
+          type: boolean
+        isGroup:
+          type: boolean
+        memberCount:
+          type: integer
+        phoneNumber:
+          type: string
+        supportsVideo:
+          type: boolean
+        tag:
+          type: string
+      required: [id, name]
+
+    CreateChatThreadRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        message:
+          type: string
+        time:
+          type: string
+        isGroup:
+          type: boolean
+        memberCount:
+          type: integer
+        phoneNumber:
+          type: string
+        supportsVideo:
+          type: boolean
+        tag:
+          type: string
+      required: [name]
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        assignee:
+          type: string
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        dueAt:
+          type: string
+          format: date-time
+        sourceThreadId:
+          type: string
+        sourceMessageId:
+          type: string
+        ownerId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required: [id, title, priority, status]
+
+    CreateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        assignee:
+          type: string
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        dueAt:
+          type: string
+          format: date-time
+      required: [title]
+
+    CreateTaskFromMessageRequest:
+      type: object
+      properties:
+        threadId:
+          type: string
+        messageId:
+          type: string
+        title:
+          type: string
+        assignee:
+          type: string
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        dueAt:
+          type: string
+          format: date-time
+      required: [threadId, messageId]
+
+    PatchTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        assignee:
+          type: string
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        dueAt:
+          type: string
+          format: date-time
+
+    TaskBatchPatchRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+        patch:
+          $ref: "#/components/schemas/PatchTaskRequest"
+      required: [ids, patch]
+
+    BotConfig:
+      type: object
+      properties:
+        ownerId:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        systemInstruction:
+          type: string
+        documents:
+          type: array
+          items:
+            type: string
+        installedSkillIds:
+          type: array
+          items:
+            type: string
+        knowledgeKeywords:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required: [name]
+
+    BotConfigUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/BotConfig"
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        description:
+          type: string
+        rolePrompt:
+          type: string
+        persona:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        safetyLevel:
+          type: string
+        status:
+          type: string
+          enum: [online, offline]
+        installedSkillIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required: [id, name]
+
+    CreateAgentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        avatar:
+          type: string
+        description:
+          type: string
+        rolePrompt:
+          type: string
+        persona:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        safetyLevel:
+          type: string
+      required: [name]
+
+    PatchAgentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        avatar:
+          type: string
+        description:
+          type: string
+        rolePrompt:
+          type: string
+        persona:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        safetyLevel:
+          type: string
+        status:
+          type: string
+          enum: [online, offline]
+
+    AgentChatRequest:
+      type: object
+      properties:
+        threadId:
+          type: string
+        message:
+          type: string
+      required: [message]
+
+    ConversationMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        threadId:
+          type: string
+        senderId:
+          type: string
+        senderName:
+          type: string
+        senderAvatar:
+          type: string
+        senderType:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+        isMe:
+          type: boolean
+        time:
+          type: string
+        voiceDuration:
+          type: string
+        replyContext:
+          type: string
+        imageUri:
+          type: string
+        imageName:
+          type: string
+
+    SendMessageRequest:
+      type: object
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+        voiceDuration:
+          type: string
+        replyContext:
+          type: string
+        imageUri:
+          type: string
+        imageName:
+          type: string
+      required: [content]
+
+    SendMessageResponse:
+      type: object
+      properties:
+        threadId:
+          type: string
+        userMessage:
+          $ref: "#/components/schemas/ConversationMessage"
+        aiMessage:
+          $ref: "#/components/schemas/ConversationMessage"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationMessage"
+      required: [threadId, userMessage]
+
+    RoleRepliesRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+        memberIds:
+          type: array
+          items:
+            type: string
+        appendUserMessage:
+          type: boolean
+      required: [prompt]
+
+    RoleRepliesResponse:
+      type: object
+      properties:
+        threadId:
+          type: string
+        userMessage:
+          $ref: "#/components/schemas/ConversationMessage"
+        replies:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationMessage"
+      required: [threadId, replies]
+
+    ThreadMember:
+      type: object
+      properties:
+        id:
+          type: string
+        threadId:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        memberType:
+          type: string
+          enum: [human, agent, role]
+        friendId:
+          type: string
+        agentId:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, threadId, memberType]
+
+    AddThreadMemberRequest:
+      type: object
+      properties:
+        friendId:
+          type: string
+        agentId:
+          type: string
+        memberType:
+          type: string
+          enum: [human, agent, role]
+        name:
+          type: string
+        avatar:
+          type: string
+
+    Friend:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        userId:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        kind:
+          type: string
+          enum: [human, bot]
+        role:
+          type: string
+        company:
+          type: string
+        threadId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, kind]
+
+    CreateFriendRequest:
+      type: object
+      properties:
+        userId:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        kind:
+          type: string
+          enum: [human, bot]
+        role:
+          type: string
+        company:
+          type: string
+      required: [userId]
+
+    DiscoverUserItem:
+      type: object
+      properties:
+        userId:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        avatar:
+          type: string
+        provider:
+          type: string
+      additionalProperties: true
+
+    AgentChatResponse:
+      type: object
+      properties:
+        agentId:
+          type: string
+        reply:
+          type: string
+        message:
+          $ref: "#/components/schemas/ConversationMessage"
+      required: [agentId, reply]
+
+    PlanAndExecuteRequest:
+      type: object
+      properties:
+        threadId:
+          type: string
+        userIntent:
+          type: string
+        allowedSkills:
+          type: array
+          items:
+            type: string
+        dryRun:
+          type: boolean
+      required: [userIntent]
+
+    PlanAndExecuteStep:
+      type: object
+      properties:
+        type:
+          type: string
+        status:
+          type: string
+        createdTaskIds:
+          type: array
+          items:
+            type: string
+      required: [type, status]
+
+    PlanAndExecuteMessage:
+      type: object
+      properties:
+        threadId:
+          type: string
+        content:
+          type: string
+      required: [threadId, content]
+
+    PlanAndExecuteResponse:
+      type: object
+      properties:
+        runId:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanAndExecuteStep"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanAndExecuteMessage"
+        createdTaskIds:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+      required: [runId, steps, status]
+
+    SkillCatalogItem:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+        permissionScope:
+          type: string
+        version:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+      required: [id, name, type]
+
+    CustomSkill:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        markdown:
+          type: string
+        permissionScope:
+          type: string
+        executor:
+          type: string
+        enabled:
+          type: boolean
+        version:
+          type: string
+        versionInt:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, markdown]
+
+    CreateCustomSkillRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        markdown:
+          type: string
+        permissionScope:
+          type: string
+        executor:
+          type: string
+        enabled:
+          type: boolean
+        version:
+          type: string
+      required: [name, markdown]
+
+    PatchCustomSkillRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        markdown:
+          type: string
+        permissionScope:
+          type: string
+        executor:
+          type: string
+        enabled:
+          type: boolean
+        version:
+          type: string
+
+    ExecuteCustomSkillRequest:
+      type: object
+      properties:
+        threadId:
+          type: string
+        input:
+          type: string
+        variables:
+          type: object
+          additionalProperties: true
+      required: [input]
+
+    ExecuteCustomSkillResponse:
+      type: object
+      properties:
+        skillId:
+          type: string
+        output:
+          type: string
+        message:
+          $ref: "#/components/schemas/ConversationMessage"
+      required: [skillId, output]
+
+    SkillRun:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        skillId:
+          type: string
+        threadId:
+          type: string
+        input:
+          type: string
+        output:
+          type: string
+        status:
+          type: string
+        error:
+          type: string
+        meta:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required: [id, skillId, status]
+
+    KnowledgeUploadRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        content:
+          type: string
+        contentBase64:
+          type: string
+      required: [name]
+
+    KnowledgeIndexRequest:
+      type: object
+      properties:
+        documentId:
+          type: string
+      required: [documentId]
+
+    KnowledgeDocument:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        name:
+          type: string
+        storageKey:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required: [id, name, status]
+
+    KnowledgeJob:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        documentId:
+          type: string
+        status:
+          type: string
+        error:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required: [id, status]
+
+    MiniApp:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        query:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum: [draft, generated, installed]
+        installed:
+          type: boolean
+        progress:
+          type: integer
+        preview:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, status]
+
+    MiniAppTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+      required: [id, name]
+
+    GenerateMiniAppRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+      required: [query]
+
+    InstallMiniAppRequest:
+      type: object
+      properties:
+        install:
+          type: boolean
+
+    RunMiniAppRequest:
+      type: object
+      properties:
+        threadId:
+          type: string
+        input:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+      required: [input]
+
+    RunMiniAppResponse:
+      type: object
+      properties:
+        appId:
+          type: string
+        output:
+          type: string
+        ranAt:
+          type: string
+          format: date-time
+        message:
+          $ref: "#/components/schemas/ConversationMessage"
+      required: [appId, output, ranAt]
