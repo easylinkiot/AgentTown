@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useMemo, useState } from "react";
@@ -29,6 +30,13 @@ interface GoogleProfile {
   name?: string;
   email?: string;
   picture?: string;
+}
+
+function sanitizeGoogleClientId(raw: string | undefined) {
+  const value = raw?.trim() || "";
+  if (!value) return "";
+  if (value.includes("placeholder")) return "";
+  return value;
 }
 
 async function fetchGoogleProfile(accessToken: string) {
@@ -62,39 +70,54 @@ export default function SignInScreen() {
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<"google" | "apple" | "phone" | "guest" | null>(null);
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
+  const isExpoGo = Constants.appOwnership === "expo";
+
+  const googleWebClientId = useMemo(
+    () => sanitizeGoogleClientId(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID),
+    []
+  );
+  const googleIosClientId = useMemo(
+    () => sanitizeGoogleClientId(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID),
+    []
+  );
+  const googleAndroidClientId = useMemo(
+    () => sanitizeGoogleClientId(process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID),
+    []
+  );
 
   const googleConfigMissing = useMemo(() => {
-    const hasAny =
-      Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID) ||
-      Boolean(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID) ||
-      Boolean(process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID);
-    return !hasAny;
-  }, []);
+    if (isExpoGo) {
+      return !googleWebClientId;
+    }
+    if (Platform.OS === "ios") {
+      return !(googleIosClientId || googleWebClientId);
+    }
+    if (Platform.OS === "android") {
+      return !(googleAndroidClientId || googleWebClientId);
+    }
+    return !googleWebClientId;
+  }, [googleAndroidClientId, googleIosClientId, googleWebClientId, isExpoGo]);
 
   const redirectUri = useMemo(
-    () =>
-      AuthSession.makeRedirectUri({
-        scheme: "agenttown",
-        path: "oauth2redirect/google",
-      }),
-    []
+    () => (isExpoGo ? undefined : AuthSession.makeRedirectUri({ scheme: "agenttown", path: "oauth2redirect/google" })),
+    [isExpoGo]
   );
 
   const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     scopes: ["openid", "profile", "email"],
     webClientId:
-      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
-      process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
+      googleWebClientId ||
+      googleIosClientId ||
       "missing-google-web-client-id",
     iosClientId:
-      process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
-      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+      googleIosClientId ||
+      googleWebClientId ||
       "missing-google-ios-client-id",
     androidClientId:
-      process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ||
-      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+      googleAndroidClientId ||
+      googleWebClientId ||
       "missing-google-android-client-id",
-    redirectUri,
+    ...(redirectUri ? { redirectUri } : {}),
   });
 
   useEffect(() => {
@@ -168,8 +191,8 @@ export default function SignInScreen() {
       Alert.alert(
         tr("Google OAuth 未配置", "Google OAuth Not Configured"),
         tr(
-          "请先在 .env.local 配置 EXPO_PUBLIC_GOOGLE_*_CLIENT_ID。",
-          "Please set EXPO_PUBLIC_GOOGLE_*_CLIENT_ID in .env.local first."
+          "请先在 .env 配置真实 EXPO_PUBLIC_GOOGLE_*_CLIENT_ID（不是 placeholder）。",
+          "Please set real EXPO_PUBLIC_GOOGLE_*_CLIENT_ID values in .env (not placeholders)."
         )
       );
       return;
@@ -177,7 +200,7 @@ export default function SignInScreen() {
 
     try {
       setBusyKey("google");
-      const result = await googlePromptAsync();
+      const result = await googlePromptAsync(isExpoGo ? { useProxy: true } : {});
       if (result.type === "dismiss" || result.type === "cancel") {
         setBusyKey(null);
       }

@@ -113,12 +113,22 @@ export interface RunMiniAppOutput {
 }
 
 export interface CreateFriendInput {
-  name: string;
+  userId: string;
+  name?: string;
   avatar?: string;
   kind?: "human" | "bot";
   role?: string;
   company?: string;
   threadId?: string;
+}
+
+export interface DiscoverUser {
+  id: string;
+  displayName: string;
+  email?: string;
+  provider: string;
+  role: "admin" | "member" | "guest";
+  avatar: string;
 }
 
 export interface AddThreadMemberInput {
@@ -335,6 +345,12 @@ export async function createChatThread(payload: ChatThread) {
   });
 }
 
+export async function deleteChatThread(threadId: string) {
+  return apiFetch<{ ok: boolean; id: string }>(`/v1/chat/threads/${encodeURIComponent(threadId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function listThreadMessages(
   threadId: string,
   options?: { limit?: number; before?: string }
@@ -377,6 +393,13 @@ export async function createFriend(payload: CreateFriendInput) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function discoverUsers(query?: string) {
+  const params = new URLSearchParams();
+  if (query?.trim()) params.set("q", query.trim());
+  const qs = params.toString();
+  return apiFetch<DiscoverUser[]>(`/v1/users/discover${qs ? `?${qs}` : ""}`);
 }
 
 export async function deleteFriend(friendId: string) {

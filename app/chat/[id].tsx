@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   FlatList,
   GestureResponderEvent,
@@ -20,6 +21,7 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { tx } from "@/src/i18n/translate";
 import { aiText, listAgents as listAgentsApi, listFriends as listFriendsApi } from "@/src/lib/api";
+import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { Agent, ConversationMessage, Friend, ThreadMember } from "@/src/types";
 
@@ -43,6 +45,7 @@ function mentionMemberIDs(text: string, members: ThreadMember[]) {
 export default function ChatDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const isDraggingRef = useRef(false);
   const bubbleHeightsRef = useRef<Record<string, number>>({});
   const params = useLocalSearchParams<{
@@ -71,6 +74,8 @@ export default function ChatDetailScreen() {
     listMembers,
     addMember,
     removeMember,
+    removeFriend,
+    removeChatThread,
     generateRoleReplies,
   } = useAgentTown();
 
@@ -93,6 +98,7 @@ export default function ChatDetailScreen() {
 
   const members = threadMembers[chatId] || [];
   const messages = messagesByThread[chatId] || [];
+  const linkedFriend = useMemo(() => friends.find((item) => item.threadId === chatId), [chatId, friends]);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -142,6 +148,7 @@ export default function ChatDetailScreen() {
   const [memberPoolBusy, setMemberPoolBusy] = useState(false);
   const [memberPoolError, setMemberPoolError] = useState<string | null>(null);
   const [memberPoolNonce, setMemberPoolNonce] = useState(0);
+  const [threadMenuModal, setThreadMenuModal] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -283,11 +290,12 @@ export default function ChatDetailScreen() {
         const result = await sendMessage(chatId, {
           content,
           type: "text",
-          senderName: "Me",
+          senderId: user?.id,
+          senderName: user?.displayName || "Me",
           senderAvatar: botConfig.avatar,
           senderType: "human",
           isMe: true,
-          requestAI: true,
+          requestAI: chatId === "mybot",
           systemInstruction: botConfig.systemInstruction,
         });
         if (!result) {
@@ -376,6 +384,43 @@ export default function ChatDetailScreen() {
     }
   };
 
+  const confirmDeleteFriend = () => {
+    if (!linkedFriend) return;
+    Alert.alert(
+      tr("删除好友", "Delete Friend"),
+      tr("将删除该好友及当前私聊记录，无法撤销。", "This deletes the friend and this direct chat. This cannot be undone."),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("删除", "Delete"),
+          style: "destructive",
+          onPress: () => {
+            setThreadMenuModal(false);
+            void removeFriend(linkedFriend.id).finally(() => router.back());
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmDeleteThread = () => {
+    Alert.alert(
+      tr(thread.isGroup ? "删除群聊" : "删除聊天", thread.isGroup ? "Delete Group Chat" : "Delete Chat"),
+      tr("将删除该会话全部消息，无法撤销。", "This deletes all messages in this thread. This cannot be undone."),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("删除", "Delete"),
+          style: "destructive",
+          onPress: () => {
+            setThreadMenuModal(false);
+            void removeChatThread(chatId).finally(() => router.back());
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <KeyframeBackground>
       <SafeAreaView style={styles.safeArea}>
@@ -400,7 +445,7 @@ export default function ChatDetailScreen() {
                   <Ionicons name="person-add-outline" size={16} color="rgba(226,232,240,0.92)" />
                 </Pressable>
               ) : null}
-              <Pressable style={styles.headerIcon} onPress={() => null}>
+              <Pressable style={styles.headerIcon} onPress={() => setThreadMenuModal(true)}>
                 <Ionicons name="ellipsis-horizontal" size={16} color="rgba(226,232,240,0.92)" />
               </Pressable>
             </View>
@@ -478,9 +523,12 @@ export default function ChatDetailScreen() {
                 }
 
                 const me = !!msg.isMe;
+                const actorID = user?.id?.trim() || "";
+                const meBySender = actorID !== "" && (msg.senderId || "").trim() === actorID;
+                const meFinal = actorID !== "" ? meBySender : me;
                 const highlighted = highlightMessageId !== "" && msg.id === highlightMessageId;
                 return (
-                  <View style={[styles.msgRow, me && styles.msgRowMe]}>
+                  <View style={[styles.msgRow, meFinal && styles.msgRowMe]}>
                     <Pressable
                       onLayout={(e) => {
                         bubbleHeightsRef.current[msg.id] = e.nativeEvent.layout.height;
@@ -488,16 +536,16 @@ export default function ChatDetailScreen() {
                       onPress={(e) => handleMessagePress(msg, e)}
                       style={[
                         styles.bubble,
-                        me ? styles.bubbleMe : styles.bubbleOther,
+                        meFinal ? styles.bubbleMe : styles.bubbleOther,
                         highlighted && styles.bubbleHighlight,
                       ]}
                     >
-                      {!me && msg.senderName ? (
+                      {!meFinal && msg.senderName ? (
                         <Text style={styles.sender} numberOfLines={1}>
                           {msg.senderName}
                         </Text>
                       ) : null}
-                      <Text style={[styles.msgText, me && styles.msgTextMe]}>{msg.content}</Text>
+                      <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{msg.content}</Text>
                       {msg.time ? <Text style={styles.time}>{msg.time}</Text> : null}
                     </Pressable>
                   </View>
@@ -702,6 +750,29 @@ export default function ChatDetailScreen() {
             </Pressable>
           </Pressable>
         </Modal>
+
+        <Modal visible={threadMenuModal} transparent animationType="fade" onRequestClose={() => setThreadMenuModal(false)}>
+          <Pressable style={styles.modalOverlayBottom} onPress={() => setThreadMenuModal(false)}>
+            <Pressable style={styles.actionSheet} onPress={() => null}>
+              {linkedFriend ? (
+                <Pressable style={styles.menuItem} onPress={confirmDeleteFriend}>
+                  <Ionicons name="person-remove-outline" size={16} color="rgba(248,113,113,0.95)" />
+                  <Text style={styles.menuDangerText}>{tr("删除好友", "Delete Friend")}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={styles.menuItem} onPress={confirmDeleteThread}>
+                <Ionicons name="trash-outline" size={16} color="rgba(248,113,113,0.95)" />
+                <Text style={styles.menuDangerText}>
+                  {tr(thread.isGroup ? "删除群聊" : "删除聊天", thread.isGroup ? "Delete Group Chat" : "Delete Chat")}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.menuItem} onPress={() => setThreadMenuModal(false)}>
+                <Ionicons name="close-outline" size={16} color="rgba(226,232,240,0.92)" />
+                <Text style={styles.menuText}>{tr("取消", "Cancel")}</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </SafeAreaView>
     </KeyframeBackground>
   );
@@ -897,6 +968,27 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.92)",
     padding: 14,
     gap: 10,
+  },
+  menuItem: {
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  menuText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  menuDangerText: {
+    color: "rgba(248,113,113,0.98)",
+    fontSize: 13,
+    fontWeight: "900",
   },
   aiCard: {
     borderRadius: 20,

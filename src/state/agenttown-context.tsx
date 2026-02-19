@@ -7,6 +7,7 @@ import {
   createAgent as createAgentApi,
   createChatThread,
   createCustomSkill as createCustomSkillApi,
+  deleteChatThread as deleteChatThreadApi,
   createFriend as createFriendApi,
   createTask as createTaskApi,
   createTaskFromMessage as createTaskFromMessageApi,
@@ -78,6 +79,7 @@ interface AgentTownContextValue {
   updateBotConfig: (next: BotConfig) => void;
   addTask: (task: TaskItem) => void;
   addChatThread: (thread: ChatThread) => void;
+  removeChatThread: (threadId: string) => Promise<void>;
   updateHouseType: (next: number) => void;
   updateUiTheme: (next: UiTheme) => void;
   updateLanguage: (next: AppLanguage) => void;
@@ -87,7 +89,8 @@ interface AgentTownContextValue {
   loadOlderMessages: (threadId: string) => Promise<number>;
   sendMessage: (threadId: string, payload: SendThreadMessageInput) => Promise<SendThreadMessageOutput | null>;
   createFriend: (input: {
-    name: string;
+    userId: string;
+    name?: string;
     avatar?: string;
     kind?: "human" | "bot";
     role?: string;
@@ -427,13 +430,15 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       }));
     }
 
-    const latest = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+    const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+    const latest = Array.isArray(latestRaw) ? latestRaw : [];
     const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
-    void writeThreadCache(threadId, merged);
+    const safeMerged = Array.isArray(merged) ? merged : [];
+    void writeThreadCache(threadId, safeMerged);
 
     setMessagesByThread((prev) => ({
       ...prev,
-      [threadId]: merged.slice(-MESSAGE_RENDER_WINDOW),
+      [threadId]: safeMerged.slice(-MESSAGE_RENDER_WINDOW),
     }));
   }, []);
 
@@ -537,6 +542,24 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           setChatThreads((prev) => upsertById(prev, payload, true));
           break;
         }
+        case "chat.thread.deleted": {
+          const payload = event.payload as { id?: string };
+          const threadId = payload?.id || event.threadId;
+          if (!threadId) break;
+          setChatThreads((prev) => prev.filter((item) => item.id !== threadId));
+          setMessagesByThread((prev) => {
+            const next = { ...prev };
+            delete next[threadId];
+            return next;
+          });
+          setThreadMembers((prev) => {
+            const next = { ...prev };
+            delete next[threadId];
+            return next;
+          });
+          setFriends((prev) => prev.filter((item) => item.threadId !== threadId));
+          break;
+        }
         case "chat.message.created": {
           const payload = event.payload as ConversationMessage;
           const threadId = event.threadId || payload?.threadId;
@@ -597,9 +620,23 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           break;
         }
         case "friend.deleted": {
-          const payload = event.payload as { id?: string };
+          const payload = event.payload as { id?: string; threadId?: string };
           if (!payload?.id) break;
+          const removedThreadID = payload.threadId || "";
           setFriends((prev) => prev.filter((item) => item.id !== payload.id));
+          if (removedThreadID) {
+            setChatThreads((prev) => prev.filter((item) => item.id !== removedThreadID));
+            setMessagesByThread((prev) => {
+              const next = { ...prev };
+              delete next[removedThreadID];
+              return next;
+            });
+            setThreadMembers((prev) => {
+              const next = { ...prev };
+              delete next[removedThreadID];
+              return next;
+            });
+          }
           break;
         }
         case "thread.member.added": {
@@ -722,6 +759,26 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           // Keep optimistic state.
         });
       },
+      removeChatThread: async (threadId) => {
+        if (!threadId) return;
+        setChatThreads((prev) => removeById(prev, threadId));
+        setMessagesByThread((prev) => {
+          const next = { ...prev };
+          delete next[threadId];
+          return next;
+        });
+        setThreadMembers((prev) => {
+          const next = { ...prev };
+          delete next[threadId];
+          return next;
+        });
+        setFriends((prev) => prev.filter((item) => item.threadId !== threadId));
+        try {
+          await deleteChatThreadApi(threadId);
+        } catch {
+          // Keep optimistic state.
+        }
+      },
       updateHouseType: setMyHouseType,
       updateUiTheme: setUiTheme,
       updateLanguage: setLanguage,
@@ -760,7 +817,22 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       },
       removeFriend: async (friendId) => {
         if (!friendId) return;
+        const existing = friends.find((item) => item.id === friendId);
+        const linkedThreadID = existing?.threadId || "";
         setFriends((prev) => removeById(prev, friendId));
+        if (linkedThreadID) {
+          setChatThreads((prev) => prev.filter((item) => item.id !== linkedThreadID));
+          setMessagesByThread((prev) => {
+            const next = { ...prev };
+            delete next[linkedThreadID];
+            return next;
+          });
+          setThreadMembers((prev) => {
+            const next = { ...prev };
+            delete next[linkedThreadID];
+            return next;
+          });
+        }
         try {
           await deleteFriendApi(friendId);
         } catch {
