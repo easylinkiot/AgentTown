@@ -8,17 +8,17 @@ import {
   GestureResponderEvent,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import {
   aiText,
@@ -517,7 +517,7 @@ export default function ChatDetailScreen() {
 
   return (
     <KeyframeBackground>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>

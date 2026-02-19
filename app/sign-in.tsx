@@ -11,14 +11,15 @@ import {
   Alert,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -288,7 +289,7 @@ export default function SignInScreen() {
     : tr("输入手机号获取验证码", "Enter phone number to request code");
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.brandCard}>
           <View style={styles.logoCircle}>

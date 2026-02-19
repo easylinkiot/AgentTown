@@ -1,7 +1,9 @@
 import { Stack, useRouter, useSegments } from "expo-router";
 import React, { useEffect } from "react";
-import { ActivityIndicator, SafeAreaView, StyleSheet } from "react-native";
+import { ActivityIndicator, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { AgentTownProvider } from "@/src/state/agenttown-context";
 import { AuthProvider, useAuth } from "@/src/state/auth-context";
 
@@ -26,7 +28,7 @@ function RootStack() {
 
   if (!isHydrated) {
     return (
-      <SafeAreaView style={styles.loadingWrap}>
+      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.loadingWrap}>
         <ActivityIndicator size="large" color="#2563eb" />
       </SafeAreaView>
     );

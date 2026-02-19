@@ -4,16 +4,17 @@ import React, { useMemo, useState } from "react";
 import {
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { TaskItem, TaskPriority, TaskStatus } from "@/src/types";
@@ -76,7 +77,7 @@ export default function TasksScreen() {
 
   return (
     <KeyframeBackground>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
@@ -435,4 +436,3 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 });
-
