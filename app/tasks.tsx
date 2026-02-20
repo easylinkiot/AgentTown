@@ -92,7 +92,7 @@ export default function TasksScreen() {
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
             </Pressable>
-            <Text style={styles.title}>{tr("Tudu", "Tudu")}</Text>
+            <Text style={styles.title}>{tr("待办", "Todo")}</Text>
             <Pressable style={styles.addBtn} onPress={() => setCreateModal(true)}>
               <Ionicons name="add" size={16} color="#0b1220" />
             </Pressable>
@@ -108,7 +108,12 @@ export default function TasksScreen() {
             />
           ) : null}
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.pillScroll}
+            contentContainerStyle={styles.pillRow}
+          >
             {([
               { key: "all", zh: "全部", en: "All" },
               { key: "Pending", zh: "待处理", en: "Pending" },
@@ -127,7 +132,12 @@ export default function TasksScreen() {
             ))}
           </ScrollView>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.pillScroll}
+            contentContainerStyle={styles.pillRow}
+          >
             {([
               { key: "latest", zh: "最新", en: "Latest" },
               { key: "priority", zh: "优先级", en: "Priority" },
@@ -280,11 +290,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  pillScroll: {
+    flexGrow: 0,
+  },
   pillRow: {
     gap: 8,
     paddingBottom: 2,
+    paddingRight: 2,
+    alignItems: "center",
   },
   pill: {
+    alignSelf: "flex-start",
+    minHeight: 36,
+    justifyContent: "center",
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
