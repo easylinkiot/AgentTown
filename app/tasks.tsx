@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -42,7 +43,7 @@ function nextStatus(status: TaskStatus): TaskStatus {
 
 export default function TasksScreen() {
   const router = useRouter();
-  const { tasks, addTask, updateTask, language, bootstrapReady } = useAgentTown();
+  const { tasks, addTask, updateTask, language, bootstrapReady, refreshAll } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
 
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -51,6 +52,13 @@ export default function TasksScreen() {
   const [title, setTitle] = useState("");
   const [assignee, setAssignee] = useState("Jason");
   const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshAll().catch((err) => setError(formatApiError(err)));
+      return () => {};
+    }, [refreshAll])
+  );
 
   const list = useMemo(() => {
     const filtered = filter === "all" ? [...tasks] : tasks.filter((t) => t.status === filter);

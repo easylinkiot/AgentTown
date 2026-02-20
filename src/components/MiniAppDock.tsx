@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
   Image,
@@ -160,6 +161,7 @@ function heroForApp(app: MiniApp | null) {
 }
 
 export function MiniAppDock() {
+  const router = useRouter();
   const { language, miniApps, miniAppGeneration, generateMiniApp, installMiniApp } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
 
@@ -229,7 +231,13 @@ export function MiniAppDock() {
               <Pressable
                 key={action.id}
                 style={styles.quickItem}
-                onPress={() => openGenerator(promptForAction(action, language))}
+                onPress={() => {
+                  if (action.id === "tasks") {
+                    router.push("/tasks");
+                    return;
+                  }
+                  openGenerator(promptForAction(action, language));
+                }}
               >
                 <View style={[styles.quickIcon, { backgroundColor: `${action.color}2A`, borderColor: `${action.color}55` }]}>
                   <Ionicons name={action.icon} size={16} color={action.color} />
@@ -701,4 +709,3 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
 });
-

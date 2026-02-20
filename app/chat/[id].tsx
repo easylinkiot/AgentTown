@@ -531,6 +531,25 @@ export default function ChatDetailScreen() {
     }
   };
 
+  const runAddToTask = async () => {
+    if (!actionMessage) return;
+    try {
+      const fallbackTitle = tr("来自聊天的任务", "Task from chat");
+      const created = await createTaskFromMessage(
+        chatId,
+        actionMessage.id,
+        (actionMessage.content || "").slice(0, 80) || fallbackTitle
+      );
+      Alert.alert(tr("已添加任务", "Task added"), created.title || tr("任务已创建", "Task created"));
+      setActionModal(false);
+    } catch (err) {
+      Alert.alert(
+        tr("添加任务失败", "Add task failed"),
+        err instanceof Error ? err.message : tr("请稍后重试", "Please try again")
+      );
+    }
+  };
+
   const runReplyDraft = async () => {
     if (!actionMessage || askAIBusy) return;
     setAskAIError(null);
@@ -634,6 +653,13 @@ export default function ChatDetailScreen() {
       const meFinal = isCurrentUserMessage(raw, actorID);
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
       const displayText = normalizeDisplayedContent(raw.content || "", raw.senderName);
+      const ownAvatar = (user?.avatar || botConfig.avatar || "").trim();
+      const messageAvatar = (() => {
+        const senderAvatar = (raw.senderAvatar || "").trim();
+        if (senderAvatar) return senderAvatar;
+        if (meFinal) return ownAvatar;
+        return (thread.avatar || botConfig.avatar || ownAvatar || "").trim();
+      })();
 
       const messageBody = () => {
         if (raw.type === "voice") {
@@ -676,6 +702,15 @@ export default function ChatDetailScreen() {
 
       return (
         <View style={[styles.msgRow, meFinal && styles.msgRowMe]}>
+          {!meFinal ? (
+            messageAvatar ? (
+              <Image source={{ uri: messageAvatar }} style={styles.msgAvatar} />
+            ) : (
+              <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
+                <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
+              </View>
+            )
+          ) : null}
           <Pressable
             onLayout={(e) => {
               bubbleHeightsRef.current[raw.id] = e.nativeEvent.layout.height;
@@ -696,10 +731,19 @@ export default function ChatDetailScreen() {
             {messageBody()}
             {raw.time ? <Text style={styles.time}>{raw.time}</Text> : null}
           </Pressable>
+          {meFinal ? (
+            messageAvatar ? (
+              <Image source={{ uri: messageAvatar }} style={styles.msgAvatar} />
+            ) : (
+              <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
+                <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
+              </View>
+            )
+          ) : null}
         </View>
       );
     },
-    [currentUserId, handleLongPress, handleMessagePress, highlightMessageId, tr]
+    [botConfig.avatar, currentUserId, handleLongPress, handleMessagePress, highlightMessageId, thread.avatar, tr, user?.avatar]
   );
 
 
@@ -918,12 +962,7 @@ export default function ChatDetailScreen() {
                 </Pressable>
                 <Pressable
                   style={[styles.aiBtn, styles.aiBtnSecondary, askAIBusy && styles.aiBtnDisabled]}
-                  onPress={() => {
-                    if (!actionMessage) return;
-                    void createTaskFromMessage(chatId, actionMessage.id, actionMessage.content.slice(0, 80)).finally(() =>
-                      setActionModal(false)
-                    );
-                  }}
+                  onPress={() => void runAddToTask()}
                 >
                   <Text style={styles.aiBtnText}>{tr("任务", "Task")}</Text>
                 </Pressable>
@@ -1171,9 +1210,23 @@ const styles = StyleSheet.create({
   msgRow: {
     flexDirection: "row",
     justifyContent: "flex-start",
+    alignItems: "flex-end",
+    gap: 8,
   },
   msgRowMe: {
     justifyContent: "flex-end",
+  },
+  msgAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  msgAvatarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   bubble: {
     maxWidth: "86%",

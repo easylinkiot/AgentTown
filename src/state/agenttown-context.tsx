@@ -913,18 +913,16 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         }
       },
       createTaskFromMessage: async (threadId, messageId, title) => {
-        if (!threadId || !messageId) return null;
-        try {
-          const created = await createTaskFromMessageApi({
-            threadId,
-            messageId,
-            title,
-          });
-          setTasks((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
-          return created;
-        } catch {
-          return null;
+        if (!threadId || !messageId) {
+          throw new Error("invalid task source message");
         }
+        const created = await createTaskFromMessageApi({
+          threadId,
+          messageId,
+          title,
+        });
+        setTasks((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+        return created;
       },
       updateTask: async (taskId, patch) => {
         if (!taskId) return;
