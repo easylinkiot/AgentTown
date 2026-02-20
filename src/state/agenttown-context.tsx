@@ -296,6 +296,16 @@ function previewMessage(message: ConversationMessage): string {
   return message.content;
 }
 
+function normalizeMessageForUser(message: ConversationMessage, userID: string): ConversationMessage {
+  const senderID = (message.senderId || "").trim();
+  const current = (userID || "").trim();
+  const isMe = senderID !== "" && current !== "" ? senderID === current : Boolean(message.isMe);
+  return {
+    ...message,
+    isMe,
+  };
+}
+
 export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const { isSignedIn, user } = useAuth();
   const userID = (user?.id || "").trim();
@@ -532,20 +542,21 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const payload = event.payload as ConversationMessage;
           const threadId = event.threadId || payload?.threadId;
           if (!threadId || !payload?.id) break;
+          const normalizedPayload = normalizeMessageForUser({ ...payload, threadId }, userID);
 
           setMessagesByThread((prev) => {
             const history = prev[threadId] || [];
-            if (history.some((item) => item.id === payload.id)) {
+            if (history.some((item) => item.id === normalizedPayload.id)) {
               return prev;
             }
             return {
               ...prev,
-              [threadId]: [...history, { ...payload, threadId }],
+              [threadId]: [...history, normalizedPayload],
             };
           });
 
-          void upsertThreadCache(userID, threadId, [{ ...payload, threadId }]);
-          setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(payload)));
+          void upsertThreadCache(userID, threadId, [normalizedPayload]);
+          setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(normalizedPayload)));
           break;
         }
         case "task.created":
@@ -777,8 +788,11 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       createFriend: async (input) => {
         try {
           const created = await createFriendApi(input);
-          setFriends((prev) => upsertById(prev, created, true));
-          return created;
+          if (created.mode === "friend" && created.friend) {
+            setFriends((prev) => upsertById(prev, created.friend as Friend, true));
+            return created.friend as Friend;
+          }
+          return null;
         } catch {
           return null;
         }
@@ -872,8 +886,8 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
                 : thread
             )
           );
-        } catch {
-          // Ignore operation failure.
+        } catch (err) {
+          throw err;
         }
       },
       removeMember: async (threadId, memberId) => {

@@ -20,11 +20,19 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
-import { createChatThread, discoverUsers, type DiscoverUser } from "@/src/lib/api";
+import {
+  acceptFriendRequest,
+  createFriendQR,
+  discoverUsers,
+  listFriendRequests,
+  scanFriendQR,
+  rejectFriendRequest,
+  type DiscoverUser,
+} from "@/src/lib/api";
 import { tx } from "@/src/i18n/translate";
 import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
-import { ChatThread } from "@/src/types";
+import { ChatThread, FriendRequest } from "@/src/types";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -37,11 +45,12 @@ export default function HomeScreen() {
     botConfig,
     language,
     bootstrapReady,
-    addChatThread,
     createFriend,
     createGroup,
+    refreshAll,
   } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
+  const profileAvatar = user?.avatar || botConfig.avatar;
 
   const [peopleModal, setPeopleModal] = useState(false);
   const [friendModal, setFriendModal] = useState(false);
@@ -52,6 +61,14 @@ export default function HomeScreen() {
   const [friendCandidates, setFriendCandidates] = useState<DiscoverUser[]>([]);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [addingUserId, setAddingUserId] = useState<string | null>(null);
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [qrToken, setQrToken] = useState("");
+  const [qrExpiresAt, setQrExpiresAt] = useState("");
+  const [scanToken, setScanToken] = useState("");
+  const [loadingQRCreate, setLoadingQRCreate] = useState(false);
+  const [loadingQRScan, setLoadingQRScan] = useState(false);
 
   const [groupName, setGroupName] = useState("");
   const [groupAvatar, setGroupAvatar] = useState("");
@@ -76,8 +93,7 @@ export default function HomeScreen() {
     const items = [
       ...friends
         .filter((f) => {
-          const uid = (f.userId || "").trim();
-          return !uid || uid !== (user?.id || "").trim();
+          return f.kind === "bot";
         })
         .map((f) => ({ id: `friend:${f.id}`, avatar: f.avatar })),
       ...agents
@@ -122,6 +138,36 @@ export default function HomeScreen() {
     };
   }, [friendModal, friendQuery]);
 
+  useEffect(() => {
+    if (!friendModal) return;
+    let cancelled = false;
+    const run = async () => {
+      setLoadingRequests(true);
+      try {
+        const list = await listFriendRequests();
+        if (!cancelled) {
+          const incoming = Array.isArray(list)
+            ? list.filter((req) => req.status === "pending" && req.toUserId === (user?.id || ""))
+            : [];
+          setFriendRequests(incoming);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setFriendRequests([]);
+          setUiError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingRequests(false);
+        }
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [friendModal, user?.id]);
+
   const handleOpenThread = (thread: ChatThread) => {
     router.push({
       pathname: "/chat/[id]",
@@ -140,38 +186,79 @@ export default function HomeScreen() {
     setAddingUserId(candidate.id);
 
     try {
-      const threadId = `dm_${Date.now()}`;
-      const avatar = candidate.avatar?.trim() || "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200";
-
-      const thread: ChatThread = {
-        id: threadId,
-        name: candidate.displayName,
-        avatar,
-        message: tr("新联系人", "New contact"),
-        time: "Now",
-        isGroup: false,
-        supportsVideo: true,
-      };
-
-      const created = await createChatThread(thread);
-      addChatThread(created);
       await createFriend({
         userId: candidate.id,
         name: candidate.displayName,
         kind: "human",
-        avatar: created.avatar,
-        threadId: created.id,
       });
-
-      setFriendModal(false);
-      setPeopleModal(false);
       setFriendQuery("");
-      setFriendCandidates([]);
-      handleOpenThread(created);
+      const list = await discoverUsers("");
+      setFriendCandidates(Array.isArray(list) ? list : []);
     } catch (err) {
       setUiError(err instanceof Error ? err.message : String(err));
     } finally {
       setAddingUserId(null);
+    }
+  };
+
+  const handleAcceptFriendRequest = async (requestId: string) => {
+    if (!requestId || requestActionId) return;
+    setRequestActionId(requestId);
+    setUiError(null);
+    try {
+      await acceptFriendRequest(requestId);
+      await refreshAll();
+      setFriendRequests((prev) => prev.filter((item) => item.id !== requestId));
+    } catch (err) {
+      setUiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRequestActionId(null);
+    }
+  };
+
+  const handleRejectFriendRequest = async (requestId: string) => {
+    if (!requestId || requestActionId) return;
+    setRequestActionId(requestId);
+    setUiError(null);
+    try {
+      await rejectFriendRequest(requestId);
+      setFriendRequests((prev) => prev.filter((item) => item.id !== requestId));
+    } catch (err) {
+      setUiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRequestActionId(null);
+    }
+  };
+
+  const handleCreateMyQR = async () => {
+    if (loadingQRCreate) return;
+    setUiError(null);
+    setLoadingQRCreate(true);
+    try {
+      const result = await createFriendQR();
+      setQrToken(result.token || "");
+      setQrExpiresAt(result.expiresAt || "");
+    } catch (err) {
+      setUiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingQRCreate(false);
+    }
+  };
+
+  const handleScanByToken = async () => {
+    const token = scanToken.trim();
+    if (!token || loadingQRScan) return;
+    setUiError(null);
+    setLoadingQRScan(true);
+    try {
+      await scanFriendQR({ token });
+      setScanToken("");
+      const list = await discoverUsers(friendQuery.trim());
+      setFriendCandidates(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setUiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingQRScan(false);
     }
   };
 
@@ -206,7 +293,7 @@ export default function HomeScreen() {
         <View style={styles.container}>
           <View style={styles.topBar}>
             <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>
-              <Image source={{ uri: botConfig.avatar }} style={styles.profileAvatar} />
+              <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
               <View style={styles.onlineDot} />
             </Pressable>
 
@@ -356,7 +443,93 @@ export default function HomeScreen() {
                 style={styles.input}
               />
 
+              <View style={styles.qrActions}>
+                <Pressable
+                  style={styles.qrActionBtn}
+                  disabled={loadingQRCreate}
+                  onPress={handleCreateMyQR}
+                >
+                  <Ionicons name="qr-code-outline" size={14} color="#bfdbfe" />
+                  <Text style={styles.qrActionText}>
+                    {loadingQRCreate ? tr("生成中...", "Generating...") : tr("我的二维码", "My QR")}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {qrToken ? (
+                <View style={styles.qrTokenCard}>
+                  <Text style={styles.qrTokenTitle}>{tr("扫码内容", "QR payload")}</Text>
+                  <Text selectable style={styles.qrTokenValue}>
+                    {qrToken}
+                  </Text>
+                  <Text style={styles.qrTokenHint}>
+                    {tr("有效期至：", "Expires at: ")}
+                    {qrExpiresAt || "-"}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.qrScanRow}>
+                <TextInput
+                  value={scanToken}
+                  onChangeText={setScanToken}
+                  placeholder={tr("粘贴二维码内容以添加好友", "Paste QR payload to add friend")}
+                  placeholderTextColor="rgba(148,163,184,0.9)"
+                  style={[styles.input, styles.qrScanInput]}
+                />
+                <Pressable
+                  style={styles.qrScanBtn}
+                  disabled={!scanToken.trim() || loadingQRScan}
+                  onPress={handleScanByToken}
+                >
+                  <Text style={styles.qrScanBtnText}>
+                    {loadingQRScan ? tr("提交中...", "Sending...") : tr("扫一扫", "Scan")}
+                  </Text>
+                </Pressable>
+              </View>
+
               <View style={styles.candidateList}>
+                {loadingRequests ? (
+                  <View style={styles.candidateLoading}>
+                    <ActivityIndicator color="#93c5fd" />
+                  </View>
+                ) : null}
+
+                {!loadingRequests && friendRequests.length > 0 ? (
+                  <View style={styles.requestSection}>
+                    <Text style={styles.requestTitle}>{tr("好友邀请", "Friend Requests")}</Text>
+                    {friendRequests.map((req) => (
+                      <View key={req.id} style={styles.requestItem}>
+                        <Image source={{ uri: req.fromAvatar || "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200" }} style={styles.candidateAvatar} />
+                        <View style={styles.candidateBody}>
+                          <Text numberOfLines={1} style={styles.candidateName}>
+                            {req.fromName || tr("未知用户", "Unknown User")}
+                          </Text>
+                          <Text numberOfLines={1} style={styles.candidateMeta}>
+                            {tr("邀请你成为好友", "Sent you a friend invite")}
+                          </Text>
+                        </View>
+                        <Pressable
+                          disabled={Boolean(requestActionId)}
+                          style={styles.requestActionBtn}
+                          onPress={() => handleAcceptFriendRequest(req.id)}
+                        >
+                          <Text style={styles.requestActionText}>
+                            {requestActionId === req.id ? tr("处理中...", "Working...") : tr("接受", "Accept")}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          disabled={Boolean(requestActionId)}
+                          style={styles.requestActionBtnGhost}
+                          onPress={() => handleRejectFriendRequest(req.id)}
+                        >
+                          <Text style={styles.requestActionTextGhost}>{tr("拒绝", "Decline")}</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
                 {loadingCandidates ? (
                   <View style={styles.candidateLoading}>
                     <ActivityIndicator color="#93c5fd" />
@@ -684,6 +857,74 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.03)",
     padding: 8,
   },
+  qrActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  qrActionBtn: {
+    minHeight: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.35)",
+    backgroundColor: "rgba(30,64,175,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  qrActionText: {
+    color: "#dbeafe",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  qrTokenCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.25)",
+    backgroundColor: "rgba(15,23,42,0.5)",
+    padding: 10,
+    gap: 6,
+  },
+  qrTokenTitle: {
+    color: "rgba(191,219,254,0.95)",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  qrTokenValue: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+  },
+  qrTokenHint: {
+    color: "rgba(148,163,184,0.9)",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  qrScanRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  qrScanInput: {
+    flex: 1,
+  },
+  qrScanBtn: {
+    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.35)",
+    backgroundColor: "rgba(30,64,175,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  qrScanBtnText: {
+    color: "#dbeafe",
+    fontSize: 12,
+    fontWeight: "900",
+  },
   candidateLoading: {
     minHeight: 120,
     alignItems: "center",
@@ -733,6 +974,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 12,
     lineHeight: 18,
+  },
+  requestSection: {
+    marginBottom: 8,
+    gap: 8,
+  },
+  requestTitle: {
+    color: "rgba(191,219,254,0.95)",
+    fontSize: 12,
+    fontWeight: "900",
+    paddingHorizontal: 6,
+    paddingTop: 4,
+  },
+  requestItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.24)",
+    backgroundColor: "rgba(30,64,175,0.18)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  requestActionBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(59,130,246,0.42)",
+    backgroundColor: "rgba(30,64,175,0.34)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  requestActionText: {
+    color: "#dbeafe",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  requestActionBtnGhost: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  requestActionTextGhost: {
+    color: "rgba(226,232,240,0.9)",
+    fontSize: 11,
+    fontWeight: "900",
   },
   choiceRow: {
     flexDirection: "row",

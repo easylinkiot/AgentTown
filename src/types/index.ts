@@ -83,6 +83,19 @@ export interface Friend {
   updatedAt?: string;
 }
 
+export type FriendRequestStatus = "pending" | "accepted" | "rejected" | "canceled";
+
+export interface FriendRequest {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  fromName?: string;
+  fromAvatar?: string;
+  status: FriendRequestStatus;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type AgentStatus = "online" | "offline";
 
 export interface Agent {
@@ -175,6 +188,7 @@ export interface AppBootstrapState {
   chatThreads: ChatThread[];
   messages: Record<string, ConversationMessage[]>;
   friends?: Friend[];
+  friendRequests?: FriendRequest[];
   threadMembers?: Record<string, ThreadMember[]>;
   agents: Agent[];
   skillCatalog: SkillCatalogItem[];
@@ -196,9 +210,12 @@ export interface AuthUser {
   displayName: string;
   provider: string;
   providerUserId?: string;
+  requireProfileSetup?: boolean;
+  phone?: string;
+  avatar?: string;
   role: UserRole;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export interface AiContextState {

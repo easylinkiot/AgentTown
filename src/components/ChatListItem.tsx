@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   name: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: "700",
     color: "#111827",
     maxWidth: "84%",
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     color: "#f8fafc",
   },
   memberCount: {
-    fontSize: 10,
+    fontSize: 11,
     color: "#64748b",
     fontWeight: "600",
   },
@@ -167,14 +167,14 @@ const styles = StyleSheet.create({
     color: "rgba(148,163,184,0.95)",
   },
   time: {
-    fontSize: 11,
+    fontSize: 13,
     color: "#6b7280",
   },
   timeNeo: {
     color: "rgba(148,163,184,0.78)",
   },
   message: {
-    fontSize: 12,
+    fontSize: 14,
     color: "#4b5563",
   },
   messageNeo: {

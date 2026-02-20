@@ -7,6 +7,7 @@ import {
   ConversationMessage,
   CustomSkill,
   Friend,
+  FriendRequest,
   MiniApp,
   MiniAppTemplate,
   RealtimeEvent,
@@ -120,6 +121,21 @@ export interface CreateFriendInput {
   role?: string;
   company?: string;
   threadId?: string;
+}
+
+export interface CreateFriendResponse {
+  mode: "friend" | "request";
+  friend?: Friend;
+  request?: FriendRequest;
+}
+
+export interface CreateFriendQRResponse {
+  token: string;
+  expiresAt: string;
+}
+
+export interface ScanFriendQRInput {
+  token: string;
 }
 
 export interface DiscoverUser {
@@ -292,6 +308,13 @@ export async function authMe() {
   return apiFetch<AuthUser>("/v1/auth/me");
 }
 
+export async function authUpdateProfile(payload: { displayName: string; email: string }) {
+  return apiFetch<AuthSessionPayload>("/v1/auth/me/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchBootstrap() {
   return apiFetch<BootstrapPayload>("/v1/bootstrap");
 }
@@ -389,7 +412,38 @@ export async function listFriends() {
 }
 
 export async function createFriend(payload: CreateFriendInput) {
-  return apiFetch<Friend>("/v1/friends", {
+  return apiFetch<CreateFriendResponse>("/v1/friends", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listFriendRequests() {
+  return apiFetch<FriendRequest[]>("/v1/friend-requests");
+}
+
+export async function acceptFriendRequest(requestId: string) {
+  return apiFetch<{ ok: boolean; request: FriendRequest }>(
+    `/v1/friend-requests/${encodeURIComponent(requestId)}/accept`,
+    { method: "POST" }
+  );
+}
+
+export async function rejectFriendRequest(requestId: string) {
+  return apiFetch<{ ok: boolean; request: FriendRequest }>(
+    `/v1/friend-requests/${encodeURIComponent(requestId)}/reject`,
+    { method: "POST" }
+  );
+}
+
+export async function createFriendQR() {
+  return apiFetch<CreateFriendQRResponse>("/v1/friend-qr/create", {
+    method: "POST",
+  });
+}
+
+export async function scanFriendQR(payload: ScanFriendQRInput) {
+  return apiFetch<CreateFriendResponse>("/v1/friend-qr/scan", {
     method: "POST",
     body: JSON.stringify(payload),
   });

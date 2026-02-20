@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -66,7 +66,7 @@ export default function ConfigScreen() {
     language,
     updateLanguage,
   } = useAgentTown();
-  const { user, signOut } = useAuth();
+  const { user, signOut, completeProfile } = useAuth();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const isNeo = uiTheme === "neo";
 
@@ -84,6 +84,18 @@ export default function ConfigScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [installingSkillId, setInstallingSkillId] = useState<string | null>(null);
   const [viewingSkill, setViewingSkill] = useState<MarketItem | null>(null);
+  const [profileName, setProfileName] = useState(user?.displayName || "");
+  const [profileEmail, setProfileEmail] = useState(user?.email || "");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  const profileAvatar = user?.avatar || botConfig.avatar;
+  const profileProvider = user?.provider || "unknown";
+  const profilePhone = user?.phone || tr("未绑定手机号", "No phone linked");
+
+  useEffect(() => {
+    setProfileName(user?.displayName || "");
+    setProfileEmail(user?.email || "");
+  }, [user?.displayName, user?.email, user?.id]);
 
   const installedSkills = useMemo(() => {
     const allSkills = MARKET_DATA.flatMap((category) => category.items);
@@ -111,6 +123,35 @@ export default function ConfigScreen() {
   const handleSignOut = async () => {
     await signOut();
     router.replace("/sign-in");
+  };
+
+  const handleSaveProfile = async () => {
+    const nextName = profileName.trim();
+    const nextEmail = profileEmail.trim();
+    if (!nextName) {
+      Alert.alert(tr("信息不完整", "Incomplete Profile"), tr("请输入用户名。", "Please enter a username."));
+      return;
+    }
+    if (!nextEmail || !nextEmail.includes("@")) {
+      Alert.alert(
+        tr("信息不完整", "Incomplete Profile"),
+        tr("请输入有效邮箱地址。", "Please enter a valid email address.")
+      );
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      await completeProfile({ displayName: nextName, email: nextEmail });
+      Alert.alert(tr("已更新", "Updated"), tr("账号信息已保存。", "Account profile saved."));
+    } catch (err) {
+      Alert.alert(
+        tr("更新失败", "Update failed"),
+        err instanceof Error ? err.message : tr("请稍后重试", "Please try again")
+      );
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const uploadKnowledge = async () => {
@@ -205,6 +246,55 @@ export default function ConfigScreen() {
           style={[styles.scroll, styles.scrollNeo]}
           contentContainerStyle={[styles.scrollContent, styles.scrollContentNeo]}
         >
+          <View style={styles.neoAccountCard}>
+            <View style={styles.neoAccountHead}>
+              <View style={styles.neoAccountAvatarWrap}>
+                <Image source={{ uri: profileAvatar }} style={styles.neoAccountAvatar} />
+              </View>
+              <View style={styles.neoAccountBody}>
+                <Text style={styles.neoIdentityLabel}>{tr("MY PROFILE", "MY PROFILE")}</Text>
+                <Text style={styles.neoAccountName} numberOfLines={1}>
+                  {user?.displayName || tr("未命名用户", "Unnamed User")}
+                </Text>
+                <Text style={styles.neoAccountMeta} numberOfLines={1}>
+                  {profileProvider} · {profilePhone}
+                </Text>
+              </View>
+            </View>
+            <TextInput
+              style={styles.neoAccountField}
+              value={profileName}
+              onChangeText={setProfileName}
+              placeholder={tr("用户名", "Username")}
+              placeholderTextColor="rgba(148,163,184,0.85)"
+            />
+            <TextInput
+              style={styles.neoAccountField}
+              value={profileEmail}
+              onChangeText={setProfileEmail}
+              placeholder={tr("电子邮件", "Email")}
+              placeholderTextColor="rgba(148,163,184,0.85)"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <View style={styles.neoReadonlyRow}>
+              <Ionicons name="call-outline" size={14} color="rgba(148,163,184,0.9)" />
+              <Text style={styles.neoReadonlyText}>{profilePhone}</Text>
+            </View>
+            <Pressable
+              style={[styles.neoProfileSaveBtn, savingProfile && styles.neoProfileSaveBtnDisabled]}
+              onPress={handleSaveProfile}
+              disabled={savingProfile}
+            >
+              {savingProfile ? (
+                <ActivityIndicator size="small" color="#111827" />
+              ) : (
+                <Ionicons name="save-outline" size={16} color="#111827" />
+              )}
+              <Text style={styles.neoProfileSaveBtnText}>{tr("保存资料", "Save Profile")}</Text>
+            </Pressable>
+          </View>
+
           <View style={styles.neoIdentityCard}>
             <View style={styles.neoIdentityAvatarWrap}>
               <Image source={{ uri: avatar }} style={styles.avatar} />
@@ -485,14 +575,43 @@ export default function ConfigScreen() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("账号", "Account")}</Text>
-          <Text style={styles.accountText}>
-            {tr("当前登录为", "Signed in as")} {user?.displayName || tr("未知", "Unknown")}
+          <View style={styles.accountProfileRow}>
+            <Image source={{ uri: profileAvatar }} style={styles.accountAvatar} />
+            <View style={styles.accountProfileBody}>
+              <Text style={styles.accountName}>{user?.displayName || tr("未知", "Unknown")}</Text>
+              <Text style={styles.accountSubtext}>{`${tr("提供方", "Provider")}: ${profileProvider}`}</Text>
+            </View>
+          </View>
+          <Text style={styles.accountMetaLine}>
+            {tr("电子邮件", "Email")}: {user?.email || tr("未设置", "Not set")}
           </Text>
-          <Text style={styles.accountSubtext}>
-            {`${tr("提供方", "Provider")}: ${user?.provider || "unknown"}${user?.email ? ` · ${user.email}` : ""}${
-              user?.phone ? ` · ${user.phone}` : ""
-            }`}
+          <Text style={styles.accountMetaLine}>
+            {tr("电话", "Phone")}: {profilePhone}
           </Text>
+          <TextInput
+            style={styles.accountInput}
+            value={profileName}
+            onChangeText={setProfileName}
+            placeholder={tr("用户名", "Username")}
+          />
+          <TextInput
+            style={styles.accountInput}
+            value={profileEmail}
+            onChangeText={setProfileEmail}
+            placeholder={tr("电子邮件", "Email")}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          <Pressable style={styles.accountSaveBtn} onPress={handleSaveProfile} disabled={savingProfile}>
+            {savingProfile ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <>
+                <Ionicons name="save-outline" size={16} color="white" />
+                <Text style={styles.accountSaveBtnText}>{tr("保存资料", "Save Profile")}</Text>
+              </>
+            )}
+          </Pressable>
           <Pressable style={styles.signOutBtn} onPress={handleSignOut}>
             <Ionicons name="log-out-outline" size={16} color="#b91c1c" />
             <Text style={styles.signOutBtnText}>{tr("退出登录", "Sign Out")}</Text>
@@ -1029,6 +1148,90 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  neoAccountCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(20,20,36,0.82)",
+    padding: 14,
+    gap: 10,
+  },
+  neoAccountHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  neoAccountAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  neoAccountAvatar: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(30,41,59,0.8)",
+  },
+  neoAccountBody: {
+    flex: 1,
+    gap: 4,
+  },
+  neoAccountName: {
+    color: "#f8fafc",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  neoAccountMeta: {
+    color: "rgba(148,163,184,0.88)",
+    fontSize: 12,
+  },
+  neoAccountField: {
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(15,23,42,0.45)",
+    color: "#f8fafc",
+    fontSize: 14,
+    paddingHorizontal: 10,
+  },
+  neoReadonlyRow: {
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(15,23,42,0.38)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+  },
+  neoReadonlyText: {
+    color: "rgba(226,232,240,0.88)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  neoProfileSaveBtn: {
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.8)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  neoProfileSaveBtnDisabled: {
+    opacity: 0.75,
+  },
+  neoProfileSaveBtnText: {
+    color: "#111827",
+    fontSize: 13,
+    fontWeight: "800",
+  },
   accountText: {
     fontSize: 13,
     color: "#111827",
@@ -1038,6 +1241,52 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#475569",
     lineHeight: 18,
+  },
+  accountProfileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  accountAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#e5e7eb",
+  },
+  accountProfileBody: {
+    flex: 1,
+    gap: 2,
+  },
+  accountName: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  accountMetaLine: {
+    fontSize: 12,
+    color: "#475569",
+  },
+  accountInput: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 10,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    fontSize: 13,
+  },
+  accountSaveBtn: {
+    minHeight: 40,
+    borderRadius: 10,
+    backgroundColor: "#111827",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  accountSaveBtnText: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "700",
   },
   signOutBtn: {
     minHeight: 40,

@@ -40,6 +40,11 @@ function sanitizeGoogleClientId(raw: string | undefined) {
   return value;
 }
 
+function isAppleRelay(email?: string | null) {
+  const value = (email || "").trim().toLowerCase();
+  return value.endsWith("@privaterelay.appleid.com");
+}
+
 async function fetchGoogleProfile(accessToken: string) {
   const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -58,6 +63,7 @@ export default function SignInScreen() {
   const {
     isHydrated,
     user,
+    completeProfile,
     signInAsGuest,
     signInWithApple,
     signInWithGoogle,
@@ -69,8 +75,11 @@ export default function SignInScreen() {
   const [otpCode, setOtpCode] = useState("");
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
-  const [busyKey, setBusyKey] = useState<"google" | "apple" | "phone" | "guest" | null>(null);
+  const [busyKey, setBusyKey] = useState<"google" | "apple" | "phone" | "guest" | "profile" | null>(null);
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
   const isExpoGo = Constants.appOwnership === "expo";
 
   const googleWebClientId = useMemo(
@@ -130,6 +139,13 @@ export default function SignInScreen() {
 
   useEffect(() => {
     if (!isHydrated || !user) return;
+    if (user.requireProfileSetup) {
+      setProfileName(user.displayName || "");
+      setProfileEmail(isAppleRelay(user.email) ? "" : (user.email || ""));
+      setShowProfileSetup(true);
+      return;
+    }
+    setShowProfileSetup(false);
     router.replace("/");
   }, [isHydrated, router, user]);
 
@@ -165,7 +181,6 @@ export default function SignInScreen() {
           avatar: profile.picture,
           idToken,
         });
-        router.replace("/");
       } catch {
         Alert.alert(
           tx(language, "Google 登录失败", "Google Sign-In Failed"),
@@ -181,7 +196,6 @@ export default function SignInScreen() {
     try {
       setBusyKey("guest");
       await signInAsGuest();
-      router.replace("/");
     } finally {
       setBusyKey(null);
     }
@@ -201,7 +215,7 @@ export default function SignInScreen() {
 
     try {
       setBusyKey("google");
-      const result = await googlePromptAsync(isExpoGo ? { useProxy: true } : {});
+      const result = await googlePromptAsync();
       if (result.type === "dismiss" || result.type === "cancel") {
         setBusyKey(null);
       }
@@ -242,7 +256,6 @@ export default function SignInScreen() {
         email: credential.email,
         identityToken: credential.identityToken || null,
       });
-      router.replace("/");
     } catch (error) {
       const knownCode = (error as { code?: string })?.code;
       if (knownCode !== "ERR_REQUEST_CANCELED") {
@@ -275,10 +288,35 @@ export default function SignInScreen() {
     try {
       setBusyKey("phone");
       await verifyPhoneCode(phone, otpCode);
-      router.replace("/");
     } catch (error) {
       const msg = error instanceof Error ? error.message : tr("验证码校验失败", "Code verification failed");
       Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleCompleteProfile = async () => {
+    const name = profileName.trim();
+    const email = profileEmail.trim();
+    if (!name) {
+      Alert.alert(tr("信息不完整", "Incomplete Profile"), tr("请输入用户名。", "Please enter a username."));
+      return;
+    }
+    if (!email || !email.includes("@") || isAppleRelay(email)) {
+      Alert.alert(
+        tr("信息不完整", "Incomplete Profile"),
+        tr("请输入可用邮箱（不能是 Apple Relay）。", "Please enter a valid non-relay email.")
+      );
+      return;
+    }
+
+    try {
+      setBusyKey("profile");
+      await completeProfile({ displayName: name, email });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : tr("更新失败", "Failed to update profile");
+      Alert.alert(tr("更新失败", "Update Failed"), msg);
     } finally {
       setBusyKey(null);
     }
@@ -346,6 +384,45 @@ export default function SignInScreen() {
             <Text style={styles.appleBtnText}>{tr("使用 Apple 继续", "Continue with Apple")}</Text>
           </Pressable>
         </View>
+
+        {showProfileSetup ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{tr("完善 Apple 账号信息", "Complete Apple Account Profile")}</Text>
+            <Text style={styles.helperText}>
+              {tr(
+                "你选择了匿名/隐藏邮箱，需先设置用户名和邮箱后继续。",
+                "You chose anonymous/hidden email. Set username and email to continue."
+              )}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={profileName}
+              onChangeText={setProfileName}
+              placeholder={tr("用户名", "Username")}
+              autoCapitalize="words"
+            />
+            <TextInput
+              style={styles.input}
+              value={profileEmail}
+              onChangeText={setProfileEmail}
+              placeholder={tr("电子邮件", "Email")}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <Pressable
+              style={[styles.primaryBtn, busyKey !== null && styles.btnDisabled]}
+              disabled={busyKey !== null}
+              onPress={handleCompleteProfile}
+            >
+              {busyKey === "profile" ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Ionicons name="checkmark-done-outline" size={16} color="white" />
+              )}
+              <Text style={styles.primaryBtnText}>{tr("保存并继续", "Save and Continue")}</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("手机号验证码", "Phone Verification")}</Text>

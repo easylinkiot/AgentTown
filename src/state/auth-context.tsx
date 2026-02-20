@@ -1,21 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { authGuest, authMe, authProvider, setAuthToken } from "@/src/lib/api";
+import { authGuest, authMe, authProvider, authUpdateProfile, setAuthToken } from "@/src/lib/api";
+import { AuthUser } from "@/src/types";
 
 export type AuthMethod = "guest" | "google" | "apple" | "phone";
-
-export interface AuthUser {
-  id: string;
-  provider: AuthMethod | string;
-  displayName: string;
-  email?: string;
-  phone?: string;
-  avatar?: string;
-  role?: "admin" | "member" | "guest";
-  createdAt: string;
-  updatedAt?: string;
-}
 
 interface PhoneOtpState {
   code: string;
@@ -44,6 +33,7 @@ interface AuthContextValue {
   }) => Promise<void>;
   sendPhoneCode: (phone: string) => Promise<{ expiresAt: number; devCode?: string }>;
   verifyPhoneCode: (phone: string, code: string) => Promise<void>;
+  completeProfile: (input: { displayName: string; email: string }) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -77,6 +67,7 @@ function mapBackendUser(input: {
   provider: string;
   displayName: string;
   email?: string;
+  requireProfileSetup?: boolean;
   role?: "admin" | "member" | "guest";
   createdAt: string;
   updatedAt?: string;
@@ -86,7 +77,8 @@ function mapBackendUser(input: {
     provider: (input.provider as AuthMethod) || "guest",
     displayName: input.displayName,
     email: input.email,
-    role: input.role,
+    requireProfileSetup: Boolean(input.requireProfileSetup),
+    role: input.role || "guest",
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
   };
@@ -202,6 +194,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applySession]
   );
 
+  const completeProfile = useCallback<AuthContextValue["completeProfile"]>(
+    async ({ displayName, email }) => {
+      const session = await authUpdateProfile({ displayName, email });
+      await applySession({
+        token: session.token,
+        user: mapBackendUser(session.user),
+      });
+    },
+    [applySession]
+  );
+
   const sendPhoneCode = useCallback<AuthContextValue["sendPhoneCode"]>(async (phone) => {
     const normalizedPhone = normalizePhone(phone);
     const nextCode = `${Math.floor(100000 + Math.random() * 900000)}`;
@@ -264,12 +267,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isHydrated,
       user,
       token,
-      isSignedIn: Boolean(user && token),
+      isSignedIn: Boolean(user && token && !user.requireProfileSetup),
       signInAsGuest,
       signInWithGoogle,
       signInWithApple,
       sendPhoneCode,
       verifyPhoneCode,
+      completeProfile,
       signOut,
     }),
     [
@@ -281,6 +285,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithApple,
       sendPhoneCode,
       verifyPhoneCode,
+      completeProfile,
       signOut,
     ]
   );

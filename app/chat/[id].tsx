@@ -59,7 +59,8 @@ function toGiftedMessage(
   currentUserId: string,
   fallbackTime: number
 ): GiftedMessage {
-  const isMe = message.isMe || (currentUserId && (message.senderId || "").trim() === currentUserId);
+  const senderID = (message.senderId || "").trim();
+  const isMe = senderID !== "" && currentUserId ? senderID === currentUserId : Boolean(message.isMe);
   const parsedTime = message.time ? Date.parse(message.time) : Number.NaN;
   const createdAt = Number.isFinite(parsedTime) ? new Date(parsedTime) : new Date(fallbackTime);
 
@@ -75,6 +76,14 @@ function toGiftedMessage(
     system: message.type === "system",
     raw: message,
   };
+}
+
+function isCurrentUserMessage(message: ConversationMessage, currentUserId: string) {
+  const senderID = (message.senderId || "").trim();
+  if (senderID !== "" && currentUserId) {
+    return senderID === currentUserId;
+  }
+  return Boolean(message.isMe);
 }
 
 function isLikelySameMessage(a: GiftedMessage, b: GiftedMessage) {
@@ -144,7 +153,8 @@ export default function ChatDetailScreen() {
   const members = threadMembers[chatId] || [];
   const messages = messagesByThread[chatId] || [];
   const linkedFriend = useMemo(() => friends.find((item) => item.threadId === chatId), [chatId, friends]);
-  const currentUserId = (user?.id || "").trim() || "me";
+  const currentUserId = (user?.id || "").trim();
+  const giftedUserId = currentUserId || "me";
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
 
   const baseGiftedMessages = useMemo(() => {
@@ -298,8 +308,6 @@ export default function ChatDetailScreen() {
         desc: f.role || f.company || (f.kind === "bot" ? "Bot" : "Human"),
         onAdd: async () => {
           await addMember(chatId, { friendId: f.id, memberType: f.kind === "bot" ? "role" : "human" });
-          await listMembers(chatId);
-          setMemberModal(false);
         },
       }));
 
@@ -312,8 +320,6 @@ export default function ChatDetailScreen() {
         desc: a.persona || a.description || "Agent",
         onAdd: async () => {
           await addMember(chatId, { agentId: a.id, memberType: "agent" });
-          await listMembers(chatId);
-          setMemberModal(false);
         },
       }));
 
@@ -338,7 +344,7 @@ export default function ChatDetailScreen() {
         onAdd: async () => {
           setMemberPoolError(null);
           try {
-            let friend = friendPool.find((f) => (f.userId || "").trim() === u.id);
+            let friend: Friend | null | undefined = friendPool.find((f) => (f.userId || "").trim() === u.id);
             if (!friend) {
               friend = await createFriend({
                 userId: u.id,
@@ -347,13 +353,18 @@ export default function ChatDetailScreen() {
               });
             }
             if (!friend) {
-              throw new Error("create friend failed");
+              setMemberPoolError(
+                tr(
+                  "好友邀请已发送。请等待对方接受后再加入群聊。",
+                  "Friend invite sent. Add them to the group after they accept."
+                )
+              );
+              return;
             }
             await addMember(chatId, { friendId: friend.id, memberType: "human" });
-            await listMembers(chatId);
-            setMemberModal(false);
           } catch (err) {
             setMemberPoolError(err instanceof Error ? err.message : String(err));
+            throw err;
           }
         },
       }));
@@ -467,8 +478,7 @@ export default function ChatDetailScreen() {
       const top = ev.nativeEvent.pageY - ev.nativeEvent.locationY;
       const bottom = top + h;
       const meFinal =
-        message.isMe ||
-        ((message.senderId || "").trim() !== "" && (message.senderId || "").trim() === currentUserId);
+        isCurrentUserMessage(message, currentUserId);
       setActionAnchor({
         yTop: top,
         yBottom: bottom,
@@ -602,7 +612,7 @@ export default function ChatDetailScreen() {
       if (!current) return <></>;
       const raw = current.raw;
       const actorID = currentUserId;
-      const meFinal = raw.isMe || ((raw.senderId || "").trim() !== "" && (raw.senderId || "").trim() === actorID);
+      const meFinal = isCurrentUserMessage(raw, actorID);
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
 
       const messageBody = () => {
@@ -696,9 +706,17 @@ export default function ChatDetailScreen() {
                   : tr("Direct", "Direct")}
               </Text>
             </View>
-            <View style={styles.headerActions}>
-              {thread.isGroup ? (
-                <Pressable style={styles.headerIcon} onPress={() => setMemberModal(true)}>
+              <View style={styles.headerActions}>
+                {thread.isGroup ? (
+                <Pressable
+                  style={styles.headerIcon}
+                  onPress={() => {
+                    setMemberQuery("");
+                    setMemberFilter("all");
+                    setMemberPoolError(null);
+                    setMemberModal(true);
+                  }}
+                >
                   <Ionicons name="person-add-outline" size={16} color="rgba(226,232,240,0.92)" />
                 </Pressable>
               ) : null}
@@ -745,34 +763,34 @@ export default function ChatDetailScreen() {
           ) : (
             <GiftedChat
               messages={giftedMessages}
-              user={{ _id: currentUserId, name: user?.displayName || "Me" }}
+              user={{ _id: giftedUserId, name: user?.displayName || "Me" }}
               renderInputToolbar={() => null}
               minInputToolbarHeight={0}
               renderMessage={renderMessage}
               renderSystemMessage={renderSystemMessage}
               messagesContainerStyle={styles.messageContainer}
-              listViewProps={{
-                style: styles.messageList,
-                contentContainerStyle: styles.messageContent,
-                onEndReachedThreshold: 0.2,
-                onEndReached: () => void requestOlder(),
-                onScrollBeginDrag: () => {
-                  isDraggingRef.current = true;
-                },
-                onScrollEndDrag: () => {
-                  setTimeout(() => {
+              listViewProps={
+                {
+                  onEndReachedThreshold: 0.2,
+                  onEndReached: () => void requestOlder(),
+                  onScrollBeginDrag: () => {
+                    isDraggingRef.current = true;
+                  },
+                  onScrollEndDrag: () => {
+                    setTimeout(() => {
+                      isDraggingRef.current = false;
+                    }, 120);
+                  },
+                  onMomentumScrollEnd: () => {
                     isDraggingRef.current = false;
-                  }, 120);
-                },
-                onMomentumScrollEnd: () => {
-                  isDraggingRef.current = false;
-                },
-                ListFooterComponent: loadingOlder ? (
-                  <Text style={styles.memberHint}>{tr("加载更早消息...", "Loading older...")}</Text>
-                ) : hasMore ? (
-                  <Text style={styles.memberHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
-                ) : null,
-              }}
+                  },
+                  ListFooterComponent: loadingOlder ? (
+                    <Text style={styles.memberHint}>{tr("加载更早消息...", "Loading older...")}</Text>
+                  ) : hasMore ? (
+                    <Text style={styles.memberHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
+                  ) : null,
+                } as any
+              }
             />
           )}
 
@@ -948,7 +966,22 @@ export default function ChatDetailScreen() {
                   <Text style={styles.memberHint}>{tr("加载中...", "Loading...")}</Text>
                 ) : null}
                 {candidates.map((c) => (
-                  <Pressable key={c.key} style={styles.memberItem} onPress={() => void c.onAdd()}>
+                  <Pressable
+                    key={c.key}
+                    style={styles.memberItem}
+                    onPress={() => {
+                      void (async () => {
+                        setMemberPoolError(null);
+                        try {
+                          await c.onAdd();
+                          await listMembers(chatId);
+                          setMemberPoolNonce((n) => n + 1);
+                        } catch (err) {
+                          setMemberPoolError(err instanceof Error ? err.message : String(err));
+                        }
+                      })();
+                    }}
+                  >
                     <View style={styles.memberMain}>
                       <Text style={styles.memberName}>{c.label}</Text>
                       <Text style={styles.memberDesc} numberOfLines={1}>{c.desc}</Text>
@@ -1066,12 +1099,12 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#e2e8f0",
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "900",
   },
   subtitle: {
     color: "rgba(148,163,184,0.95)",
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "700",
   },
   headerActions: {
@@ -1112,7 +1145,7 @@ const styles = StyleSheet.create({
   },
   sysText: {
     color: "rgba(226,232,240,0.78)",
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "700",
   },
   msgRow: {
@@ -1143,7 +1176,7 @@ const styles = StyleSheet.create({
   },
   sender: {
     color: "rgba(226,232,240,0.86)",
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "900",
   },
   messageBody: {
@@ -1156,7 +1189,7 @@ const styles = StyleSheet.create({
   },
   replyText: {
     color: "rgba(203,213,225,0.9)",
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "700",
   },
   voiceRow: {
@@ -1166,8 +1199,8 @@ const styles = StyleSheet.create({
   },
   voiceText: {
     color: "rgba(226,232,240,0.92)",
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: "600",
   },
   imageWrap: {
@@ -1180,13 +1213,13 @@ const styles = StyleSheet.create({
   },
   imageLabel: {
     color: "rgba(148,163,184,0.9)",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
   },
   msgText: {
     color: "rgba(226,232,240,0.92)",
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 17,
+    lineHeight: 24,
     fontWeight: "600",
   },
   msgTextMe: {
@@ -1194,7 +1227,7 @@ const styles = StyleSheet.create({
   },
   time: {
     color: "rgba(148,163,184,0.9)",
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "700",
   },
   inputRow: {
@@ -1224,8 +1257,8 @@ const styles = StyleSheet.create({
   },
   input: {
     color: "#e2e8f0",
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 17,
+    lineHeight: 24,
     maxHeight: 120,
   },
   sendBtn: {
@@ -1402,12 +1435,14 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   memberCard: {
+    width: "92%",
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     backgroundColor: "rgba(15,23,42,0.92)",
     padding: 14,
     gap: 10,
+    minHeight: 360,
     maxHeight: "92%",
   },
   memberHeader: {
@@ -1472,7 +1507,8 @@ const styles = StyleSheet.create({
     color: "#e2e8f0",
   },
   memberList: {
-    flex: 1,
+    minHeight: 160,
+    maxHeight: 320,
   },
   memberListContent: {
     gap: 10,
