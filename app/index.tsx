@@ -17,21 +17,22 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
-import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
+import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
+import { tx } from "@/src/i18n/translate";
 import {
   acceptFriendRequest,
   createFriendQR,
   discoverUsers,
+  formatApiError,
   listFriendRequests,
-  scanFriendQR,
   rejectFriendRequest,
+  scanFriendQR,
   type DiscoverUser,
 } from "@/src/lib/api";
-import { tx } from "@/src/i18n/translate";
-import { useAuth } from "@/src/state/auth-context";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { useAuth } from "@/src/state/auth-context";
 import { ChatThread, FriendRequest } from "@/src/types";
 
 export default function HomeScreen() {
@@ -123,7 +124,7 @@ export default function HomeScreen() {
       } catch (err) {
         if (!cancelled) {
           setFriendCandidates([]);
-          setUiError(err instanceof Error ? err.message : String(err));
+          setUiError(formatApiError(err));
         }
       } finally {
         if (!cancelled) {
@@ -154,7 +155,7 @@ export default function HomeScreen() {
       } catch (err) {
         if (!cancelled) {
           setFriendRequests([]);
-          setUiError(err instanceof Error ? err.message : String(err));
+          setUiError(formatApiError(err));
         }
       } finally {
         if (!cancelled) {
@@ -195,7 +196,7 @@ export default function HomeScreen() {
       const list = await discoverUsers("");
       setFriendCandidates(Array.isArray(list) ? list : []);
     } catch (err) {
-      setUiError(err instanceof Error ? err.message : String(err));
+      setUiError(formatApiError(err));
     } finally {
       setAddingUserId(null);
     }
@@ -210,7 +211,7 @@ export default function HomeScreen() {
       await refreshAll();
       setFriendRequests((prev) => prev.filter((item) => item.id !== requestId));
     } catch (err) {
-      setUiError(err instanceof Error ? err.message : String(err));
+      setUiError(formatApiError(err));
     } finally {
       setRequestActionId(null);
     }
@@ -224,7 +225,7 @@ export default function HomeScreen() {
       await rejectFriendRequest(requestId);
       setFriendRequests((prev) => prev.filter((item) => item.id !== requestId));
     } catch (err) {
-      setUiError(err instanceof Error ? err.message : String(err));
+      setUiError(formatApiError(err));
     } finally {
       setRequestActionId(null);
     }
@@ -239,7 +240,7 @@ export default function HomeScreen() {
       setQrToken(result.token || "");
       setQrExpiresAt(result.expiresAt || "");
     } catch (err) {
-      setUiError(err instanceof Error ? err.message : String(err));
+      setUiError(formatApiError(err));
     } finally {
       setLoadingQRCreate(false);
     }
@@ -256,7 +257,7 @@ export default function HomeScreen() {
       const list = await discoverUsers(friendQuery.trim());
       setFriendCandidates(Array.isArray(list) ? list : []);
     } catch (err) {
-      setUiError(err instanceof Error ? err.message : String(err));
+      setUiError(formatApiError(err));
     } finally {
       setLoadingQRScan(false);
     }
@@ -281,7 +282,7 @@ export default function HomeScreen() {
         handleOpenThread(created);
       }
     } catch (err) {
-      setUiError(err instanceof Error ? err.message : String(err));
+      setUiError(formatApiError(err));
     } finally {
       setCreatingGroup(false);
     }

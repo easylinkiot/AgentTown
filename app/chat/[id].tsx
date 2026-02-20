@@ -25,6 +25,7 @@ import { tx } from "@/src/i18n/translate";
 import {
   aiText,
   discoverUsers as discoverUsersApi,
+  formatApiError,
   listAgents as listAgentsApi,
   listFriends as listFriendsApi,
   type DiscoverUser,
@@ -230,7 +231,7 @@ export default function ChatDetailScreen() {
           await listMembers(chatId);
         }
       } catch (err) {
-        if (mounted) setLoadError(err instanceof Error ? err.message : String(err));
+        if (mounted) setLoadError(formatApiError(err));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -265,7 +266,7 @@ export default function ChatDetailScreen() {
       })
       .catch((err) => {
         if (!alive) return;
-        setMemberPoolError(err instanceof Error ? err.message : String(err));
+        setMemberPoolError(formatApiError(err));
       })
       .finally(() => {
         if (!alive) return;
@@ -363,7 +364,7 @@ export default function ChatDetailScreen() {
             }
             await addMember(chatId, { friendId: friend.id, memberType: "human" });
           } catch (err) {
-            setMemberPoolError(err instanceof Error ? err.message : String(err));
+            setMemberPoolError(formatApiError(err));
             throw err;
           }
         },
@@ -506,7 +507,7 @@ export default function ChatDetailScreen() {
       });
       setAskAIAnswer((result.text || "").trim() || "Noted.");
     } catch (err) {
-      setAskAIError(err instanceof Error ? err.message : String(err));
+      setAskAIError(formatApiError(err));
     } finally {
       setAskAIBusy(false);
     }
@@ -529,7 +530,7 @@ export default function ChatDetailScreen() {
       }
       setActionModal(false);
     } catch (err) {
-      setAskAIError(err instanceof Error ? err.message : String(err));
+      setAskAIError(formatApiError(err));
     } finally {
       setAskAIBusy(false);
     }
@@ -586,7 +587,7 @@ export default function ChatDetailScreen() {
           style: "destructive",
           onPress: () => {
             void removeMember(chatId, member.id).catch((err) =>
-              setMemberPoolError(err instanceof Error ? err.message : String(err))
+              setMemberPoolError(formatApiError(err))
             );
           },
         },
@@ -746,7 +747,7 @@ export default function ChatDetailScreen() {
                 setLoadError(null);
                 setLoading(true);
                 void refreshThreadMessages(chatId)
-                  .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)))
+                  .catch((err) => setLoadError(formatApiError(err)))
                   .finally(() => setLoading(false));
               }}
             />
@@ -977,7 +978,7 @@ export default function ChatDetailScreen() {
                           await listMembers(chatId);
                           setMemberPoolNonce((n) => n + 1);
                         } catch (err) {
-                          setMemberPoolError(err instanceof Error ? err.message : String(err));
+                          setMemberPoolError(formatApiError(err));
                         }
                       })();
                     }}

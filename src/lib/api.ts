@@ -191,6 +191,116 @@ export interface RoleRepliesOutput {
 
 const DEFAULT_API_BASE_URL = "https://agenttown-api.kittens.cloud";
 
+type ApiErrorBody = {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+    requestId?: unknown;
+  };
+  code?: unknown;
+  message?: unknown;
+  details?: unknown;
+  requestId?: unknown;
+};
+
+export class ApiError extends Error {
+  status: number;
+  method: string;
+  path: string;
+  baseUrl: string;
+  code?: string;
+  details?: unknown;
+  requestId?: string;
+  retryAfterSeconds?: number;
+
+  constructor(params: {
+    status: number;
+    method: string;
+    path: string;
+    baseUrl: string;
+    message: string;
+    code?: string;
+    details?: unknown;
+    requestId?: string;
+    retryAfterSeconds?: number;
+  }) {
+    super(params.message);
+    this.name = "ApiError";
+    this.status = params.status;
+    this.method = params.method;
+    this.path = params.path;
+    this.baseUrl = params.baseUrl;
+    this.code = params.code;
+    this.details = params.details;
+    this.requestId = params.requestId;
+    this.retryAfterSeconds = params.retryAfterSeconds;
+  }
+}
+
+function parseApiErrorBody(rawText: string) {
+  if (!rawText) return null;
+  try {
+    return JSON.parse(rawText) as ApiErrorBody;
+  } catch {
+    return null;
+  }
+}
+
+function coerceString(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function parseRetryAfterSeconds(headerValue: string | null) {
+  if (!headerValue) return undefined;
+  const raw = headerValue.trim();
+  if (!raw) return undefined;
+
+  const asInt = Number.parseInt(raw, 10);
+  if (Number.isFinite(asInt) && asInt >= 0) return asInt;
+
+  const at = Date.parse(raw);
+  if (!Number.isFinite(at)) return undefined;
+  const seconds = Math.ceil((at - Date.now()) / 1000);
+  return seconds > 0 ? seconds : 0;
+}
+
+function sanitizeRawErrorText(rawText: string) {
+  const text = rawText.trim();
+  if (!text) return undefined;
+  if (text.startsWith("<!DOCTYPE") || text.startsWith("<html")) {
+    return "Server error response";
+  }
+  return text.length > 280 ? `${text.slice(0, 280)}...` : text;
+}
+
+export function formatApiError(error: unknown) {
+  if (error instanceof ApiError) {
+    const parts: string[] = [];
+    const code = error.code || `HTTP_${error.status}`;
+    parts.push(`[${code}] ${error.message}`);
+    if (error.status === 429) {
+      if (typeof error.retryAfterSeconds === "number" && Number.isFinite(error.retryAfterSeconds)) {
+        parts.push(`Rate limited. Retry after ${error.retryAfterSeconds}s.`);
+      } else {
+        parts.push("Rate limited. Please retry later.");
+      }
+    } else if (error.status >= 500) {
+      parts.push("Server error. Please retry later.");
+    } else if (error.status >= 400) {
+      parts.push("Request failed. Please check your input or permissions.");
+    }
+    if (error.requestId) {
+      parts.push(`Request ID: ${error.requestId}`);
+    }
+    return parts.join(" ");
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 let authToken: string | null = null;
 
 export function setAuthToken(token?: string | null) {
@@ -235,24 +345,33 @@ async function apiFetch<T>(
     const text = await response.text();
     const base = getApiBaseUrl();
     const method = init?.method || "GET";
-    const prefix = `${response.status} ${method} ${path} @ ${base}`;
+    const parsed = parseApiErrorBody(text);
+    const bodyError = parsed?.error;
+    const code = coerceString(bodyError?.code) || coerceString(parsed?.code);
+    const canonicalMessage =
+      coerceString(bodyError?.message) ||
+      coerceString(parsed?.message) ||
+      sanitizeRawErrorText(text) ||
+      "API request failed";
+    const requestId =
+      coerceString(bodyError?.requestId) ||
+      coerceString(parsed?.requestId) ||
+      coerceString(response.headers.get("x-request-id")) ||
+      coerceString(response.headers.get("x-correlation-id"));
+    const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+    const details = bodyError?.details ?? parsed?.details;
 
-    if (text) {
-      let canonical = "";
-      try {
-        const parsed = JSON.parse(text) as { message?: unknown };
-        if (parsed && typeof parsed === "object" && typeof parsed.message === "string") {
-          canonical = parsed.message.trim();
-        }
-      } catch {
-        // ignore JSON parse errors
-      }
-      if (canonical) {
-        throw new Error(`${prefix}: ${canonical}`);
-      }
-      throw new Error(`${prefix}: ${text}`);
-    }
-    throw new Error(`${prefix}: API request failed`);
+    throw new ApiError({
+      status: response.status,
+      method,
+      path,
+      baseUrl: base,
+      code,
+      details,
+      requestId,
+      retryAfterSeconds,
+      message: canonicalMessage,
+    });
   }
 
   if (response.status === 204) {

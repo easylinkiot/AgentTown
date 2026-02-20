@@ -16,6 +16,7 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
+import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { TaskItem, TaskPriority, TaskStatus } from "@/src/types";
 
@@ -182,9 +183,7 @@ export default function TasksScreen() {
                     <Pressable
                       style={styles.cycleBtn}
                       onPress={() =>
-                        void updateTask(task.id as string, { status: nextStatus(task.status) }).catch((err) =>
-                          setError(err instanceof Error ? err.message : String(err))
-                        )
+                        void updateTask(task.id as string, { status: nextStatus(task.status) }).catch((err) => setError(formatApiError(err)))
                       }
                     >
                       <Ionicons name="swap-horizontal-outline" size={14} color="#0b1220" />

@@ -19,6 +19,7 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
+import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
 
 export default function AgentsScreen() {
@@ -88,7 +89,7 @@ export default function AgentsScreen() {
         setError(tr("创建失败，请重试", "Create failed, please retry"));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatApiError(err));
     } finally {
       setCreatingAgent(false);
     }
@@ -116,7 +117,7 @@ export default function AgentsScreen() {
         setSkillOutput("");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatApiError(err));
     }
   };
 
@@ -135,7 +136,7 @@ export default function AgentsScreen() {
           style: "destructive",
           onPress: () => {
             void toggleAgentSkill(selectedAgent.id, skillId, false).catch((err) =>
-              setError(err instanceof Error ? err.message : String(err))
+              setError(formatApiError(err))
             );
           },
         },
@@ -157,7 +158,7 @@ export default function AgentsScreen() {
           style: "destructive",
           onPress: () => {
             void removeCustomSkill(skillId).catch((err) =>
-              setError(err instanceof Error ? err.message : String(err))
+              setError(formatApiError(err))
             );
           },
         },
@@ -254,7 +255,7 @@ export default function AgentsScreen() {
                             return;
                           }
                           void toggleAgentSkill(selectedAgent.id, skill.id, true).catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err))
+                            setError(formatApiError(err))
                           );
                         }}
                       >
@@ -296,7 +297,7 @@ export default function AgentsScreen() {
                               setSkillOutput(`${skill.name}:\n${output}`);
                             }
                           } catch (err) {
-                            setError(err instanceof Error ? err.message : String(err));
+                            setError(formatApiError(err));
                           } finally {
                             setRunningSkillId(null);
                           }
@@ -310,7 +311,7 @@ export default function AgentsScreen() {
                         style={styles.toggleBtn}
                         onPress={() => {
                           void patchCustomSkill(skill.id, { enabled: !skill.enabled }).catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err))
+                            setError(formatApiError(err))
                           );
                         }}
                       >
