@@ -17,6 +17,7 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
+import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
 
 type InviteFilter = "all" | "human" | "agent" | "role";
@@ -46,7 +47,7 @@ export default function GroupsScreen() {
 
   useEffect(() => {
     if (!selectedGroupId) return;
-    void listMembers(selectedGroupId).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    void listMembers(selectedGroupId).catch((err) => setError(formatApiError(err)));
   }, [listMembers, selectedGroupId]);
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
@@ -110,7 +111,7 @@ export default function GroupsScreen() {
           style: "destructive",
           onPress: () => {
             void removeMember(groupId, memberId).catch((err) =>
-              setError(err instanceof Error ? err.message : String(err))
+              setError(formatApiError(err))
             );
           },
         },
@@ -240,7 +241,7 @@ export default function GroupsScreen() {
 
               <ScrollView contentContainerStyle={styles.candidateList} showsVerticalScrollIndicator={false}>
                 {candidates.map((c) => (
-                  <Pressable key={c.key} style={styles.candidateItem} onPress={() => void c.onAdd().catch((err) => setError(String(err)))}>
+                  <Pressable key={c.key} style={styles.candidateItem} onPress={() => void c.onAdd().catch((err) => setError(formatApiError(err)))}>
                     <View style={styles.candidateMain}>
                       <Text style={styles.candidateName}>{c.label}</Text>
                       <Text style={styles.candidateDesc} numberOfLines={1}>{c.desc}</Text>

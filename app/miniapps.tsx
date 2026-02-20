@@ -9,6 +9,7 @@ import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/State
 import { MiniAppDock } from "@/src/components/MiniAppDock";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
+import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
 
 export default function MiniAppsScreen() {
@@ -36,7 +37,7 @@ export default function MiniAppsScreen() {
           text: tr("卸载", "Uninstall"),
           style: "destructive",
           onPress: () => {
-            void installMiniApp(appId, false).catch((err) => setError(String(err)));
+            void installMiniApp(appId, false).catch((err) => setError(formatApiError(err)));
           },
         },
       ]
@@ -56,7 +57,7 @@ export default function MiniAppsScreen() {
           text: tr("删除", "Delete"),
           style: "destructive",
           onPress: () => {
-            void removeMiniApp(appId).catch((err) => setError(String(err)));
+            void removeMiniApp(appId).catch((err) => setError(formatApiError(err)));
           },
         },
       ]
@@ -114,7 +115,7 @@ export default function MiniAppsScreen() {
                           const out = await runMiniApp(app.id, tr("请执行一次标准流程", "Run a standard workflow"));
                           if (out) setOutput(out);
                         } catch (err) {
-                          setError(err instanceof Error ? err.message : String(err));
+                          setError(formatApiError(err));
                         } finally {
                           setRunningId(null);
                         }
@@ -146,7 +147,7 @@ export default function MiniAppsScreen() {
                   <View style={styles.cardActions}>
                     <Pressable
                       style={styles.actionBtn}
-                      onPress={() => void installMiniApp(app.id, true).catch((err) => setError(String(err)))}
+                      onPress={() => void installMiniApp(app.id, true).catch((err) => setError(formatApiError(err)))}
                     >
                       <Ionicons name="add-circle-outline" size={16} color="#0b1220" />
                       <Text style={styles.actionText}>{tr("安装", "Install")}</Text>
