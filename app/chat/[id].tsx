@@ -95,6 +95,24 @@ function isLikelySameMessage(a: GiftedMessage, b: GiftedMessage) {
   return diff < 120000;
 }
 
+function normalizeDisplayedContent(content: string, senderName?: string) {
+  const text = (content || "").trim();
+  const speaker = (senderName || "").trim();
+  if (!text || !speaker) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerSpeaker = speaker.toLowerCase();
+  const prefixes = [lowerSpeaker + ":", lowerSpeaker + "：", "**" + lowerSpeaker + ":**", "**" + lowerSpeaker + "：**"];
+
+  for (const prefix of prefixes) {
+    if (lowerText.startsWith(prefix) && text.length >= prefix.length) {
+      const next = text.slice(prefix.length).trim();
+      if (next) return next;
+    }
+  }
+  return text;
+}
+
 export default function ChatDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -614,6 +632,7 @@ export default function ChatDetailScreen() {
       const actorID = currentUserId;
       const meFinal = isCurrentUserMessage(raw, actorID);
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
+      const displayText = normalizeDisplayedContent(raw.content || "", raw.senderName);
 
       const messageBody = () => {
         if (raw.type === "voice") {
@@ -647,8 +666,8 @@ export default function ChatDetailScreen() {
                 {raw.imageName ? <Text style={styles.imageLabel}>{raw.imageName}</Text> : null}
               </View>
             ) : null}
-            {raw.content ? (
-              <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{raw.content}</Text>
+            {displayText ? (
+              <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{displayText}</Text>
             ) : null}
           </View>
         );
