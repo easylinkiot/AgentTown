@@ -6,17 +6,35 @@ import { AppLanguage, ChatThread, UiTheme } from "@/src/types";
 interface ChatListItemProps {
   chat: ChatThread;
   onPress: () => void;
+  onAvatarPress?: (chat: ChatThread) => void;
   theme?: UiTheme;
   language?: AppLanguage;
+}
+
+function isBotLikeName(name: string) {
+  const safe = (name || "").trim();
+  if (!safe) return false;
+  return /\bbot\b/i.test(safe) || safe.includes("助理");
+}
+
+function inferAvatarTag(chat: ChatThread): "NPC" | "Bot" | null {
+  const id = (chat.id || "").trim().toLowerCase();
+  const tag = (chat.tag || "").trim().toLowerCase();
+  if (id === "mybot" || id.startsWith("agent_userbot_")) return "Bot";
+  if (isBotLikeName(chat.name)) return "Bot";
+  if (id.startsWith("agent_") || tag === "npc" || tag === "agent") return "NPC";
+  return null;
 }
 
 export function ChatListItem({
   chat,
   onPress,
+  onAvatarPress,
   theme = "classic",
   language = "en",
 }: ChatListItemProps) {
   const isNeo = theme === "neo";
+  const avatarTag = inferAvatarTag(chat);
   const preview = chat.isVoiceCall
     ? language === "zh"
       ? "[语音通话]"
@@ -25,14 +43,41 @@ export function ChatListItem({
 
   return (
     <Pressable style={[styles.container, isNeo && styles.containerNeo]} onPress={onPress}>
-      <View style={styles.avatarWrap}>
-        <Image source={{ uri: chat.avatar }} style={[styles.avatar, isNeo && styles.avatarNeo]} />
-        {!!chat.unreadCount && (
-          <View style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
-            <Text style={styles.unreadText}>{chat.unreadCount}</Text>
-          </View>
-        )}
-      </View>
+      {onAvatarPress ? (
+        <Pressable
+          style={styles.avatarWrap}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onAvatarPress(chat);
+          }}
+        >
+          <Image source={{ uri: chat.avatar }} style={[styles.avatar, isNeo && styles.avatarNeo]} />
+          {avatarTag ? (
+            <View style={[styles.avatarTag, avatarTag === "NPC" ? styles.avatarTagNpc : styles.avatarTagBot]}>
+              <Text style={styles.avatarTagText}>{avatarTag}</Text>
+            </View>
+          ) : null}
+          {!!chat.unreadCount && (
+            <View style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
+              <Text style={styles.unreadText}>{chat.unreadCount}</Text>
+            </View>
+          )}
+        </Pressable>
+      ) : (
+        <View style={styles.avatarWrap}>
+          <Image source={{ uri: chat.avatar }} style={[styles.avatar, isNeo && styles.avatarNeo]} />
+          {avatarTag ? (
+            <View style={[styles.avatarTag, avatarTag === "NPC" ? styles.avatarTagNpc : styles.avatarTagBot]}>
+              <Text style={styles.avatarTagText}>{avatarTag}</Text>
+            </View>
+          ) : null}
+          {!!chat.unreadCount && (
+            <View style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
+              <Text style={styles.unreadText}>{chat.unreadCount}</Text>
+            </View>
+          )}
+        </View>
+      )}
       <View style={styles.body}>
         <View style={styles.rowTop}>
           <View style={styles.nameWrap}>
@@ -97,6 +142,32 @@ const styles = StyleSheet.create({
   },
   avatarWrap: {
     position: "relative",
+  },
+  avatarTag: {
+    position: "absolute",
+    left: 6,
+    right: 6,
+    bottom: -7,
+    height: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarTagBot: {
+    backgroundColor: "rgba(37,99,235,0.96)",
+    borderColor: "rgba(191,219,254,0.78)",
+  },
+  avatarTagNpc: {
+    backgroundColor: "rgba(15,118,110,0.96)",
+    borderColor: "rgba(167,243,208,0.78)",
+  },
+  avatarTagText: {
+    color: "#f8fafc",
+    fontSize: 8,
+    lineHeight: 9,
+    fontWeight: "900",
+    letterSpacing: 0.3,
   },
   avatar: {
     width: 42,

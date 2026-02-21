@@ -100,7 +100,15 @@ interface AgentTownContextValue {
   removeFriend: (friendId: string) => Promise<void>;
   createAgent: (input: CreateAgentInput) => Promise<Agent | null>;
   toggleAgentSkill: (agentId: string, skillId: string, install: boolean) => Promise<void>;
-  createGroup: (input: { name: string; avatar?: string; memberCount?: number }) => Promise<ChatThread | null>;
+  createGroup: (input: {
+    name: string;
+    avatar?: string;
+    memberCount?: number;
+    groupType?: "toc" | "tob";
+    groupSubCategory?: string;
+    groupNpcName?: string;
+    groupCommanderUserId?: string;
+  }) => Promise<ChatThread | null>;
   listMembers: (threadId: string) => Promise<void>;
   addMember: (threadId: string, input: AddThreadMemberInput) => Promise<void>;
   removeMember: (threadId: string, memberId: string) => Promise<void>;
@@ -853,6 +861,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           isGroup: true,
           memberCount: input.memberCount || 1,
           supportsVideo: true,
+          groupType: input.groupType || "toc",
+          groupSubCategory: input.groupSubCategory?.trim() || undefined,
+          groupNpcName: input.groupNpcName?.trim() || undefined,
+          groupCommanderUserId: input.groupCommanderUserId?.trim() || undefined,
         };
 
         setChatThreads((prev) => upsertById(prev, draft, true));
@@ -860,8 +872,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const created = await createChatThread(draft);
           setChatThreads((prev) => upsertById(prev, created, true));
           return created;
-        } catch {
-          return draft;
+        } catch (err) {
+          setChatThreads((prev) => prev.filter((thread) => thread.id !== draft.id));
+          throw err;
         }
       },
       listMembers,

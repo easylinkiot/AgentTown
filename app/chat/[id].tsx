@@ -114,6 +114,41 @@ function normalizeDisplayedContent(content: string, senderName?: string) {
   return text;
 }
 
+function isBotLikeName(value?: string) {
+  const name = (value || "").trim();
+  if (!name) return false;
+  return /\bbot\b/i.test(name) || name.includes("助理");
+}
+
+function inferAvatarTagFromSender(message: ConversationMessage): "NPC" | "Bot" | null {
+  const senderType = (message.senderType || "").trim().toLowerCase();
+  const senderID = (message.senderId || "").trim().toLowerCase();
+  const senderName = (message.senderName || "").trim();
+
+  if (senderType === "human") return null;
+  if (senderType.includes("bot")) return "Bot";
+  if (senderType.includes("agent") || senderType.includes("npc") || senderType.includes("role")) {
+    return "NPC";
+  }
+  if (senderID === "agent_mybot" || senderID.startsWith("agent_userbot_")) return "Bot";
+  if (senderID.startsWith("agent_")) return "NPC";
+  if (isBotLikeName(senderName)) return "Bot";
+  if (/\bnpc\b/i.test(senderName)) return "NPC";
+  return null;
+}
+
+function inferAvatarTagFromMember(member: ThreadMember): "NPC" | "Bot" | null {
+  if (member.memberType === "human") return null;
+  if (member.memberType === "role") return "NPC";
+  if (member.memberType === "agent") {
+    const agentID = (member.agentId || "").trim().toLowerCase();
+    if (agentID === "agent_mybot" || agentID.startsWith("agent_userbot_")) return "Bot";
+    if (isBotLikeName(member.name)) return "Bot";
+    return "NPC";
+  }
+  return null;
+}
+
 export default function ChatDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -153,6 +188,26 @@ export default function ChatDetailScreen() {
   } = useAgentTown();
 
   const tr = (zh: string, en: string) => tx(language, zh, en);
+
+  const openEntityConfig = useCallback(
+    (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
+      const currentUser = (user?.id || "").trim();
+      if (entity.entityType === "human" && entity.entityId && entity.entityId === currentUser) {
+        router.push("/config" as never);
+        return;
+      }
+      router.push({
+        pathname: "/entity-config",
+        params: {
+          entityType: entity.entityType,
+          entityId: entity.entityId || "",
+          name: entity.name || "",
+          avatar: entity.avatar || "",
+        },
+      });
+    },
+    [router, user?.id]
+  );
 
   const thread = useMemo(() => {
     const found = chatThreads.find((t) => t.id === chatId);
@@ -225,6 +280,12 @@ export default function ChatDetailScreen() {
   const [askAIAnswer, setAskAIAnswer] = useState<string | null>(null);
   const [askAIError, setAskAIError] = useState<string | null>(null);
   const [askAIBusy, setAskAIBusy] = useState(false);
+  const [myBotPanel, setMyBotPanel] = useState(false);
+  const [memberNameListModal, setMemberNameListModal] = useState(false);
+  const [myBotQuestion, setMyBotQuestion] = useState("");
+  const [myBotAnswer, setMyBotAnswer] = useState<string | null>(null);
+  const [myBotError, setMyBotError] = useState<string | null>(null);
+  const [myBotBusy, setMyBotBusy] = useState(false);
 
   const [memberModal, setMemberModal] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
@@ -235,6 +296,10 @@ export default function ChatDetailScreen() {
   const [memberPoolBusy, setMemberPoolBusy] = useState(false);
   const [memberPoolError, setMemberPoolError] = useState<string | null>(null);
   const [memberPoolNonce, setMemberPoolNonce] = useState(0);
+  const [pendingMemberAdds, setPendingMemberAdds] = useState<
+    Array<{ key: string; label: string; onAdd: () => Promise<void> }>
+  >([]);
+  const [memberApplyBusy, setMemberApplyBusy] = useState(false);
   const [threadMenuModal, setThreadMenuModal] = useState(false);
 
   useEffect(() => {
@@ -313,20 +378,21 @@ export default function ChatDetailScreen() {
     const usedAgentIds = new Set(members.map((m) => m.agentId).filter(Boolean));
 
     const friendItems = friendPool
+      // Hide personal/member bots from group add-member candidates.
+      // Group should add real users (friends) or explicit Agent/NPC entries.
+      .filter((f) => f.kind === "human")
       .filter((f) => {
-        if (f.kind === "human") {
-          const uid = (f.userId || "").trim();
-          if (uid && usedHumanUserIDs.has(uid)) return false;
-        }
+        const uid = (f.userId || "").trim();
+        if (uid && usedHumanUserIDs.has(uid)) return false;
         return !usedFriendIds.has(f.id);
       })
       .map((f) => ({
         key: `friend:${f.id}`,
-        type: f.kind === "bot" ? ("role" as const) : ("human" as const),
+        type: "human" as const,
         label: f.name,
-        desc: f.role || f.company || (f.kind === "bot" ? "Bot" : "Human"),
+        desc: f.role || f.company || "Human",
         onAdd: async () => {
-          await addMember(chatId, { friendId: f.id, memberType: f.kind === "bot" ? "role" : "human" });
+          await addMember(chatId, { friendId: f.id, memberType: "human" });
         },
       }));
 
@@ -410,6 +476,11 @@ export default function ChatDetailScreen() {
     memberQuery,
     members,
   ]);
+
+  const selectedMemberKeys = useMemo(
+    () => new Set(pendingMemberAdds.map((item) => item.key)),
+    [pendingMemberAdds]
+  );
 
   const requestOlder = async () => {
     if (loadingOlder || !hasMore || !chatId) return;
@@ -531,6 +602,50 @@ export default function ChatDetailScreen() {
     }
   };
 
+  const runGroupMyBot = async () => {
+    const question = myBotQuestion.trim();
+    if (!question || myBotBusy) return;
+    setMyBotBusy(true);
+    setMyBotError(null);
+    try {
+      const transcript = messages
+        .slice(-40)
+        .map((m) => {
+          const sender = (m.senderName || (m.isMe ? "Me" : "Member")).trim();
+          const content = normalizeDisplayedContent(m.content || "", m.senderName);
+          const text = (content || "").trim();
+          if (!text) return "";
+          return `${sender}: ${text}`;
+        })
+        .filter(Boolean)
+        .join("\n");
+
+      const prompt = [
+        `Group: ${thread.name}`,
+        "",
+        "Latest context:",
+        transcript || "(empty)",
+        "",
+        `User question: ${question}`,
+        "",
+        "Answer as the user's private assistant. Keep concise and actionable.",
+      ].join("\n");
+
+      const result = await aiText({
+        prompt,
+        systemInstruction:
+          (botConfig.systemInstruction || "You are MyBot.") +
+          "\nYou are private to the current user. Never reveal private guidance as if it were a group message.",
+        fallback: "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner.",
+      });
+      setMyBotAnswer((result.text || "").trim() || "Noted.");
+    } catch (err) {
+      setMyBotError(formatApiError(err));
+    } finally {
+      setMyBotBusy(false);
+    }
+  };
+
   const runAddToTask = async () => {
     if (!actionMessage) return;
     try {
@@ -563,7 +678,14 @@ export default function ChatDetailScreen() {
       });
       const draft = (result.text || "").trim();
       if (draft) {
-        setInput(draft);
+        const targetName = (actionMessage.senderName || "").trim();
+        if (thread.isGroup && targetName) {
+          const mention = `@${targetName}`;
+          const hasMentionPrefix = draft.toLowerCase().startsWith(mention.toLowerCase());
+          setInput(hasMentionPrefix ? draft : `${mention} ${draft}`);
+        } else {
+          setInput(draft);
+        }
       }
       setActionModal(false);
     } catch (err) {
@@ -571,6 +693,20 @@ export default function ChatDetailScreen() {
     } finally {
       setAskAIBusy(false);
     }
+  };
+
+  const insertMention = (name?: string) => {
+    const safeName = (name || "").trim();
+    if (!safeName) return;
+    const mention = `@${safeName}`;
+    const current = (input || "").trim();
+    if (!current) {
+      setInput(`${mention} `);
+      return;
+    }
+    if (current.toLowerCase().includes(mention.toLowerCase())) return;
+    const spacer = input.endsWith(" ") ? "" : " ";
+    setInput(`${input}${spacer}${mention} `);
   };
 
   const confirmDeleteFriend = () => {
@@ -654,12 +790,28 @@ export default function ChatDetailScreen() {
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
       const displayText = normalizeDisplayedContent(raw.content || "", raw.senderName);
       const ownAvatar = (user?.avatar || botConfig.avatar || "").trim();
+      const avatarTag = meFinal ? null : inferAvatarTagFromSender(raw);
+      const avatarEntityType: "human" | "bot" | "npc" = meFinal
+        ? "human"
+        : avatarTag === "Bot"
+          ? "bot"
+          : avatarTag === "NPC"
+            ? "npc"
+            : "human";
       const messageAvatar = (() => {
         const senderAvatar = (raw.senderAvatar || "").trim();
         if (senderAvatar) return senderAvatar;
         if (meFinal) return ownAvatar;
         return (thread.avatar || botConfig.avatar || ownAvatar || "").trim();
       })();
+      const handleAvatarPress = () => {
+        openEntityConfig({
+          entityType: avatarEntityType,
+          entityId: meFinal ? currentUserId : (raw.senderId || "").trim(),
+          name: meFinal ? (user?.displayName || tr("我", "Me")) : (raw.senderName || ""),
+          avatar: messageAvatar || undefined,
+        });
+      };
 
       const messageBody = () => {
         if (raw.type === "voice") {
@@ -703,13 +855,20 @@ export default function ChatDetailScreen() {
       return (
         <View style={[styles.msgRow, meFinal && styles.msgRowMe]}>
           {!meFinal ? (
-            messageAvatar ? (
-              <Image source={{ uri: messageAvatar }} style={styles.msgAvatar} />
-            ) : (
-              <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
-                <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
-              </View>
-            )
+            <Pressable style={styles.msgAvatarWrap} onPress={handleAvatarPress}>
+              {messageAvatar ? (
+                <Image source={{ uri: messageAvatar }} style={styles.msgAvatar} />
+              ) : (
+                <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
+                  <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
+                </View>
+              )}
+              {avatarTag ? (
+                <View style={[styles.avatarTag, avatarTag === "NPC" ? styles.avatarTagNpc : styles.avatarTagBot]}>
+                  <Text style={styles.avatarTagText}>{avatarTag}</Text>
+                </View>
+              ) : null}
+            </Pressable>
           ) : null}
           <Pressable
             onLayout={(e) => {
@@ -732,18 +891,36 @@ export default function ChatDetailScreen() {
             {raw.time ? <Text style={styles.time}>{raw.time}</Text> : null}
           </Pressable>
           {meFinal ? (
-            messageAvatar ? (
-              <Image source={{ uri: messageAvatar }} style={styles.msgAvatar} />
-            ) : (
-              <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
-                <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
-              </View>
-            )
+            <Pressable style={styles.msgAvatarWrap} onPress={handleAvatarPress}>
+              {messageAvatar ? (
+                <Image source={{ uri: messageAvatar }} style={styles.msgAvatar} />
+              ) : (
+                <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
+                  <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
+                </View>
+              )}
+              {avatarTag ? (
+                <View style={[styles.avatarTag, avatarTag === "NPC" ? styles.avatarTagNpc : styles.avatarTagBot]}>
+                  <Text style={styles.avatarTagText}>{avatarTag}</Text>
+                </View>
+              ) : null}
+            </Pressable>
           ) : null}
         </View>
       );
     },
-    [botConfig.avatar, currentUserId, handleLongPress, handleMessagePress, highlightMessageId, thread.avatar, tr, user?.avatar]
+    [
+      botConfig.avatar,
+      currentUserId,
+      handleLongPress,
+      handleMessagePress,
+      highlightMessageId,
+      openEntityConfig,
+      thread.avatar,
+      tr,
+      user?.avatar,
+      user?.displayName,
+    ]
   );
 
 
@@ -760,7 +937,13 @@ export default function ChatDetailScreen() {
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
             </Pressable>
-            <View style={styles.headerMain}>
+            <Pressable
+              style={styles.headerMain}
+              onPress={() => {
+                if (!thread.isGroup) return;
+                setMemberNameListModal(true);
+              }}
+            >
               <Text style={styles.title} numberOfLines={1}>
                 {thread.name}
               </Text>
@@ -769,8 +952,30 @@ export default function ChatDetailScreen() {
                   ? tr(`${Math.max(thread.memberCount || 0, members.length)} people active`, `${Math.max(thread.memberCount || 0, members.length)} people active`)
                   : tr("Direct", "Direct")}
               </Text>
-            </View>
+            </Pressable>
               <View style={styles.headerActions}>
+                {thread.isGroup ? (
+                  <Pressable
+                    style={[
+                      styles.headerIcon,
+                      {
+                        width: "auto",
+                        paddingHorizontal: 10,
+                        flexDirection: "row",
+                        gap: 6,
+                      },
+                    ]}
+                    onPress={() => {
+                      setMyBotQuestion("");
+                      setMyBotAnswer(null);
+                      setMyBotError(null);
+                      setMyBotPanel(true);
+                    }}
+                  >
+                    <Ionicons name="sparkles-outline" size={16} color="rgba(191,219,254,0.95)" />
+                    <Text style={{ color: "rgba(191,219,254,0.95)", fontSize: 12, fontWeight: "800" }}>MyBot</Text>
+                  </Pressable>
+                ) : null}
                 {thread.isGroup ? (
                 <Pressable
                   style={styles.headerIcon}
@@ -778,6 +983,8 @@ export default function ChatDetailScreen() {
                     setMemberQuery("");
                     setMemberFilter("all");
                     setMemberPoolError(null);
+                    setPendingMemberAdds([]);
+                    setMemberApplyBusy(false);
                     setMemberModal(true);
                   }}
                 >
@@ -971,6 +1178,165 @@ export default function ChatDetailScreen() {
           </Pressable>
         </Modal>
 
+        <Modal visible={myBotPanel} transparent animationType="fade" onRequestClose={() => setMyBotPanel(false)}>
+          <Pressable style={styles.modalOverlay} onPress={() => setMyBotPanel(false)}>
+            <Pressable style={styles.memberCard} onPress={() => null}>
+              <View style={styles.memberHeader}>
+                <Text style={styles.memberTitle}>MyBot</Text>
+                <Pressable style={styles.closeTiny} onPress={() => setMyBotPanel(false)}>
+                  <Ionicons name="close" size={16} color="rgba(226,232,240,0.85)" />
+                </Pressable>
+              </View>
+              <Text style={[styles.memberHint, { marginBottom: 10 }]}>
+                {tr("只对你可见，基于当前群聊上下文回答。", "Private to you, answers with current group context.")}
+              </Text>
+              <TextInput
+                value={myBotQuestion}
+                onChangeText={setMyBotQuestion}
+                placeholder={tr("问 MyBot 当前群聊的问题", "Ask MyBot about this group")}
+                placeholderTextColor="rgba(148,163,184,0.9)"
+                multiline
+                style={{
+                  minHeight: 72,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.14)",
+                  backgroundColor: "rgba(15,23,42,0.55)",
+                  color: "rgba(241,245,249,0.96)",
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  fontSize: 15,
+                  textAlignVertical: "top",
+                  marginBottom: 10,
+                }}
+                editable={!myBotBusy}
+              />
+              {myBotError ? <Text style={styles.aiError}>{myBotError}</Text> : null}
+              {myBotAnswer ? (
+                <ScrollView style={{ maxHeight: 220, marginBottom: 10 }}>
+                  <View style={styles.aiAnswerBox}>
+                    <Text style={styles.aiAnswerText}>{myBotAnswer}</Text>
+                  </View>
+                </ScrollView>
+              ) : null}
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10 }}>
+                <Pressable
+                  style={[
+                    styles.filterBtn,
+                    { minHeight: 42, minWidth: 96, alignItems: "center", justifyContent: "center" },
+                  ]}
+                  onPress={() => setMyBotPanel(false)}
+                >
+                  <Text style={styles.filterText}>{tr("关闭", "Close")}</Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.filterBtn,
+                    {
+                      minHeight: 42,
+                      minWidth: 108,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor:
+                        myBotBusy || !myBotQuestion.trim()
+                          ? "rgba(51,65,85,0.45)"
+                          : "rgba(147,197,253,0.28)",
+                    },
+                  ]}
+                  onPress={() => void runGroupMyBot()}
+                  disabled={myBotBusy || !myBotQuestion.trim()}
+                >
+                  <Text style={[styles.filterText, { color: "rgba(219,234,254,0.98)" }]}>
+                    {myBotBusy ? tr("思考中...", "Thinking...") : tr("询问", "Ask")}
+                  </Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal
+          visible={memberNameListModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMemberNameListModal(false)}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setMemberNameListModal(false)}>
+            <Pressable style={styles.memberCard} onPress={() => null}>
+              <View style={styles.memberHeader}>
+                <Text style={styles.memberTitle}>{tr("成员列表", "Member list")}</Text>
+                <Pressable style={styles.closeTiny} onPress={() => setMemberNameListModal(false)}>
+                  <Ionicons name="close" size={16} color="rgba(226,232,240,0.85)" />
+                </Pressable>
+              </View>
+
+              <ScrollView style={styles.memberList} contentContainerStyle={styles.memberListContent}>
+                {members.length === 0 ? (
+                  <Text style={styles.memberHint}>{tr("暂无成员", "No members")}</Text>
+                ) : (
+                  members.map((m) => {
+                    const memberTag = inferAvatarTagFromMember(m);
+                    return (
+                      <Pressable
+                        key={m.id}
+                        style={styles.memberItem}
+                        onPress={() => {
+                          insertMention(m.name);
+                          setMemberNameListModal(false);
+                        }}
+                      >
+                        <View style={styles.memberIdentity}>
+                          <Pressable
+                            style={styles.memberAvatarWrap}
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              const memberTag = inferAvatarTagFromMember(m);
+                              openEntityConfig({
+                                entityType: memberTag === "Bot" ? "bot" : memberTag === "NPC" ? "npc" : "human",
+                                entityId: m.memberType === "human" ? m.friendId || m.id : m.agentId || m.id,
+                                name: m.name,
+                                avatar: m.avatar,
+                              });
+                            }}
+                          >
+                            {m.avatar ? (
+                              <Image source={{ uri: m.avatar }} style={styles.memberAvatar} />
+                            ) : (
+                              <View style={[styles.memberAvatar, styles.memberAvatarFallback]}>
+                                <Ionicons name="person-outline" size={14} color="rgba(226,232,240,0.86)" />
+                              </View>
+                            )}
+                            {memberTag ? (
+                              <View
+                                style={[
+                                  styles.avatarTag,
+                                  memberTag === "NPC" ? styles.avatarTagNpc : styles.avatarTagBot,
+                                ]}
+                              >
+                                <Text style={styles.avatarTagText}>{memberTag}</Text>
+                              </View>
+                            ) : null}
+                          </Pressable>
+                          <View style={styles.memberMain}>
+                            <Text style={styles.memberName}>{m.name}</Text>
+                            <Text style={styles.memberDesc} numberOfLines={1}>
+                              {m.memberType === "human"
+                                ? tr("真人", "Human")
+                                : m.memberType === "agent"
+                                  ? "Agent"
+                                  : tr("角色", "Role")}
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
         <Modal visible={memberModal} transparent animationType="fade" onRequestClose={() => setMemberModal(false)}>
           <Pressable style={styles.modalOverlay} onPress={() => setMemberModal(false)}>
             <Pressable style={styles.memberCard} onPress={() => null}>
@@ -1027,25 +1393,30 @@ export default function ChatDetailScreen() {
                 {candidates.map((c) => (
                   <Pressable
                     key={c.key}
-                    style={styles.memberItem}
+                    style={[
+                      styles.memberItem,
+                      selectedMemberKeys.has(c.key) && styles.memberItemSelected,
+                    ]}
                     onPress={() => {
-                      void (async () => {
-                        setMemberPoolError(null);
-                        try {
-                          await c.onAdd();
-                          await listMembers(chatId);
-                          setMemberPoolNonce((n) => n + 1);
-                        } catch (err) {
-                          setMemberPoolError(formatApiError(err));
+                      setMemberPoolError(null);
+                      setPendingMemberAdds((prev) => {
+                        const exists = prev.some((item) => item.key === c.key);
+                        if (exists) {
+                          return prev.filter((item) => item.key !== c.key);
                         }
-                      })();
+                        return [...prev, { key: c.key, label: c.label, onAdd: c.onAdd }];
+                      });
                     }}
                   >
                     <View style={styles.memberMain}>
                       <Text style={styles.memberName}>{c.label}</Text>
                       <Text style={styles.memberDesc} numberOfLines={1}>{c.desc}</Text>
                     </View>
-                    <Ionicons name="add-circle-outline" size={18} color="#93c5fd" />
+                    <Ionicons
+                      name={selectedMemberKeys.has(c.key) ? "checkmark-circle" : "add-circle-outline"}
+                      size={18}
+                      color="#93c5fd"
+                    />
                   </Pressable>
                 ))}
                 {candidates.length === 0 ? (
@@ -1080,6 +1451,27 @@ export default function ChatDetailScreen() {
               </ScrollView>
 
               <View style={styles.currentRow}>
+                {pendingMemberAdds.length > 0 ? (
+                  <>
+                    <Text style={styles.currentTitle}>{tr("待添加", "Pending add")}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.currentChips}>
+                      {pendingMemberAdds.map((item) => (
+                        <View key={item.key} style={styles.currentChip}>
+                          <Text style={styles.currentChipText}>{item.label}</Text>
+                          <Pressable
+                            onPress={() =>
+                              setPendingMemberAdds((prev) =>
+                                prev.filter((entry) => entry.key !== item.key)
+                              )
+                            }
+                          >
+                            <Ionicons name="close" size={12} color="rgba(248,113,113,0.95)" />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </>
+                ) : null}
                 <Text style={styles.currentTitle}>{tr("当前成员", "Members")}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.currentChips}>
                   {members.map((m) => (
@@ -1091,6 +1483,62 @@ export default function ChatDetailScreen() {
                     </View>
                   ))}
                 </ScrollView>
+
+                <View style={styles.memberFooter}>
+                  <Pressable
+                    style={styles.memberFooterGhost}
+                    onPress={() => setMemberModal(false)}
+                    disabled={memberApplyBusy}
+                  >
+                    <Text style={styles.memberFooterGhostText}>{tr("取消", "Cancel")}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.memberFooterCta,
+                      (pendingMemberAdds.length === 0 || memberApplyBusy) && styles.memberFooterCtaDisabled,
+                    ]}
+                    disabled={pendingMemberAdds.length === 0 || memberApplyBusy}
+                    onPress={() => {
+                      Alert.alert(
+                        tr("确认创建 Group", "Confirm create Group"),
+                        tr(
+                          "确定要创建Group并添加所选成员吗？",
+                          "Are you sure you want to create Group and add selected members?"
+                        ),
+                        [
+                          { text: tr("取消", "Cancel"), style: "cancel" },
+                          {
+                            text: tr("确定", "OK"),
+                            style: "default",
+                            onPress: () => {
+                              void (async () => {
+                                setMemberApplyBusy(true);
+                                setMemberPoolError(null);
+                                try {
+                                  for (const item of pendingMemberAdds) {
+                                    await item.onAdd();
+                                  }
+                                  await listMembers(chatId);
+                                  setMemberPoolNonce((n) => n + 1);
+                                  setPendingMemberAdds([]);
+                                  setMemberModal(false);
+                                } catch (err) {
+                                  setMemberPoolError(formatApiError(err));
+                                } finally {
+                                  setMemberApplyBusy(false);
+                                }
+                              })();
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={styles.memberFooterCtaText}>
+                      {memberApplyBusy ? tr("处理中...", "Applying...") : "OK"}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             </Pressable>
           </Pressable>
@@ -1216,6 +1664,13 @@ const styles = StyleSheet.create({
   msgRowMe: {
     justifyContent: "flex-end",
   },
+  msgAvatarWrap: {
+    width: 30,
+    height: 30,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   msgAvatar: {
     width: 30,
     height: 30,
@@ -1227,6 +1682,33 @@ const styles = StyleSheet.create({
   msgAvatarFallback: {
     alignItems: "center",
     justifyContent: "center",
+  },
+  avatarTag: {
+    position: "absolute",
+    left: 3,
+    right: 3,
+    bottom: -7,
+    height: 11,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
+  },
+  avatarTagBot: {
+    backgroundColor: "rgba(37,99,235,0.96)",
+    borderColor: "rgba(191,219,254,0.78)",
+  },
+  avatarTagNpc: {
+    backgroundColor: "rgba(15,118,110,0.96)",
+    borderColor: "rgba(167,243,208,0.78)",
+  },
+  avatarTagText: {
+    color: "#f8fafc",
+    fontSize: 7,
+    lineHeight: 8,
+    fontWeight: "900",
+    letterSpacing: 0.25,
   },
   bubble: {
     maxWidth: "86%",
@@ -1605,6 +2087,35 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.10)",
     backgroundColor: "rgba(255,255,255,0.05)",
   },
+  memberItemSelected: {
+    borderColor: "rgba(59,130,246,0.42)",
+    backgroundColor: "rgba(30,64,175,0.20)",
+  },
+  memberIdentity: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  memberAvatarWrap: {
+    width: 34,
+    height: 34,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  memberAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(15,23,42,0.55)",
+  },
+  memberAvatarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
   memberMain: {
     flex: 1,
     gap: 2,
@@ -1649,6 +2160,44 @@ const styles = StyleSheet.create({
   currentChipText: {
     color: "rgba(226,232,240,0.88)",
     fontSize: 11,
+    fontWeight: "900",
+  },
+  memberFooter: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    paddingTop: 4,
+  },
+  memberFooterGhost: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  memberFooterGhostText: {
+    color: "rgba(226,232,240,0.86)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  memberFooterCta: {
+    minHeight: 38,
+    minWidth: 82,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: "#e2e8f0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  memberFooterCtaDisabled: {
+    opacity: 0.55,
+  },
+  memberFooterCtaText: {
+    color: "#0b1220",
+    fontSize: 12,
     fontWeight: "900",
   },
 });

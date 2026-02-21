@@ -50,6 +50,7 @@ function RootStack() {
       <Stack.Screen name="groups" />
       <Stack.Screen name="miniapps" />
       <Stack.Screen name="config" />
+      <Stack.Screen name="entity-config" />
       <Stack.Screen name="town-map" />
       <Stack.Screen name="living-room" />
     </Stack>

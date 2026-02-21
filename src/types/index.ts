@@ -13,6 +13,11 @@ export interface ChatThread {
   phoneNumber?: string;
   supportsVideo?: boolean;
   tag?: string;
+  groupType?: "toc" | "tob" | string;
+  groupSubCategory?: string;
+  groupNpcName?: string;
+  groupNpcAgentId?: string;
+  groupCommanderUserId?: string;
 }
 
 export type UiTheme = "classic" | "neo";

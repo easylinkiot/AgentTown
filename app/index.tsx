@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -34,6 +34,30 @@ import {
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
 import { ChatThread, FriendRequest } from "@/src/types";
+
+type GroupCategoryOption = {
+  key: string;
+  groupType: "toc" | "tob";
+  zh: string;
+  en: string;
+};
+
+const GROUP_CATEGORY_OPTIONS: GroupCategoryOption[] = [
+  { key: "toc_learning", groupType: "toc", zh: "学习群", en: "Learning" },
+  { key: "toc_interest", groupType: "toc", zh: "兴趣群", en: "Interest" },
+  { key: "toc_local_life", groupType: "toc", zh: "本地生活", en: "Local Life" },
+  { key: "tob_inventory", groupType: "tob", zh: "库存", en: "Inventory" },
+  { key: "tob_after_sales", groupType: "tob", zh: "售后", en: "After-sales" },
+  { key: "tob_training", groupType: "tob", zh: "培训", en: "Training" },
+  { key: "tob_pricing", groupType: "tob", zh: "价格", en: "Pricing" },
+  { key: "tob_promotion", groupType: "tob", zh: "促销", en: "Promotion" },
+  { key: "tob_ordering", groupType: "tob", zh: "订货", en: "Ordering" },
+];
+
+function groupTypeFromSubCategory(subCategory: string): "toc" | "tob" {
+  const found = GROUP_CATEGORY_OPTIONS.find((item) => item.key === subCategory);
+  return found?.groupType || "toc";
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -73,6 +97,9 @@ export default function HomeScreen() {
 
   const [groupName, setGroupName] = useState("");
   const [groupAvatar, setGroupAvatar] = useState("");
+  const [groupSubCategory, setGroupSubCategory] = useState<string>("toc_learning");
+  const [groupNpcName, setGroupNpcName] = useState("");
+  const [groupCommanderUserId, setGroupCommanderUserId] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
 
   const list = useMemo(() => {
@@ -96,16 +123,33 @@ export default function HomeScreen() {
         .filter((f) => {
           return f.kind === "bot";
         })
-        .map((f) => ({ id: `friend:${f.id}`, avatar: f.avatar })),
+        .map((f) => ({
+          id: `friend:${f.id}`,
+          entityId: f.userId || f.id,
+          name: f.name,
+          avatar: f.avatar,
+          entityType: "bot" as const,
+          badge: "Bot" as const,
+        })),
       ...agents
         .filter((a) => {
+          const id = (a.id || "").trim();
           const name = (a.name || "").trim();
-          if (a.id === "agent_mybot") return false;
+          if (!id) return false;
+          if (id === "agent_mybot") return false;
+          if (id.startsWith("agent_userbot_")) return false;
           if (assistantNameEN && name === assistantNameEN) return false;
           if (assistantNameZH && name === assistantNameZH) return false;
           return true;
         })
-        .map((a) => ({ id: `agent:${a.id}`, avatar: a.avatar })),
+        .map((a) => ({
+          id: `agent:${a.id}`,
+          entityId: a.id,
+          name: a.name,
+          avatar: a.avatar,
+          entityType: "npc" as const,
+          badge: "NPC" as const,
+        })),
     ].filter((x) => !!x.avatar);
     return items.slice(0, 9);
   }, [agents, friends, user?.displayName, user?.id]);
@@ -180,6 +224,66 @@ export default function HomeScreen() {
       },
     });
   };
+
+  const openEntityConfig = useCallback(
+    (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
+      if (entity.entityType === "human" && entity.entityId && entity.entityId === (user?.id || "")) {
+        router.push("/config" as never);
+        return;
+      }
+      router.push({
+        pathname: "/entity-config",
+        params: {
+          entityType: entity.entityType,
+          entityId: entity.entityId || "",
+          name: entity.name || "",
+          avatar: entity.avatar || "",
+        },
+      });
+    },
+    [router, user?.id]
+  );
+
+  const openThreadAvatarConfig = useCallback(
+    (thread: ChatThread) => {
+      const threadID = (thread.id || "").trim();
+      if (threadID === "mybot" || threadID === "agent_mybot" || threadID.startsWith("agent_userbot_")) {
+        openEntityConfig({
+          entityType: "bot",
+          entityId: threadID === "mybot" ? "agent_mybot" : threadID,
+          name: thread.name,
+          avatar: thread.avatar,
+        });
+        return;
+      }
+      if (threadID.startsWith("agent_")) {
+        openEntityConfig({
+          entityType: "npc",
+          entityId: threadID,
+          name: thread.name,
+          avatar: thread.avatar,
+        });
+        return;
+      }
+      const linkedFriend = friends.find((item) => item.threadId === threadID);
+      if (linkedFriend) {
+        openEntityConfig({
+          entityType: linkedFriend.kind === "bot" ? "bot" : "human",
+          entityId: linkedFriend.userId || linkedFriend.id,
+          name: linkedFriend.name,
+          avatar: linkedFriend.avatar,
+        });
+        return;
+      }
+      openEntityConfig({
+        entityType: "npc",
+        entityId: thread.groupNpcAgentId || threadID,
+        name: thread.groupNpcName || thread.name,
+        avatar: thread.avatar,
+      });
+    },
+    [friends, openEntityConfig]
+  );
 
   const handleCreateFriend = async (candidate: DiscoverUser) => {
     if (!candidate?.id || addingUserId) return;
@@ -273,11 +377,18 @@ export default function HomeScreen() {
         name: safeName,
         avatar: groupAvatar.trim() || undefined,
         memberCount: 1,
+        groupType: groupTypeFromSubCategory(groupSubCategory),
+        groupSubCategory,
+        groupNpcName: groupNpcName.trim() || undefined,
+        groupCommanderUserId: groupCommanderUserId.trim() || undefined,
       });
       setGroupModal(false);
       setPeopleModal(false);
       setGroupName("");
       setGroupAvatar("");
+      setGroupSubCategory("toc_learning");
+      setGroupNpcName("");
+      setGroupCommanderUserId("");
       if (created) {
         handleOpenThread(created);
       }
@@ -351,7 +462,13 @@ export default function HomeScreen() {
               data={list}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
-                <ChatListItem chat={item} language={language} theme="neo" onPress={() => handleOpenThread(item)} />
+                <ChatListItem
+                  chat={item}
+                  language={language}
+                  theme="neo"
+                  onPress={() => handleOpenThread(item)}
+                  onAvatarPress={openThreadAvatarConfig}
+                />
               )}
               contentContainerStyle={styles.listContent}
               ListEmptyComponent={
@@ -372,10 +489,29 @@ export default function HomeScreen() {
                 contentContainerStyle={styles.presenceRow}
               >
                 {presence.map((item) => (
-                  <View key={item.id} style={styles.presenceItem}>
+                  <Pressable
+                    key={item.id}
+                    style={styles.presenceItem}
+                    onPress={() =>
+                      openEntityConfig({
+                        entityType: item.entityType,
+                        entityId: item.entityId,
+                        name: item.name,
+                        avatar: item.avatar,
+                      })
+                    }
+                  >
                     <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
+                    <View
+                      style={[
+                        styles.presenceTypeTag,
+                        item.badge === "NPC" ? styles.presenceTypeTagNpc : styles.presenceTypeTagBot,
+                      ]}
+                    >
+                      <Text style={styles.presenceTypeTagText}>{item.badge}</Text>
+                    </View>
                     <View style={styles.presenceDot} />
-                  </View>
+                  </Pressable>
                 ))}
               </ScrollView>
             ) : (
@@ -501,7 +637,27 @@ export default function HomeScreen() {
                     <Text style={styles.requestTitle}>{tr("好友邀请", "Friend Requests")}</Text>
                     {friendRequests.map((req) => (
                       <View key={req.id} style={styles.requestItem}>
-                        <Image source={{ uri: req.fromAvatar || "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200" }} style={styles.candidateAvatar} />
+                        <Pressable
+                          onPress={() =>
+                            openEntityConfig({
+                              entityType: "human",
+                              entityId: req.fromUserId,
+                              name: req.fromName || "",
+                              avatar:
+                                req.fromAvatar ||
+                                "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200",
+                            })
+                          }
+                        >
+                          <Image
+                            source={{
+                              uri:
+                                req.fromAvatar ||
+                                "https://img.freepik.com/free-psd/3d-illustration-human-avatar-profile_23-2150671142.jpg?w=200",
+                            }}
+                            style={styles.candidateAvatar}
+                          />
+                        </Pressable>
                         <View style={styles.candidateBody}>
                           <Text numberOfLines={1} style={styles.candidateName}>
                             {req.fromName || tr("未知用户", "Unknown User")}
@@ -544,7 +700,19 @@ export default function HomeScreen() {
                         disabled={Boolean(addingUserId)}
                         onPress={() => handleCreateFriend(candidate)}
                       >
-                        <Image source={{ uri: candidate.avatar }} style={styles.candidateAvatar} />
+                        <Pressable
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            openEntityConfig({
+                              entityType: "human",
+                              entityId: candidate.id,
+                              name: candidate.displayName,
+                              avatar: candidate.avatar,
+                            });
+                          }}
+                        >
+                          <Image source={{ uri: candidate.avatar }} style={styles.candidateAvatar} />
+                        </Pressable>
                         <View style={styles.candidateBody}>
                           <Text numberOfLines={1} style={styles.candidateName}>
                             {candidate.displayName}
@@ -593,8 +761,64 @@ export default function HomeScreen() {
                 placeholderTextColor="rgba(148,163,184,0.9)"
                 style={styles.input}
               />
+              <Text style={styles.requestTitle}>{tr("群类型子分类", "Group sub-category")}</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                {GROUP_CATEGORY_OPTIONS.map((item) => {
+                  const active = groupSubCategory === item.key;
+                  return (
+                    <Pressable
+                      key={item.key}
+                      style={[
+                        {
+                          minHeight: 38,
+                          paddingHorizontal: 12,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: "rgba(255,255,255,0.14)",
+                          backgroundColor: active ? "rgba(37,99,235,0.28)" : "rgba(15,23,42,0.55)",
+                        },
+                      ]}
+                      onPress={() => setGroupSubCategory(item.key)}
+                    >
+                      <Text
+                        style={{
+                          color: active ? "rgba(219,234,254,0.98)" : "rgba(203,213,225,0.92)",
+                          fontSize: 13,
+                          fontWeight: "800",
+                        }}
+                      >
+                        {tr(item.zh, item.en)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <TextInput
+                value={groupNpcName}
+                onChangeText={setGroupNpcName}
+                placeholder={tr("群 NPC 名称（可选）", "Group NPC name (optional)")}
+                placeholderTextColor="rgba(148,163,184,0.9)"
+                style={styles.input}
+              />
+              <TextInput
+                value={groupCommanderUserId}
+                onChangeText={setGroupCommanderUserId}
+                placeholder={tr("可发号施令用户ID（可选）", "Command userId (optional)")}
+                placeholderTextColor="rgba(148,163,184,0.9)"
+                style={styles.input}
+              />
               <View style={styles.formFooter}>
-                <Pressable style={styles.formGhost} onPress={() => setGroupModal(false)}>
+                <Pressable
+                  style={styles.formGhost}
+                  onPress={() => {
+                    setGroupModal(false);
+                    setGroupSubCategory("toc_learning");
+                    setGroupNpcName("");
+                    setGroupCommanderUserId("");
+                  }}
+                >
                   <Text style={styles.formGhostText}>{tr("取消", "Cancel")}</Text>
                 </Pressable>
                 <Pressable
@@ -754,6 +978,32 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+  },
+  presenceTypeTag: {
+    position: "absolute",
+    left: 6,
+    right: 6,
+    bottom: -8,
+    height: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  presenceTypeTagBot: {
+    backgroundColor: "rgba(37,99,235,0.95)",
+    borderColor: "rgba(191,219,254,0.78)",
+  },
+  presenceTypeTagNpc: {
+    backgroundColor: "rgba(15,118,110,0.95)",
+    borderColor: "rgba(167,243,208,0.78)",
+  },
+  presenceTypeTagText: {
+    color: "#f8fafc",
+    fontSize: 8,
+    lineHeight: 9,
+    fontWeight: "900",
+    letterSpacing: 0.3,
   },
   presenceAdd: {
     width: 46,
