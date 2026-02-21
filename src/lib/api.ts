@@ -17,6 +17,70 @@ import {
   ThreadMemberType,
 } from "@/src/types";
 
+// --- AgentTown API (ebike project) DTOs ---
+export type ATTargetType = "self" | "user" | "group" | "user_bot";
+
+export interface ATSession {
+  id: string;
+  session_type: string;
+  target_type: ATTargetType;
+  target_id: string;
+  bot_owner_user_id?: string;
+  title?: string;
+  last_message_at?: string;
+  message_count?: number;
+  last_message_preview?: string;
+}
+
+export interface ATMessage {
+  id: string;
+  session_id: string;
+  target_type: ATTargetType;
+  target_id: string;
+  seq_no: number;
+  role: "user" | "assistant" | "tool" | string;
+  message_type?: string;
+  content: string;
+  reply_to_message_id?: string;
+  tool_name?: string;
+  tool_input?: string;
+  tool_output?: string;
+  created_at?: string;
+}
+
+export interface ATChatCompletionsRequest {
+  stream: true;
+  input: string;
+  prompt?: string;
+  session_id?: string;
+  target_type: ATTargetType;
+  target_id?: string;
+  bot_owner_user_id?: string;
+  skill_ids?: string[];
+}
+
+export interface ATChatAssistRequest {
+  stream: true;
+  action: "auto_reply" | "add_task" | "ask_anything" | string;
+  target_type: ATTargetType;
+  target_id: string;
+  selected_message_id?: string;
+  selected_message_content?: string;
+  session_id?: string;
+}
+
+export interface ATTaskPayload {
+  target_type: ATTargetType;
+  target_id: string;
+  title: string;
+  description?: string;
+  status?: "todo" | "doing" | "done" | "cancelled";
+  due_at?: string;
+  reminder_at?: string;
+  recurrence_rule?: string;
+  priority?: "low" | "medium" | "high";
+}
+
 export interface BootstrapPayload extends AppBootstrapState {}
 
 export interface AuthSessionPayload {
@@ -190,6 +254,7 @@ export interface RoleRepliesOutput {
 }
 
 const DEFAULT_API_BASE_URL = "https://agenttown-api.kittens.cloud";
+const AT_PREFIX = "/api/v1/agent-town";
 
 type ApiErrorBody = {
   error?: {
@@ -383,6 +448,193 @@ async function apiFetch<T>(
   }
 
   return (await response.json()) as T;
+}
+
+// ---------- AgentTown (ebike) SSE helper ----------
+type SSEHandler = (event: string, data: any) => void;
+
+async function sseRequest(path: string, body: any, onEvent: SSEHandler, abort?: AbortSignal) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const resp = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal: abort,
+  });
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text();
+    throw new ApiError({
+      status: resp.status,
+      method: "POST",
+      path,
+      baseUrl: getApiBaseUrl(),
+      message: sanitizeRawErrorText(text) || "SSE request failed",
+      code: undefined,
+      details: text,
+      requestId: coerceString(resp.headers.get("x-request-id")) || undefined,
+    });
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 2);
+      if (!chunk) continue;
+      const lines = chunk.split("\n");
+      let event = "message";
+      let data = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          event = line.slice(6).trim() || "message";
+        } else if (line.startsWith("data:")) {
+          data += line.slice(5).trim();
+        }
+      }
+      if (!data) continue;
+      try {
+        onEvent(event, JSON.parse(data));
+      } catch {
+        onEvent(event, data);
+      }
+    }
+  }
+}
+
+// ---------- AgentTown (ebike) API ----------
+export async function atListSessions(params?: { target_type?: ATTargetType; target_id?: string; limit?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.target_type) qs.set("target_type", params.target_type);
+  if (params?.target_id) qs.set("target_id", params.target_id);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<ATSession[]>(`${AT_PREFIX}/chat/sessions${query}`);
+}
+
+export async function atListSessionMessages(
+  sessionId: string,
+  opts?: {
+    role?: string;
+    message_type?: string;
+    include_tool?: boolean;
+    before_seq_no?: number;
+    after_seq_no?: number;
+    limit?: number;
+  }
+) {
+  const qs = new URLSearchParams();
+  if (opts?.role) qs.set("role", opts.role);
+  if (opts?.message_type) qs.set("message_type", opts.message_type);
+  if (opts?.include_tool) qs.set("include_tool", "true");
+  if (opts?.before_seq_no) qs.set("before_seq_no", String(opts.before_seq_no));
+  if (opts?.after_seq_no) qs.set("after_seq_no", String(opts.after_seq_no));
+  if (opts?.limit) qs.set("limit", String(opts.limit));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<ATMessage[]>(`${AT_PREFIX}/chat/sessions/${encodeURIComponent(sessionId)}/messages${query}`);
+}
+
+export async function atChatCompletionsStream(
+  payload: ATChatCompletionsRequest,
+  onEvent: SSEHandler,
+  abort?: AbortSignal
+) {
+  return sseRequest(`${AT_PREFIX}/chat/completions`, payload, onEvent, abort);
+}
+
+export async function atChatAssistStream(payload: ATChatAssistRequest, onEvent: SSEHandler, abort?: AbortSignal) {
+  return sseRequest(`${AT_PREFIX}/chat/assist`, payload, onEvent, abort);
+}
+
+export async function atCreateTask(payload: ATTaskPayload) {
+  return apiFetch<{ id: string }>(`${AT_PREFIX}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function atListTasks(params?: { status?: string; limit?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<any[]>(`${AT_PREFIX}/tasks${query}`);
+}
+
+export async function atUpdateTask(taskId: string, payload: Partial<ATTaskPayload>) {
+  return apiFetch<{ ok: boolean }>(`${AT_PREFIX}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function atDeleteTask(taskId: string) {
+  return apiFetch<{ ok: boolean }>(`${AT_PREFIX}/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+}
+
+export async function atGetBotSettings() {
+  return apiFetch<{ bot_enabled: boolean; visibility: string; bot_prompt: string }>(`${AT_PREFIX}/bot/settings`);
+}
+
+export async function atUpdateBotSettings(payload: { bot_enabled?: boolean; visibility?: string; bot_prompt?: string }) {
+  return apiFetch<{ ok: boolean }>(`${AT_PREFIX}/bot/settings`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function atListMiniApps() {
+  return apiFetch<any[]>(`${AT_PREFIX}/mini-apps`);
+}
+
+export async function atMiniAppChatStream(
+  appId: string,
+  payload: { stream: true; session_id?: string; input: string; prompt?: string },
+  onEvent: SSEHandler,
+  abort?: AbortSignal
+) {
+  return sseRequest(`${AT_PREFIX}/mini-apps/${encodeURIComponent(appId)}/chat/completions`, payload, onEvent, abort);
+}
+
+// ---------- Mapping helpers ----------
+export function mapATSessionToThread(item: ATSession): ChatThread {
+  return {
+    id: item.id,
+    name: item.title || item.id,
+    avatar: "", // server未提供，前端可后续填充
+    message: item.last_message_preview || "",
+    time: item.last_message_at || "",
+    unreadCount: 0,
+    isGroup: item.target_type === "group",
+    memberCount: item.message_count ? Number(item.message_count) : undefined,
+    tag: item.session_type,
+    groupType: item.target_type === "group" ? "toc" : undefined,
+  };
+}
+
+export function mapATMessageToConversation(msg: ATMessage, currentUserId?: string): ConversationMessage {
+  const isMe = currentUserId ? msg.role === "user" && msg.target_id === currentUserId : msg.role === "user";
+  return {
+    id: msg.id || String(msg.seq_no),
+    threadId: msg.session_id,
+    senderId: msg.role === "user" ? msg.target_id : undefined,
+    senderName: msg.role === "user" ? "Me" : "Assistant",
+    senderAvatar: "",
+    senderType: msg.role === "assistant" ? "bot" : "human",
+    content: msg.content || "",
+    type: msg.message_type || "text",
+    isMe,
+    time: msg.created_at,
+    replyContext: undefined,
+    voiceDuration: undefined,
+  };
 }
 
 export async function authRegister(payload: {
