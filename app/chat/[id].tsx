@@ -1641,6 +1641,7 @@ const styles = StyleSheet.create({
   },
   sysRow: {
     alignItems: "center",
+    marginBottom: 10,
   },
   sysPill: {
     paddingHorizontal: 12,
@@ -1660,6 +1661,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     alignItems: "flex-end",
     gap: 8,
+    marginBottom: 10,
   },
   msgRowMe: {
     justifyContent: "flex-end",
