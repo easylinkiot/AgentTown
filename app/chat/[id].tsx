@@ -3,9 +3,12 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Dimensions,
+  Easing,
   GestureResponderEvent,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -233,6 +236,40 @@ export default function ChatDetailScreen() {
   useEffect(() => {
     messagesByThreadRef.current = messagesByThread;
   }, [messagesByThread]);
+
+  const keyboardPadding = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const isIOS = Platform.OS === "ios";
+    const animateTo = (toValue: number, duration: number) => {
+      Animated.timing(keyboardPadding, {
+        toValue,
+        duration,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    };
+    const handleFrame = (event?: { endCoordinates?: { height?: number }; duration?: number }) => {
+      const height = Math.max(0, event?.endCoordinates?.height ?? 0);
+      const target = Math.max(0, height - insets.bottom);
+      animateTo(target, event?.duration ?? (isIOS ? 250 : 200));
+    };
+    const handleHide = (event?: { duration?: number }) => {
+      animateTo(0, event?.duration ?? (isIOS ? 200 : 180));
+    };
+    const showEvent = isIOS ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = isIOS ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, handleFrame);
+    const hideSub = Keyboard.addListener(hideEvent, handleHide);
+    const changeSub = isIOS
+      ? Keyboard.addListener("keyboardWillChangeFrame", handleFrame)
+      : null;
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+      changeSub?.remove();
+    };
+  }, [insets.bottom, keyboardPadding]);
 
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
 
@@ -931,6 +968,8 @@ export default function ChatDetailScreen() {
     ]
   );
 
+  const ContainerView = Animated.View;
+  const containerStyle = [styles.container, { paddingBottom: keyboardPadding }];
 
   return (
     <KeyframeBackground>
@@ -938,9 +977,10 @@ export default function ChatDetailScreen() {
         <KeyboardAvoidingView
           style={styles.keyboardAvoid}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+          keyboardVerticalOffset={0}
+          enabled={false}
         >
-        <View style={styles.container}>
+        <ContainerView style={containerStyle}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
@@ -1045,6 +1085,7 @@ export default function ChatDetailScreen() {
               user={{ _id: giftedUserId, name: user?.displayName || "Me" }}
               renderInputToolbar={() => null}
               minInputToolbarHeight={0}
+              isKeyboardInternallyHandled={false}
               renderMessage={renderMessage}
               renderSystemMessage={renderSystemMessage}
               messagesContainerStyle={styles.messageContainer}
@@ -1103,7 +1144,7 @@ export default function ChatDetailScreen() {
               <Ionicons name="arrow-up" size={18} color="#0b1220" />
             </Pressable>
           </View>
-        </View>
+        </ContainerView>
         </KeyboardAvoidingView>
 
         <Modal visible={actionModal} transparent animationType="fade" onRequestClose={() => setActionModal(false)}>
