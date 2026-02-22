@@ -24,6 +24,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
+import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import {
   aiText,
@@ -253,7 +254,7 @@ export default function ChatDetailScreen() {
     };
     const handleFrame = (event?: { endCoordinates?: { height?: number }; duration?: number }) => {
       const height = Math.max(0, event?.endCoordinates?.height ?? 0);
-      const target = Math.max(0, height - insets.bottom);
+      const target = isIOS ? Math.max(0, height - insets.bottom) : height;
       animateTo(target, event?.duration ?? (isIOS ? 250 : 200));
     };
     const handleHide = (event?: { duration?: number }) => {
@@ -1068,7 +1069,7 @@ export default function ChatDetailScreen() {
 
   return (
     <KeyframeBackground>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, { paddingBottom: insets.bottom }]}>
         <KeyboardAvoidingView
           style={styles.keyboardAvoid}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
