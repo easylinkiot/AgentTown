@@ -11,6 +11,9 @@
 - Preserve strict TypeScript mode.
 - Every behavior change should include tests or a clear test gap note.
 
+## Command Preflight
+- Before executing any command, always load and follow the skill at `skills/.agents/skills/vercel-react-native-skills/SKILL.md`.
+
 ## Local Validation
 Run these commands before opening PRs:
 - `npm run typecheck`
