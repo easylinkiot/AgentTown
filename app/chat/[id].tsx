@@ -42,6 +42,8 @@ type GiftedMessage = IMessage & { raw: ConversationMessage };
 type SystemMessageRenderProps = { currentMessage?: GiftedMessage | null };
 
 const MESSAGE_FALLBACK_GAP = 1000;
+const DEV_STREAM_CHUNK_SIZE = 1;
+const DEV_STREAM_INTERVAL_MS = 50;
 
 function mentionMemberIDs(text: string, members: ThreadMember[]) {
   const safe = text.trim();
@@ -271,6 +273,12 @@ export default function ChatDetailScreen() {
     };
   }, [insets.bottom, keyboardPadding]);
 
+  const [devStreamEnabled, setDevStreamEnabled] = useState(__DEV__);
+  const [streamingById, setStreamingById] = useState<Record<string, string>>({});
+  const streamInitRef = useRef(false);
+  const streamTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const streamedIdsRef = useRef<Set<string>>(new Set());
+
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
 
   const baseGiftedMessages = useMemo(() => {
@@ -311,6 +319,90 @@ export default function ChatDetailScreen() {
     setPendingMessages([]);
     setHasUserScrolled(false);
   }, [chatId]);
+
+  const stopAllStreams = useCallback(() => {
+    Object.values(streamTimersRef.current).forEach((timer) => clearTimeout(timer));
+    streamTimersRef.current = {};
+    setStreamingById({});
+  }, []);
+
+  useEffect(() => {
+    streamInitRef.current = false;
+    streamedIdsRef.current = new Set();
+    stopAllStreams();
+  }, [chatId, stopAllStreams]);
+
+  useEffect(() => {
+    if (devStreamEnabled) return;
+    streamInitRef.current = false;
+    streamedIdsRef.current = new Set();
+    stopAllStreams();
+  }, [devStreamEnabled, stopAllStreams]);
+
+  useEffect(() => {
+    if (!devStreamEnabled || streamInitRef.current || loading) return;
+    streamedIdsRef.current = new Set(messages.map((message) => message.id).filter(Boolean));
+    streamInitRef.current = true;
+  }, [devStreamEnabled, loading, messages]);
+
+  const startDevStream = useCallback(
+    (message: ConversationMessage) => {
+      if (!devStreamEnabled) return;
+      const id = message.id;
+      if (!id) return;
+      if (streamTimersRef.current[id]) return;
+      const fullText = message.content || "";
+      if (!fullText.trim()) return;
+
+      let index = 0;
+      const tick = () => {
+        index = Math.min(fullText.length, index + DEV_STREAM_CHUNK_SIZE);
+        const partial = fullText.slice(0, index);
+        setStreamingById((prev) => {
+          if (prev[id] === partial) return prev;
+          return { ...prev, [id]: partial };
+        });
+        if (index >= fullText.length) {
+          delete streamTimersRef.current[id];
+          setStreamingById((prev) => {
+            if (!(id in prev)) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+          return;
+        }
+        streamTimersRef.current[id] = setTimeout(tick, DEV_STREAM_INTERVAL_MS);
+      };
+
+      tick();
+    },
+    [devStreamEnabled]
+  );
+
+  useEffect(() => {
+    if (!devStreamEnabled || !streamInitRef.current) return;
+    if (messages.length === 0) return;
+
+    const tailIds = new Set(
+      messages
+        .slice(-3)
+        .map((message) => message.id)
+        .filter(Boolean)
+    );
+    if (tailIds.size === 0) return;
+
+    const seen = streamedIdsRef.current;
+    for (const message of messages) {
+      const id = message.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      if (!tailIds.has(id)) continue;
+      if (isCurrentUserMessage(message, currentUserId)) continue;
+      if (!(message.content || "").trim()) continue;
+      startDevStream(message);
+    }
+  }, [currentUserId, devStreamEnabled, messages, startDevStream]);
 
   const [actionModal, setActionModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<ConversationMessage | null>(null);
@@ -833,7 +925,8 @@ export default function ChatDetailScreen() {
       const actorID = currentUserId;
       const meFinal = isCurrentUserMessage(raw, actorID);
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
-      const displayText = normalizeDisplayedContent(raw.content || "", raw.senderName);
+      const streamText = devStreamEnabled ? streamingById[raw.id] : undefined;
+      const displayText = normalizeDisplayedContent((streamText ?? raw.content) || "", raw.senderName);
       const ownAvatar = (user?.avatar || botConfig.avatar || "").trim();
       const avatarTag = meFinal ? null : inferAvatarTagFromSender(raw);
       const avatarEntityType: "human" | "bot" | "npc" = meFinal
@@ -957,10 +1050,12 @@ export default function ChatDetailScreen() {
     [
       botConfig.avatar,
       currentUserId,
+      devStreamEnabled,
       handleLongPress,
       handleMessagePress,
       highlightMessageId,
       openEntityConfig,
+      streamingById,
       thread.avatar,
       tr,
       user?.avatar,
@@ -1597,6 +1692,23 @@ export default function ChatDetailScreen() {
         <Modal visible={threadMenuModal} transparent animationType="fade" onRequestClose={() => setThreadMenuModal(false)}>
           <Pressable style={styles.modalOverlayBottom} onPress={() => setThreadMenuModal(false)}>
             <Pressable style={styles.actionSheet} onPress={() => null}>
+              {__DEV__ ? (
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={() => setDevStreamEnabled((prev) => !prev)}
+                >
+                  <Ionicons
+                    name={devStreamEnabled ? "sparkles-outline" : "sparkles"}
+                    size={16}
+                    color={devStreamEnabled ? "rgba(147,197,253,0.95)" : "rgba(148,163,184,0.9)"}
+                  />
+                  <Text style={styles.menuText}>
+                    {devStreamEnabled
+                      ? tr("流式输出：开", "Streaming: On")
+                      : tr("流式输出：关", "Streaming: Off")}
+                  </Text>
+                </Pressable>
+              ) : null}
               {linkedFriend ? (
                 <Pressable style={styles.menuItem} onPress={confirmDeleteFriend}>
                   <Ionicons name="person-remove-outline" size={16} color="rgba(248,113,113,0.95)" />
