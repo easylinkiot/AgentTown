@@ -1187,6 +1187,7 @@ export default function ChatDetailScreen() {
               messagesContainerStyle={styles.messageContainer}
               listViewProps={
                 {
+                  keyboardShouldPersistTaps: "never",
                   onEndReachedThreshold: 0.2,
                   onEndReached: () => void requestOlder(),
                   onScrollBeginDrag: () => {
