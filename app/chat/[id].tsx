@@ -186,6 +186,7 @@ export default function ChatDetailScreen() {
     removeChatThread,
     generateRoleReplies,
   } = useAgentTown();
+  const messagesByThreadRef = useRef(messagesByThread);
 
   const tr = (zh: string, en: string) => tx(language, zh, en);
 
@@ -229,6 +230,10 @@ export default function ChatDetailScreen() {
   const linkedFriend = useMemo(() => friends.find((item) => item.threadId === chatId), [chatId, friends]);
   const currentUserId = (user?.id || "").trim();
   const giftedUserId = currentUserId || "me";
+  useEffect(() => {
+    messagesByThreadRef.current = messagesByThread;
+  }, [messagesByThread]);
+
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
 
   const baseGiftedMessages = useMemo(() => {
@@ -254,18 +259,20 @@ export default function ChatDetailScreen() {
     return GiftedChat.append(baseGiftedMessages, filteredPending);
   }, [baseGiftedMessages, pendingMessages]);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => messages.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [failedDraft, setFailedDraft] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [hasUserScrolled, setHasUserScrolled] = useState(false);
 
   useEffect(() => {
     setHasMore(true);
     setLoadingOlder(false);
     setPendingMessages([]);
+    setHasUserScrolled(false);
   }, [chatId]);
 
   const [actionModal, setActionModal] = useState(false);
@@ -306,7 +313,8 @@ export default function ChatDetailScreen() {
     let mounted = true;
     const run = async () => {
       if (!chatId) return;
-      setLoading(true);
+      const prefetched = (messagesByThreadRef.current[chatId] || []).length > 0;
+      setLoading(!prefetched);
       setLoadError(null);
       try {
         await refreshThreadMessages(chatId);
@@ -483,7 +491,7 @@ export default function ChatDetailScreen() {
   );
 
   const requestOlder = async () => {
-    if (loadingOlder || !hasMore || !chatId) return;
+    if (!hasUserScrolled || loadingOlder || !hasMore || !chatId) return;
     setLoadingOlder(true);
     try {
       const added = await loadOlderMessages(chatId);
@@ -1046,6 +1054,7 @@ export default function ChatDetailScreen() {
                   onEndReached: () => void requestOlder(),
                   onScrollBeginDrag: () => {
                     isDraggingRef.current = true;
+                    setHasUserScrolled(true);
                   },
                   onScrollEndDrag: () => {
                     setTimeout(() => {
@@ -1056,9 +1065,9 @@ export default function ChatDetailScreen() {
                     isDraggingRef.current = false;
                   },
                   ListFooterComponent: loadingOlder ? (
-                    <Text style={styles.memberHint}>{tr("加载更早消息...", "Loading older...")}</Text>
-                  ) : hasMore ? (
-                    <Text style={styles.memberHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
+                    <Text style={styles.listFooterHint}>{tr("加载更早消息...", "Loading older...")}</Text>
+                  ) : hasMore && hasUserScrolled ? (
+                    <Text style={styles.listFooterHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
                   ) : null,
                 } as any
               }
@@ -2077,6 +2086,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     paddingVertical: 8,
+  },
+  listFooterHint: {
+    color: "rgba(148,163,184,0.95)",
+    fontSize: 12,
+    fontWeight: "800",
+    paddingVertical: 8,
+    textAlign: "center",
+    alignSelf: "center",
   },
   memberItem: {
     flexDirection: "row",
