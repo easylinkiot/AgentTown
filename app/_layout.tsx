@@ -49,6 +49,7 @@ function RootStack() {
       <Stack.Screen name="agents" />
       <Stack.Screen name="groups" />
       <Stack.Screen name="miniapps" />
+      <Stack.Screen name="miniapp/[id]" />
       <Stack.Screen name="config" />
       <Stack.Screen name="entity-config" />
       <Stack.Screen name="town-map" />
