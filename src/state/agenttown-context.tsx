@@ -281,6 +281,37 @@ function removeById<T extends { id: string }>(list: T[], id: string): T[] {
   return list.filter((entry) => entry.id !== id);
 }
 
+export function isMyBotThreadId(threadId: string): boolean {
+  const id = (threadId || "").trim().toLowerCase();
+  if (!id) return false;
+  return id === "mybot" || id === "agent_mybot" || id.startsWith("agent_userbot_");
+}
+
+export function syncMyBotThreads(threads: ChatThread[], config: BotConfig): ChatThread[] {
+  if (!Array.isArray(threads) || threads.length === 0) return threads;
+
+  const nextName = (config.name || "").trim();
+  const nextAvatar = (config.avatar || "").trim();
+  let changed = false;
+
+  const nextThreads = threads.map((thread) => {
+    if (!isMyBotThreadId(thread.id)) return thread;
+
+    const mergedName = nextName || thread.name;
+    const mergedAvatar = nextAvatar || thread.avatar || DEFAULT_MYBOT_AVATAR;
+    if (thread.name === mergedName && thread.avatar === mergedAvatar) return thread;
+
+    changed = true;
+    return {
+      ...thread,
+      name: mergedName,
+      avatar: mergedAvatar,
+    };
+  });
+
+  return changed ? nextThreads : threads;
+}
+
 function updateThreadPreview(threads: ChatThread[], threadId: string, preview: string): ChatThread[] {
   const next = [...threads];
   const index = next.findIndex((item) => item.id === threadId);
@@ -353,10 +384,15 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const refreshAll = useCallback(async () => {
     const payload = await fetchBootstrap();
 
-    if (payload.botConfig) setBotConfig(payload.botConfig);
+    if (payload.botConfig) {
+      setBotConfig(payload.botConfig);
+      setChatThreads((prev) => syncMyBotThreads(prev, payload.botConfig));
+    }
     if (Array.isArray(payload.tasks)) setTasks(payload.tasks);
     if (Array.isArray(payload.chatThreads)) {
-      setChatThreads(payload.chatThreads);
+      setChatThreads(
+        payload.botConfig ? syncMyBotThreads(payload.chatThreads, payload.botConfig) : payload.chatThreads
+      );
     }
     if (payload.messages && typeof payload.messages === "object") {
       setMessagesByThread(payload.messages);
@@ -638,7 +674,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             if (members.some((item) => item.id === payload.id)) {
               return prev;
             }
-	  return {
+            return {
               ...prev,
               [threadId]: [...members, { ...payload, threadId }],
             };
@@ -662,6 +698,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const payload = event.payload as BotConfig;
           if (!payload?.name) break;
           setBotConfig(payload);
+          setChatThreads((prev) => syncMyBotThreads(prev, payload));
           break;
         }
         case "miniapp.generated":
@@ -766,6 +803,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       bootstrapReady,
       updateBotConfig: (next) => {
         setBotConfig(next);
+        setChatThreads((prev) => syncMyBotThreads(prev, next));
         void saveBotConfig(next).catch(() => {
           // Keep optimistic state.
         });
@@ -903,6 +941,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         try {
           const updated = install ? await installBotSkillApi(skillId) : await uninstallBotSkillApi(skillId);
           setBotConfig(updated);
+          setChatThreads((prev) => syncMyBotThreads(prev, updated));
         } catch {
           // Keep optimistic state.
         }
