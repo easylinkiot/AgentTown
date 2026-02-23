@@ -19,6 +19,7 @@ import {
   generateMiniApp as generateMiniAppApi,
   generateRoleReplies as generateRoleRepliesApi,
   installMiniApp as installMiniAppApi,
+  installBotSkill as installBotSkillApi,
   listThreadMembers as listThreadMembersApi,
   listThreadMessages as listThreadMessagesApi,
   patchTask as patchTaskApi,
@@ -29,6 +30,7 @@ import {
   sendThreadMessage as sendThreadMessageApi,
   subscribeRealtime,
   toggleAgentSkill as toggleAgentSkillApi,
+  uninstallBotSkill as uninstallBotSkillApi,
   type AddThreadMemberInput,
   type CreateAgentInput,
   type CreateCustomSkillInput,
@@ -100,6 +102,7 @@ interface AgentTownContextValue {
   removeFriend: (friendId: string) => Promise<void>;
   createAgent: (input: CreateAgentInput) => Promise<Agent | null>;
   toggleAgentSkill: (agentId: string, skillId: string, install: boolean) => Promise<void>;
+  toggleBotSkill: (skillId: string, install: boolean) => Promise<void>;
   createGroup: (input: {
     name: string;
     avatar?: string;
@@ -655,6 +658,12 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           });
           break;
         }
+        case "bot.updated": {
+          const payload = event.payload as BotConfig;
+          if (!payload?.name) break;
+          setBotConfig(payload);
+          break;
+        }
         case "miniapp.generated":
         case "miniapp.updated": {
           const payload = event.payload as MiniApp;
@@ -688,6 +697,42 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const payload = event.payload as CustomSkill;
           if (!payload?.id) break;
           setCustomSkills((prev) => upsertById(prev, payload, true));
+          break;
+        }
+        case "skill.custom.updated": {
+          const payload = event.payload as CustomSkill;
+          if (!payload?.id) break;
+          setCustomSkills((prev) => upsertById(prev, payload, true));
+          setSkillCatalog((prev) =>
+            prev.map((item) =>
+              item.id === payload.id
+                ? {
+                    ...item,
+                    name: payload.name,
+                    description: payload.description || "Custom Markdown Skill",
+                    permissionScope: payload.permissionScope,
+                    version: payload.version,
+                  }
+                : item
+            )
+          );
+          break;
+        }
+        case "skill.custom.deleted": {
+          const payload = event.payload as { id?: string };
+          if (!payload?.id) break;
+          setCustomSkills((prev) => prev.filter((item) => item.id !== payload.id));
+          setSkillCatalog((prev) => prev.filter((item) => item.id !== payload.id));
+          setBotConfig((prev) => ({
+            ...prev,
+            installedSkillIds: prev.installedSkillIds.filter((id) => id !== payload.id),
+          }));
+          setAgents((prev) =>
+            prev.map((agent) => ({
+              ...agent,
+              installedSkillIds: agent.installedSkillIds.filter((id) => id !== payload.id),
+            }))
+          );
           break;
         }
         default:
@@ -845,6 +890,21 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           setAgents((prev) => upsertById(prev, updated, true));
         } catch {
           // Keep local state untouched.
+        }
+      },
+      toggleBotSkill: async (skillId, install) => {
+        if (!skillId) return;
+        setBotConfig((prev) => ({
+          ...prev,
+          installedSkillIds: install
+            ? Array.from(new Set([...prev.installedSkillIds, skillId]))
+            : prev.installedSkillIds.filter((id) => id !== skillId),
+        }));
+        try {
+          const updated = install ? await installBotSkillApi(skillId) : await uninstallBotSkillApi(skillId);
+          setBotConfig(updated);
+        } catch {
+          // Keep optimistic state.
         }
       },
       createGroup: async (input) => {
