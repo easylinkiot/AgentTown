@@ -48,6 +48,15 @@ const emptySkillForm: SkillForm = {
   example: "",
 };
 
+interface RuntimeSkillItem {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  permissionScope: string;
+  source: "catalog" | "custom";
+}
+
 const NEO_CATEGORY_COLORS = ["#3b82f6", "#8b5cf6", "#6366f1", "#ec4899"];
 const NEO_CATEGORY_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   "code-slash-outline",
@@ -61,6 +70,9 @@ export default function ConfigScreen() {
   const {
     botConfig,
     updateBotConfig,
+    toggleBotSkill,
+    skillCatalog,
+    customSkills,
     uiTheme,
     updateUiTheme,
     language,
@@ -97,10 +109,61 @@ export default function ConfigScreen() {
     setProfileEmail(user?.email || "");
   }, [user?.displayName, user?.email, user?.id]);
 
+  useEffect(() => {
+    setName(botConfig.name);
+    setAvatar(botConfig.avatar);
+    setInstruction(botConfig.systemInstruction);
+    setDocuments(botConfig.documents || []);
+    setKnowledgeKeywords(botConfig.knowledgeKeywords || []);
+    setInstalledSkillIds(new Set(botConfig.installedSkillIds || []));
+  }, [botConfig]);
+
+  const runtimeSkills = useMemo<RuntimeSkillItem[]>(() => {
+    const builtins = skillCatalog.map((item) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      version: item.version,
+      permissionScope: item.permissionScope,
+      source: "catalog" as const,
+    }));
+    const customs = customSkills
+      .filter((item) => item.enabled)
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description || tr("自定义技能", "Custom skill"),
+        version: item.version,
+        permissionScope: item.permissionScope,
+        source: "custom" as const,
+      }));
+
+    const seen = new Set<string>();
+    const merged: RuntimeSkillItem[] = [];
+    for (const item of [...builtins, ...customs]) {
+      if (!item.id || seen.has(item.id)) continue;
+      seen.add(item.id);
+      merged.push(item);
+    }
+    return merged;
+  }, [customSkills, skillCatalog, tr]);
+
+  const runtimeSkillMap = useMemo(() => {
+    const map = new Map<string, RuntimeSkillItem>();
+    for (const item of runtimeSkills) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [runtimeSkills]);
+
   const installedSkills = useMemo(() => {
-    const allSkills = MARKET_DATA.flatMap((category) => category.items);
-    return allSkills.filter((item) => installedSkillIds.has(item.id));
-  }, [installedSkillIds]);
+    const out: RuntimeSkillItem[] = [];
+    for (const id of installedSkillIds) {
+      const found = runtimeSkillMap.get(id);
+      if (found) out.push(found);
+    }
+    return out;
+  }, [installedSkillIds, runtimeSkillMap]);
 
   const randomizeAvatar = () => {
     const next = AVATAR_PRESETS[Math.floor(Math.random() * AVATAR_PRESETS.length)];
@@ -210,16 +273,25 @@ export default function ConfigScreen() {
   };
 
   const installSkill = async (item: MarketItem) => {
-    setInstallingSkillId(item.id);
-    setTimeout(() => {
-      setInstalledSkillIds((prev) => {
-        const next = new Set(prev);
-        next.add(item.id);
-        return next;
-      });
-      setInstruction((prev) => `${prev}\n\n### Installed Module: ${item.name}\n${item.fullDetail}`);
+    setViewingSkill(item);
+  };
+
+  const toggleRuntimeSkill = async (skillId: string, install: boolean) => {
+    setInstallingSkillId(skillId);
+    setInstalledSkillIds((prev) => {
+      const next = new Set(prev);
+      if (install) {
+        next.add(skillId);
+      } else {
+        next.delete(skillId);
+      }
+      return next;
+    });
+    try {
+      await toggleBotSkill(skillId, install);
+    } finally {
       setInstallingSkillId(null);
-    }, 900);
+    }
   };
 
   if (isNeo) {
@@ -360,35 +432,49 @@ export default function ConfigScreen() {
             </View>
 
             <View style={styles.neoStoreList}>
-              {MARKET_DATA.map((category, index) => (
-                <Pressable
-                  key={category.id}
-                  style={styles.neoStoreItem}
-                  onPress={() => setViewingSkill(category.items[0] ?? null)}
-                >
-                  <View
-                    style={[
-                      styles.neoStoreIconWrap,
-                      { backgroundColor: NEO_CATEGORY_COLORS[index % NEO_CATEGORY_COLORS.length] },
-                    ]}
-                  >
-                    <Ionicons
-                      name={NEO_CATEGORY_ICONS[index % NEO_CATEGORY_ICONS.length]}
-                      size={18}
-                      color="white"
-                    />
-                  </View>
-                  <View style={styles.neoStoreItemBody}>
-                    <Text style={styles.neoStoreItemTitle}>{`${index + 1}. ${category.title}`}</Text>
-                    <Text style={styles.neoStoreItemSub} numberOfLines={1}>
-                      {category.subtitle}
-                    </Text>
-                  </View>
-                  <View style={styles.neoStoreChevron}>
-                    <Ionicons name="chevron-forward" size={16} color="rgba(226,232,240,0.75)" />
-                  </View>
-                </Pressable>
-              ))}
+              {runtimeSkills.length === 0 ? (
+                <Text style={styles.neoStoreItemSub}>{tr("暂无可安装技能", "No skills available")}</Text>
+              ) : (
+                runtimeSkills.map((skill, index) => {
+                  const installed = installedSkillIds.has(skill.id);
+                  const installing = installingSkillId === skill.id;
+                  return (
+                    <View key={skill.id} style={styles.neoStoreItem}>
+                      <View
+                        style={[
+                          styles.neoStoreIconWrap,
+                          { backgroundColor: NEO_CATEGORY_COLORS[index % NEO_CATEGORY_COLORS.length] },
+                        ]}
+                      >
+                        <Ionicons
+                          name={NEO_CATEGORY_ICONS[index % NEO_CATEGORY_ICONS.length]}
+                          size={18}
+                          color="white"
+                        />
+                      </View>
+                      <View style={styles.neoStoreItemBody}>
+                        <Text style={styles.neoStoreItemTitle}>{skill.name}</Text>
+                        <Text style={styles.neoStoreItemSub} numberOfLines={1}>
+                          {skill.permissionScope || skill.description}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={styles.installBtn}
+                        disabled={installing}
+                        onPress={() => void toggleRuntimeSkill(skill.id, !installed)}
+                      >
+                        <Text style={styles.installBtnText}>
+                          {installing
+                            ? tr("处理中...", "Working...")
+                            : installed
+                              ? tr("移除", "Remove")
+                              : tr("安装", "Install")}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })
+              )}
             </View>
           </View>
 
@@ -801,6 +887,42 @@ export default function ConfigScreen() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>{tr("MyBot 技能商店（运行时）", "MyBot Skill Store (Runtime)")}</Text>
+          {runtimeSkills.length === 0 ? (
+            <Text style={styles.emptyText}>{tr("暂无可安装技能。", "No skills available.")}</Text>
+          ) : (
+            runtimeSkills.map((skill) => {
+              const installed = installedSkillIds.has(skill.id);
+              const installing = installingSkillId === skill.id;
+              return (
+                <View style={styles.marketItemCard} key={skill.id}>
+                  <View style={styles.marketItemHeader}>
+                    <Text style={styles.marketItemTitle}>{skill.name}</Text>
+                    <Pressable
+                      style={styles.installBtn}
+                      onPress={() => void toggleRuntimeSkill(skill.id, !installed)}
+                      disabled={installing}
+                    >
+                      <Text style={styles.installBtnText}>
+                        {installing
+                          ? tr("处理中...", "Working...")
+                          : installed
+                            ? tr("移除", "Remove")
+                            : tr("安装", "Install")}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.marketItemDesc}>{skill.description}</Text>
+                  <Text style={styles.skillMetaText}>
+                    {skill.version} · {skill.permissionScope} · {skill.source}
+                  </Text>
+                </View>
+              );
+            })
+          )}
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("技能市场", "Skill Marketplace")}</Text>
           {MARKET_DATA.map((category) => (
             <View style={styles.marketCategory} key={category.id}>
@@ -809,25 +931,13 @@ export default function ConfigScreen() {
 
               <View style={styles.marketItemsWrap}>
                 {category.items.map((item) => {
-                  const installed = installedSkillIds.has(item.id);
-                  const installing = installingSkillId === item.id;
                   return (
                     <View style={styles.marketItemCard} key={item.id}>
                       <View style={styles.marketItemHeader}>
                         <Text style={styles.marketItemTitle}>{item.name}</Text>
-                        {installed ? (
-                          <Text style={styles.installedTag}>{tr("已安装", "Installed")}</Text>
-                        ) : (
-                          <Pressable
-                            style={styles.installBtn}
-                            onPress={() => installSkill(item)}
-                            disabled={installing}
-                          >
-                            <Text style={styles.installBtnText}>
-                              {installing ? tr("安装中...", "Installing...") : tr("获取", "Get")}
-                            </Text>
-                          </Pressable>
-                        )}
+                        <Pressable style={styles.installBtn} onPress={() => installSkill(item)}>
+                          <Text style={styles.installBtnText}>{tr("查看", "Inspect")}</Text>
+                        </Pressable>
                       </View>
                       <Text style={styles.marketItemDesc}>{item.description}</Text>
                       <Pressable onPress={() => setViewingSkill(item)}>
@@ -1544,6 +1654,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#4b5563",
     lineHeight: 16,
+  },
+  skillMetaText: {
+    fontSize: 10,
+    color: "#64748b",
+    lineHeight: 14,
   },
   marketItemDescNeo: {
     color: "rgba(148,163,184,0.88)",

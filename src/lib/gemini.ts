@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 interface GeminiHistoryItem {
   role: "user" | "model";
   text: string;
@@ -14,7 +16,11 @@ const DEFAULT_BACKEND_BASE_URL = "http://localhost:8080";
 
 function getBackendBaseUrl(): string {
   const raw = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_BACKEND_BASE_URL;
-  return raw.replace(/\/+$/, "");
+  const trimmed = raw.replace(/\/+$/, "");
+  if (Platform.OS !== "android") return trimmed;
+  return trimmed
+    .replace(/^http:\/\/localhost(?=[:/]|$)/i, "http://10.0.2.2")
+    .replace(/^http:\/\/127\.0\.0\.1(?=[:/]|$)/i, "http://10.0.2.2");
 }
 
 export async function generateGeminiText({
@@ -86,4 +92,3 @@ export async function generateGeminiJson<T>(
   const parsed = parseGeminiJson<T>(text);
   return parsed ?? fallback;
 }
-

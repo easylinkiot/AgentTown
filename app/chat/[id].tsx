@@ -793,7 +793,10 @@ export default function ChatDetailScreen() {
         actionMessage.id,
         (actionMessage.content || "").slice(0, 80) || fallbackTitle
       );
-      Alert.alert(tr("已添加任务", "Task added"), created.title || tr("任务已创建", "Task created"));
+      Alert.alert(
+        tr("已添加任务", "Task added"),
+        created?.title || tr("任务已创建", "Task created")
+      );
       setActionModal(false);
     } catch (err) {
       Alert.alert(
