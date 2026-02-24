@@ -1288,9 +1288,9 @@ export default function ChatDetailScreen() {
           )}
 
           <View style={styles.inputRow} ref={inputRowRef}>
-            <Pressable style={styles.inputIcon} onPress={() => null}>
+            {/* <Pressable style={styles.inputIcon} onPress={() => null}>
               <Ionicons name="add" size={18} color="rgba(226,232,240,0.85)" />
-            </Pressable>
+            </Pressable> */}
             <View style={styles.inputBox}>
               <TextInput
                 value={input}
@@ -2039,9 +2039,9 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
     gap: 10,
-    paddingBottom: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   inputIcon: {
     width: 40,
@@ -2060,12 +2060,11 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
     backgroundColor: "rgba(15,23,42,0.55)",
     paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   input: {
     color: "#e2e8f0",
     fontSize: 17,
-    lineHeight: 24,
+    paddingVertical: 10,
     maxHeight: 120,
   },
   sendBtn: {
