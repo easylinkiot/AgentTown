@@ -289,8 +289,9 @@ export default function ChatDetailScreen() {
       requestAnimationFrame(() => {
         node.measureInWindow((_x, y, _width, height) => {
           const screenHeight = Dimensions.get("screen").height;
+          const bottomEdge = Platform.OS === "android" ? screenHeight - insets.bottom : screenHeight;
           const bottom = y + height;
-          const distanceToBottom = Math.max(0, screenHeight - bottom);
+          const distanceToBottom = Math.max(0, bottomEdge - bottom);
           const clearance = Platform.OS === "ios" ? KEYBOARD_CLEARANCE_IOS : KEYBOARD_CLEARANCE;
           const overlap = Math.max(0, keyboardHeight + clearance - distanceToBottom);
 
@@ -304,7 +305,7 @@ export default function ChatDetailScreen() {
         });
       });
     },
-    [aiKeyboardShift, animateKeyboardValue, keyboardPadding, resetKeyboardOffsets]
+    [aiKeyboardShift, animateKeyboardValue, insets.bottom, keyboardPadding, resetKeyboardOffsets]
   );
 
   useEffect(() => {
