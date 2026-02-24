@@ -41,10 +41,15 @@ import { Agent, ConversationMessage, Friend, ThreadMember } from "@/src/types";
 type MemberFilter = "all" | "human" | "agent" | "role";
 type GiftedMessage = IMessage & { raw: ConversationMessage };
 type SystemMessageRenderProps = { currentMessage?: GiftedMessage | null };
+type KeyboardTarget = "chat" | "askAI";
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const MESSAGE_FALLBACK_GAP = 1000;
 const DEV_STREAM_CHUNK_SIZE = 1;
 const DEV_STREAM_INTERVAL_MS = 50;
+const KEYBOARD_CLEARANCE = 25;
+const KEYBOARD_CLEARANCE_IOS = 25;
 
 function mentionMemberIDs(text: string, members: ThreadMember[]) {
   const safe = text.trim();
@@ -241,24 +246,82 @@ export default function ChatDetailScreen() {
   }, [messagesByThread]);
 
   const keyboardPadding = useRef(new Animated.Value(0)).current;
+  const aiKeyboardShift = useRef(new Animated.Value(0)).current;
+  const inputRowRef = useRef<View>(null);
+  const aiCardRef = useRef<View>(null);
+  const activeKeyboardTargetRef = useRef<KeyboardTarget | null>(null);
+  const lastKeyboardHeightRef = useRef(0);
+  const lastKeyboardDurationRef = useRef(0);
+
+  const animateKeyboardValue = useCallback((value: Animated.Value, toValue: number, duration: number) => {
+    Animated.timing(value, {
+      toValue,
+      duration,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, []);
+
+  const resetKeyboardOffsets = useCallback(
+    (duration: number) => {
+      animateKeyboardValue(keyboardPadding, 0, duration);
+      animateKeyboardValue(aiKeyboardShift, 0, duration);
+    },
+    [aiKeyboardShift, animateKeyboardValue, keyboardPadding]
+  );
+
+  const applyKeyboardAvoidance = useCallback(
+    (keyboardHeight: number, duration: number) => {
+      const target = activeKeyboardTargetRef.current;
+      if (!target || keyboardHeight <= 0) {
+        resetKeyboardOffsets(duration);
+        return;
+      }
+
+      const node =
+        target === "askAI" ? aiCardRef.current : inputRowRef.current;
+
+      if (!node) {
+        resetKeyboardOffsets(duration);
+        return;
+      }
+
+      requestAnimationFrame(() => {
+        node.measureInWindow((_x, y, _width, height) => {
+          const screenHeight = Dimensions.get("screen").height;
+          const bottomEdge = Platform.OS === "android" ? screenHeight - insets.bottom : screenHeight;
+          const bottom = y + height;
+          const distanceToBottom = Math.max(0, bottomEdge - bottom);
+          const clearance = Platform.OS === "ios" ? KEYBOARD_CLEARANCE_IOS : KEYBOARD_CLEARANCE;
+          const overlap = Math.max(0, keyboardHeight + clearance - distanceToBottom);
+
+          if (target === "askAI") {
+            animateKeyboardValue(aiKeyboardShift, overlap, duration);
+            animateKeyboardValue(keyboardPadding, 0, duration);
+          } else {
+            animateKeyboardValue(keyboardPadding, overlap, duration);
+            animateKeyboardValue(aiKeyboardShift, 0, duration);
+          }
+        });
+      });
+    },
+    [aiKeyboardShift, animateKeyboardValue, insets.bottom, keyboardPadding, resetKeyboardOffsets]
+  );
 
   useEffect(() => {
     const isIOS = Platform.OS === "ios";
-    const animateTo = (toValue: number, duration: number) => {
-      Animated.timing(keyboardPadding, {
-        toValue,
-        duration,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start();
-    };
     const handleFrame = (event?: { endCoordinates?: { height?: number }; duration?: number }) => {
       const height = Math.max(0, event?.endCoordinates?.height ?? 0);
-      const target = isIOS ? Math.max(0, height - insets.bottom) : height;
-      animateTo(target, event?.duration ?? (isIOS ? 250 : 200));
+      const duration = event?.duration ?? (isIOS ? 250 : 200);
+      lastKeyboardHeightRef.current = height;
+      lastKeyboardDurationRef.current = duration;
+      applyKeyboardAvoidance(height, duration);
     };
     const handleHide = (event?: { duration?: number }) => {
-      animateTo(0, event?.duration ?? (isIOS ? 200 : 180));
+      const duration = event?.duration ?? (isIOS ? 200 : 180);
+      lastKeyboardHeightRef.current = 0;
+      lastKeyboardDurationRef.current = duration;
+      resetKeyboardOffsets(duration);
     };
     const showEvent = isIOS ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = isIOS ? "keyboardWillHide" : "keyboardDidHide";
@@ -272,7 +335,17 @@ export default function ChatDetailScreen() {
       hideSub.remove();
       changeSub?.remove();
     };
-  }, [insets.bottom, keyboardPadding]);
+  }, [applyKeyboardAvoidance, resetKeyboardOffsets]);
+
+  const setKeyboardTarget = useCallback(
+    (target: KeyboardTarget | null) => {
+      activeKeyboardTargetRef.current = target;
+      if (target && lastKeyboardHeightRef.current > 0) {
+        applyKeyboardAvoidance(lastKeyboardHeightRef.current, lastKeyboardDurationRef.current || 120);
+      }
+    },
+    [applyKeyboardAvoidance]
+  );
 
   const [devStreamEnabled, setDevStreamEnabled] = useState(__DEV__);
   const [streamingById, setStreamingById] = useState<Record<string, string>>({});
@@ -1215,14 +1288,16 @@ export default function ChatDetailScreen() {
             />
           )}
 
-          <View style={styles.inputRow}>
-            <Pressable style={styles.inputIcon} onPress={() => null}>
+          <View style={styles.inputRow} ref={inputRowRef}>
+            {/* <Pressable style={styles.inputIcon} onPress={() => null}>
               <Ionicons name="add" size={18} color="rgba(226,232,240,0.85)" />
-            </Pressable>
+            </Pressable> */}
             <View style={styles.inputBox}>
               <TextInput
                 value={input}
                 onChangeText={setInput}
+                onFocus={() => setKeyboardTarget("chat")}
+                onBlur={() => setKeyboardTarget(null)}
                 placeholder={
                   thread.isGroup
                     ? tr("Message (@name to mention)", "Message (@name to mention)")
@@ -1249,17 +1324,21 @@ export default function ChatDetailScreen() {
 
         <Modal visible={actionModal} transparent animationType="fade" onRequestClose={() => setActionModal(false)}>
           <Pressable style={styles.actionOverlay} onPress={() => setActionModal(false)}>
-            <Pressable
+            <AnimatedPressable
+              ref={aiCardRef}
               style={[
                 styles.aiCard,
                 (() => {
-                  const { height: winH, width: winW } = Dimensions.get("window");
+                  const { height: screenH } = Dimensions.get("screen");
+                  const { width: winW } = Dimensions.get("window");
                   const width = Math.min(360, Math.max(240, winW - 28));
                   const marginH = 14;
+                  const isIOS = Platform.OS === "ios";
+                  const centeredLeft = Math.max(marginH, (winW - width) / 2);
 
                   const anchor = actionAnchor;
-                  const preferBelow = anchor ? anchor.yBottom + 10 : winH - insets.bottom - 12 - aiCardHeight;
-                  const maxTop = winH - Math.max(insets.bottom, 0) - 12 - aiCardHeight;
+                  const preferBelow = anchor ? anchor.yBottom + 10 : screenH - insets.bottom - 12 - aiCardHeight;
+                  const maxTop = screenH - Math.max(insets.bottom, 0) - 12 - aiCardHeight;
                   let top = Math.min(preferBelow, maxTop);
 
                   if (anchor && preferBelow > maxTop) {
@@ -1277,10 +1356,13 @@ export default function ChatDetailScreen() {
                     position: "absolute" as const,
                     top,
                     width,
-                    left: actionAnchor?.align === "left" ? marginH : undefined,
-                    right: actionAnchor?.align === "right" ? marginH : undefined,
+                    left: isIOS ? centeredLeft : actionAnchor?.align === "left" ? marginH : undefined,
+                    right: isIOS ? undefined : actionAnchor?.align === "right" ? marginH : undefined,
                   };
                 })(),
+                {
+                  transform: [{ translateY: Animated.multiply(aiKeyboardShift, -1) }],
+                },
               ]}
               onLayout={(e) => setAiCardHeight(e.nativeEvent.layout.height)}
               onPress={() => null}
@@ -1290,6 +1372,8 @@ export default function ChatDetailScreen() {
                 <TextInput
                   value={askAI}
                   onChangeText={setAskAI}
+                  onFocus={() => setKeyboardTarget("askAI")}
+                  onBlur={() => setKeyboardTarget(null)}
                   placeholder={tr("Ask AI...", "Ask AI...")}
                   placeholderTextColor="rgba(148,163,184,0.9)"
                   style={styles.aiAskInput}
@@ -1324,7 +1408,7 @@ export default function ChatDetailScreen() {
                   <Text style={styles.aiBtnText}>{tr("任务", "Task")}</Text>
                 </Pressable>
               </View>
-            </Pressable>
+            </AnimatedPressable>
           </Pressable>
         </Modal>
 
@@ -1956,9 +2040,9 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
     gap: 10,
-    paddingBottom: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   inputIcon: {
     width: 40,
@@ -1977,12 +2061,11 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
     backgroundColor: "rgba(15,23,42,0.55)",
     paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   input: {
     color: "#e2e8f0",
     fontSize: 17,
-    lineHeight: 24,
+    paddingVertical: 10,
     maxHeight: 120,
   },
   sendBtn: {
