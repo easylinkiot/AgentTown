@@ -1243,50 +1243,54 @@ export default function ChatDetailScreen() {
             />
           ) : null}
 
-          {loading ? (
-            <LoadingSkeleton kind="messages" />
-          ) : giftedMessages.length === 0 ? (
-            <EmptyState
-              title={tr("暂无消息", "No messages yet")}
-              hint={tr("从底部输入开始对话", "Start typing below")}
-              icon="chatbox-ellipses-outline"
-            />
-          ) : (
-            <GiftedChat
-              messages={giftedMessages}
-              user={{ _id: giftedUserId, name: user?.displayName || "Me" }}
-              renderInputToolbar={() => null}
-              minInputToolbarHeight={0}
-              isKeyboardInternallyHandled={false}
-              renderMessage={renderMessage}
-              renderSystemMessage={renderSystemMessage}
-              messagesContainerStyle={styles.messageContainer}
-              listViewProps={
-                {
-                  keyboardShouldPersistTaps: "never",
-                  onEndReachedThreshold: 0.2,
-                  onEndReached: () => void requestOlder(),
-                  onScrollBeginDrag: () => {
-                    isDraggingRef.current = true;
-                    setHasUserScrolled(true);
-                  },
-                  onScrollEndDrag: () => {
-                    setTimeout(() => {
+          <View style={styles.chatBody}>
+            {loading ? (
+              <LoadingSkeleton kind="messages" />
+            ) : giftedMessages.length === 0 ? (
+              <Pressable style={styles.emptyCenter} onPress={Keyboard.dismiss}>
+                <EmptyState
+                  title={tr("暂无消息", "No messages yet")}
+                  hint={tr("从底部输入开始对话", "Start typing below")}
+                  icon="chatbox-ellipses-outline"
+                />
+              </Pressable>
+            ) : (
+              <GiftedChat
+                messages={giftedMessages}
+                user={{ _id: giftedUserId, name: user?.displayName || "Me" }}
+                renderInputToolbar={() => null}
+                minInputToolbarHeight={0}
+                isKeyboardInternallyHandled={false}
+                renderMessage={renderMessage}
+                renderSystemMessage={renderSystemMessage}
+                messagesContainerStyle={styles.messageContainer}
+                listViewProps={
+                  {
+                    keyboardShouldPersistTaps: "never",
+                    onEndReachedThreshold: 0.2,
+                    onEndReached: () => void requestOlder(),
+                    onScrollBeginDrag: () => {
+                      isDraggingRef.current = true;
+                      setHasUserScrolled(true);
+                    },
+                    onScrollEndDrag: () => {
+                      setTimeout(() => {
+                        isDraggingRef.current = false;
+                      }, 120);
+                    },
+                    onMomentumScrollEnd: () => {
                       isDraggingRef.current = false;
-                    }, 120);
-                  },
-                  onMomentumScrollEnd: () => {
-                    isDraggingRef.current = false;
-                  },
-                  ListFooterComponent: loadingOlder ? (
-                    <Text style={styles.listFooterHint}>{tr("加载更早消息...", "Loading older...")}</Text>
-                  ) : hasMore && hasUserScrolled ? (
-                    <Text style={styles.listFooterHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
-                  ) : null,
-                } as any
-              }
-            />
-          )}
+                    },
+                    ListFooterComponent: loadingOlder ? (
+                      <Text style={styles.listFooterHint}>{tr("加载更早消息...", "Loading older...")}</Text>
+                    ) : hasMore && hasUserScrolled ? (
+                      <Text style={styles.listFooterHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
+                    ) : null,
+                  } as any
+                }
+              />
+            )}
+          </View>
 
           <View style={styles.inputRow} ref={inputRowRef}>
             {/* <Pressable style={styles.inputIcon} onPress={() => null}>
@@ -1883,8 +1887,16 @@ const styles = StyleSheet.create({
     flex: 1,
     marginTop: 4,
   },
+  chatBody: {
+    flex: 1,
+    marginTop: 4,
+  },
   messageContainer: {
     flex: 1,
+  },
+  emptyCenter: {
+    flex: 1,
+    justifyContent: "center",
   },
   messageContent: {
     paddingVertical: 8,
