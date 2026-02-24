@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as FileSystem from "expo-file-system";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { DEFAULT_MYBOT_AVATAR } from "@/src/constants/chat";
 import {
@@ -7,10 +7,10 @@ import {
   createAgent as createAgentApi,
   createChatThread,
   createCustomSkill as createCustomSkillApi,
-  deleteChatThread as deleteChatThreadApi,
   createFriend as createFriendApi,
   createTask as createTaskApi,
   createTaskFromMessage as createTaskFromMessageApi,
+  deleteChatThread as deleteChatThreadApi,
   deleteCustomSkill as deleteCustomSkillApi,
   deleteFriend as deleteFriendApi,
   deleteMiniApp as deleteMiniAppApi,
@@ -18,12 +18,12 @@ import {
   fetchBootstrap,
   generateMiniApp as generateMiniAppApi,
   generateRoleReplies as generateRoleRepliesApi,
-  installMiniApp as installMiniAppApi,
   installBotSkill as installBotSkillApi,
+  installMiniApp as installMiniAppApi,
   listThreadMembers as listThreadMembersApi,
   listThreadMessages as listThreadMessagesApi,
-  patchTask as patchTaskApi,
   patchCustomSkill as patchCustomSkillApi,
+  patchTask as patchTaskApi,
   removeThreadMember as removeThreadMemberApi,
   runMiniApp as runMiniAppApi,
   saveBotConfig,
@@ -147,7 +147,7 @@ interface AgentTownContextValue {
   removeMiniApp: (appId: string) => Promise<void>;
 }
 
-const MESSAGE_PAGE_SIZE = 50;
+const MESSAGE_PAGE_SIZE = 10;
 const MESSAGE_RENDER_WINDOW = 160;
 const MESSAGE_CACHE_LIMIT = 2000;
 

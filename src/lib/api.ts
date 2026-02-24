@@ -341,12 +341,12 @@ async function apiFetch<T>(
   if (!options?.skipAuth && authToken) {
     headers.Authorization = `Bearer ${authToken}`;
   }
-
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+  const url = `${getApiBaseUrl()}${path}`
+  const response = await fetch(url, {
     ...init,
     headers,
   });
-
+  
   if (!response.ok) {
     const text = await response.text();
     const base = getApiBaseUrl();
@@ -387,8 +387,15 @@ async function apiFetch<T>(
   if (options?.rawText) {
     return (await response.text()) as unknown as T;
   }
-
-  return (await response.json()) as T;
+  const resBody = (await response.json()) as T;
+  if (__DEV__) {
+    console.group(`api Fetch (${path}) --------------- Start`)
+    if (init) console.log(`init: `, init)
+    console.log(resBody)
+    console.groupEnd()
+    console.log('------------------------------------- End')
+  }
+  return resBody;
 }
 
 export async function authRegister(payload: {
