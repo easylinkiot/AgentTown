@@ -14,14 +14,12 @@ import { useAgentTown } from "@/src/state/agenttown-context";
 
 export default function MiniAppsScreen() {
   const router = useRouter();
-  const { miniApps, runMiniApp, installMiniApp, removeMiniApp, language, bootstrapReady } = useAgentTown();
+  const { miniApps, installMiniApp, removeMiniApp, language, bootstrapReady } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
 
   const installed = useMemo(() => miniApps.filter((a) => a.installed), [miniApps]);
   const generated = useMemo(() => miniApps.filter((a) => !a.installed), [miniApps]);
 
-  const [runningId, setRunningId] = useState<string | null>(null);
-  const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const confirmUninstall = (appId: string, appName: string) => {
@@ -106,23 +104,11 @@ export default function MiniAppsScreen() {
                   </View>
                   <View style={styles.cardActions}>
                     <Pressable
-                      style={[styles.actionBtn, runningId === app.id && styles.actionBtnDisabled]}
-                      onPress={async () => {
-                        if (runningId) return;
-                        setRunningId(app.id);
-                        setOutput(null);
-                        try {
-                          const out = await runMiniApp(app.id, tr("请执行一次标准流程", "Run a standard workflow"));
-                          if (out) setOutput(out);
-                        } catch (err) {
-                          setError(formatApiError(err));
-                        } finally {
-                          setRunningId(null);
-                        }
-                      }}
+                      style={styles.actionBtn}
+                      onPress={() => router.push(`/miniapp/${app.id}`)}
                     >
-                      <Ionicons name="play-outline" size={14} color="#0b1220" />
-                      <Text style={styles.actionText}>{tr("运行", "Run")}</Text>
+                      <Ionicons name="open-outline" size={14} color="#0b1220" />
+                      <Text style={styles.actionText}>{tr("打开", "Open")}</Text>
                     </Pressable>
                     <Pressable
                       style={[styles.ghostBtn, styles.ghostBtnWarn]}
@@ -146,28 +132,26 @@ export default function MiniAppsScreen() {
                   </View>
                   <View style={styles.cardActions}>
                     <Pressable
+                      style={styles.ghostBtn}
+                      onPress={() => router.push(`/miniapp/${app.id}`)}
+                    >
+                      <Text style={styles.ghostText}>{tr("预览", "Preview")}</Text>
+                    </Pressable>
+                    <Pressable
                       style={styles.actionBtn}
                       onPress={() => void installMiniApp(app.id, true).catch((err) => setError(formatApiError(err)))}
                     >
                       <Ionicons name="add-circle-outline" size={16} color="#0b1220" />
                       <Text style={styles.actionText}>{tr("安装", "Install")}</Text>
                     </Pressable>
-                    <Pressable
-                      style={styles.ghostBtn}
-                      onPress={() => confirmDeleteMiniApp(app.id, app.name)}
-                    >
+                  </View>
+                  <View style={styles.cardActions}>
+                    <Pressable style={styles.ghostBtn} onPress={() => confirmDeleteMiniApp(app.id, app.name)}>
                       <Text style={styles.ghostText}>{tr("删除", "Delete")}</Text>
                     </Pressable>
                   </View>
                 </View>
               ))}
-
-              {output ? (
-                <View style={styles.outputCard}>
-                  <Text style={styles.outputTitle}>{tr("运行输出", "Output")}</Text>
-                  <Text style={styles.outputText}>{output}</Text>
-                </View>
-              ) : null}
             </ScrollView>
           )}
         </View>
@@ -262,9 +246,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "#e2e8f0",
   },
-  actionBtnDisabled: {
-    opacity: 0.6,
-  },
   actionText: {
     color: "#0b1220",
     fontSize: 12,
@@ -287,24 +268,5 @@ const styles = StyleSheet.create({
     color: "rgba(226,232,240,0.86)",
     fontSize: 12,
     fontWeight: "900",
-  },
-  outputCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(59,130,246,0.22)",
-    backgroundColor: "rgba(30,64,175,0.16)",
-    padding: 14,
-    gap: 8,
-  },
-  outputTitle: {
-    color: "#e2e8f0",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  outputText: {
-    color: "rgba(226,232,240,0.86)",
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600",
   },
 });

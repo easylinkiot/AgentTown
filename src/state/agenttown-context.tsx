@@ -1230,10 +1230,31 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
                     ...item,
                     preview: {
                       ...(item.preview || {}),
+                      ...(typeof result.outputData?.uiType === "string"
+                        ? { uiType: result.outputData.uiType }
+                        : {}),
+                      content: {
+                        ...(((item.preview || {}) as Record<string, unknown>).content as Record<string, unknown> || {}),
+                        ...(Array.isArray(result.outputData?.items)
+                          ? { items: result.outputData.items }
+                          : {}),
+                        ...(result.outputData?.card &&
+                        typeof result.outputData.card === "object" &&
+                        !Array.isArray(result.outputData.card)
+                          ? { card: result.outputData.card }
+                          : {}),
+                        ...(Array.isArray(result.outputData?.panels)
+                          ? { panels: result.outputData.panels }
+                          : {}),
+                        ...(Array.isArray(result.outputData?.blocks)
+                          ? { blocks: result.outputData.blocks }
+                          : {}),
+                      },
                       lastRun: {
                         input,
                         params,
                         output: result.output,
+                        outputData: result.outputData,
                         ranAt: result.ranAt,
                       },
                     },

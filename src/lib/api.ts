@@ -110,6 +110,7 @@ export interface RunMiniAppInput {
 export interface RunMiniAppOutput {
   appId: string;
   output: string;
+  outputData?: Record<string, unknown>;
   ranAt: string;
   message?: ConversationMessage;
 }
