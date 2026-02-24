@@ -1,10 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { authGuest, authMe, authProvider, authUpdateProfile, setAuthToken } from "@/src/lib/api";
+import { authGuest, authLogin, authMe, authProvider, authUpdateProfile, setAuthToken } from "@/src/lib/api";
 import { AuthUser } from "@/src/types";
 
-export type AuthMethod = "guest" | "google" | "apple" | "phone";
+export type AuthMethod = "guest" | "google" | "apple" | "phone" | "password";
 
 interface PhoneOtpState {
   code: string;
@@ -18,6 +18,7 @@ interface AuthContextValue {
   token: string | null;
   isSignedIn: boolean;
   signInAsGuest: () => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (input: {
     id: string;
     name?: string | null;
@@ -162,6 +163,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [applySession]);
 
+  const signInWithPassword = useCallback<AuthContextValue["signInWithPassword"]>(
+    async (email, password) => {
+      const session = await authLogin({ email: email.trim(), password });
+      await applySession({ token: session.token, user: mapBackendUser(session.user) });
+    },
+    [applySession]
+  );
+
   const signInWithGoogle = useCallback<AuthContextValue["signInWithGoogle"]>(
     async (input) => {
       const normalizedName = input.name?.trim() || displayNameFromEmail(input.email) || undefined;
@@ -269,6 +278,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       isSignedIn: Boolean(user && token && !user.requireProfileSetup),
       signInAsGuest,
+      signInWithPassword,
       signInWithGoogle,
       signInWithApple,
       sendPhoneCode,
@@ -281,6 +291,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       token,
       signInAsGuest,
+      signInWithPassword,
       signInWithGoogle,
       signInWithApple,
       sendPhoneCode,

@@ -26,6 +26,12 @@ import { useAuth } from "@/src/state/auth-context";
 
 WebBrowser.maybeCompleteAuthSession();
 
+const DEV_LOGIN_PRESET = {
+  email: "admin.local@agenttown.dev",
+  password: "AgentTown#2026!",
+  displayName: "Local Admin",
+};
+
 interface GoogleProfile {
   sub?: string;
   name?: string;
@@ -65,17 +71,20 @@ export default function SignInScreen() {
     user,
     completeProfile,
     signInAsGuest,
+    signInWithPassword,
     signInWithApple,
     signInWithGoogle,
     sendPhoneCode,
     verifyPhoneCode,
   } = useAuth();
 
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
-  const [busyKey, setBusyKey] = useState<"google" | "apple" | "phone" | "guest" | "profile" | null>(null);
+  const [busyKey, setBusyKey] = useState<"google" | "apple" | "phone" | "guest" | "profile" | "password" | null>(null);
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
@@ -199,6 +208,34 @@ export default function SignInScreen() {
     } finally {
       setBusyKey(null);
     }
+  };
+
+  const handlePasswordSignIn = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      Alert.alert(tr("信息不完整", "Incomplete"), tr("请输入有效邮箱。", "Please enter a valid email."));
+      return;
+    }
+    if (!password) {
+      Alert.alert(tr("信息不完整", "Incomplete"), tr("请输入密码。", "Please enter your password."));
+      return;
+    }
+
+    try {
+      setBusyKey("password");
+      await signInWithPassword(normalizedEmail, password);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : tr("登录失败", "Sign-In Failed");
+      Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleFillDevAccount = () => {
+    setEmail(DEV_LOGIN_PRESET.email);
+    setPassword(DEV_LOGIN_PRESET.password);
+    setProfileName(DEV_LOGIN_PRESET.displayName);
   };
 
   const handleGoogleSignIn = async () => {
@@ -382,6 +419,48 @@ export default function SignInScreen() {
               <Ionicons name="logo-apple" size={16} color="white" />
             )}
             <Text style={styles.appleBtnText}>{tr("使用 Apple 继续", "Continue with Apple")}</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{tr("账号密码登录", "Email & Password")}</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder={tr("电子邮件", "Email")}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder={tr("密码", "Password")}
+            secureTextEntry
+            autoCapitalize="none"
+          />
+          {__DEV__ ? (
+            <Pressable
+              style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
+              disabled={busyKey !== null}
+              onPress={handleFillDevAccount}
+            >
+              <Ionicons name="sparkles-outline" size={16} color="#1f2937" />
+              <Text style={styles.secondaryBtnText}>{tr("填充管理员账号（DEV）", "Fill Local Admin (DEV)")}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.primaryBtn, busyKey !== null && styles.btnDisabled]}
+            disabled={busyKey !== null}
+            onPress={handlePasswordSignIn}
+          >
+            {busyKey === "password" ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Ionicons name="log-in-outline" size={16} color="white" />
+            )}
+            <Text style={styles.primaryBtnText}>{tr("登录", "Sign In")}</Text>
           </Pressable>
         </View>
 
