@@ -115,6 +115,21 @@ export interface RunMiniAppOutput {
   message?: ConversationMessage;
 }
 
+export interface ATSession {
+  id: string;
+  title?: string;
+  target_type?: string;
+  target_id?: string;
+  message_count?: number;
+  updated_at?: string;
+}
+
+export interface ATCreateSessionInput {
+  target_type: "user" | "group" | "agent" | "user_bot";
+  target_id: string;
+  title?: string;
+}
+
 export interface CreateFriendInput {
   userId: string;
   name?: string;
@@ -516,6 +531,38 @@ export async function deleteChatThread(threadId: string) {
   return apiFetch<{ ok: boolean; id: string }>(`/v1/chat/threads/${encodeURIComponent(threadId)}`, {
     method: "DELETE",
   });
+}
+
+export async function atCreateSession(payload: ATCreateSessionInput): Promise<ATSession> {
+  const created = await apiFetch<ChatThread>("/v1/chat/threads", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.title || "",
+      isGroup: payload.target_type !== "user",
+      targetType: payload.target_type,
+      targetId: payload.target_id,
+    }),
+  });
+  return {
+    id: created.id,
+    title: created.name,
+    target_type: created.targetType || payload.target_type,
+    target_id: created.targetId || payload.target_id,
+  };
+}
+
+export function mapATSessionToThread(session: ATSession): ChatThread {
+  const isGroup = (session.target_type || "").toLowerCase() === "group";
+  return {
+    id: session.id,
+    name: session.title || session.id,
+    avatar: "",
+    message: "",
+    time: "Now",
+    isGroup,
+    targetType: session.target_type,
+    targetId: session.target_id,
+  };
 }
 
 export async function listThreadMessages(
