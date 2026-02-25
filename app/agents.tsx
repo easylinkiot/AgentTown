@@ -61,6 +61,19 @@ export default function AgentsScreen() {
     [agents, selectedAgentId]
   );
 
+  const displayCatalogSkill = (skill: { id: string; name: string; description: string }) => {
+    if (skill.id === "skill_reminder_scheduler") {
+      return {
+        name: tr("提醒助手", "Reminder Scheduler"),
+        description: tr(
+          "解析“10分钟后提醒我喝水 / 下个月1号提醒我生日”等自然语言并自动创建提醒任务。",
+          "Parse natural-language reminder requests and auto-create scheduled reminder tasks."
+        ),
+      };
+    }
+    return { name: skill.name, description: skill.description };
+  };
+
   const handleCreate = async () => {
     const safeName = name.trim();
     if (!safeName || creatingAgent) return;
@@ -235,11 +248,12 @@ export default function AgentsScreen() {
               <ScrollView contentContainerStyle={styles.skillList} showsVerticalScrollIndicator={false}>
                 {skillCatalog.map((skill) => {
                   const installed = Boolean(selectedAgent?.installedSkillIds?.includes(skill.id));
+                  const display = displayCatalogSkill(skill);
                   return (
                     <View key={skill.id} style={styles.skillCard}>
                       <View style={styles.skillMain}>
-                        <Text style={styles.skillName}>{skill.name}</Text>
-                        <Text style={styles.skillDesc}>{skill.description}</Text>
+                        <Text style={styles.skillName}>{display.name}</Text>
+                        <Text style={styles.skillDesc}>{display.description}</Text>
                         <Text style={styles.skillMeta}>
                           {skill.type} · {skill.version}
                         </Text>
@@ -251,7 +265,7 @@ export default function AgentsScreen() {
                         onPress={() => {
                           if (!selectedAgent) return;
                           if (installed) {
-                            confirmRemoveSkillFromAgent(skill.id, skill.name);
+                            confirmRemoveSkillFromAgent(skill.id, display.name);
                             return;
                           }
                           void toggleAgentSkill(selectedAgent.id, skill.id, true).catch((err) =>
