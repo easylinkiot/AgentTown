@@ -23,10 +23,12 @@ import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import {
   acceptFriendRequest,
+  atCreateSession,
   createFriendQR,
   discoverUsers,
   formatApiError,
   listFriendRequests,
+  mapATSessionToThread,
   rejectFriendRequest,
   scanFriendQR,
   type DiscoverUser,
@@ -70,6 +72,7 @@ export default function HomeScreen() {
     botConfig,
     language,
     bootstrapReady,
+    addChatThread,
     createFriend,
     createGroup,
     refreshAll,
@@ -213,17 +216,55 @@ export default function HomeScreen() {
     };
   }, [friendModal, user?.id]);
 
-  const handleOpenThread = (thread: ChatThread) => {
-    router.push({
-      pathname: "/chat/[id]",
-      params: {
-        id: thread.id,
-        name: thread.name,
-        avatar: thread.avatar,
-        isGroup: thread.isGroup ? "true" : "false",
-      },
-    });
-  };
+  const handleOpenThread = useCallback(
+    async (thread: ChatThread) => {
+      let nextThread = thread;
+      const threadID = (thread.id || "").trim();
+      const lowerID = threadID.toLowerCase();
+      const isMyBot =
+        lowerID === "mybot" || lowerID === "agent_mybot" || lowerID.startsWith("agent_userbot_");
+      const needsSessionResolve = !thread.isGroup && !isMyBot && !threadID.startsWith("thr_");
+
+      if (needsSessionResolve) {
+        const targetID = (thread.targetId || thread.id || "").trim();
+        const targetTypeRaw = (thread.targetType || "").trim().toLowerCase();
+        const targetType = targetTypeRaw === "user_bot" ? "user_bot" : "user";
+
+        if (targetID) {
+          try {
+            const resolved = await atCreateSession({
+              target_type: targetType,
+              target_id: targetID,
+              title: thread.name || undefined,
+            });
+            const mapped = mapATSessionToThread(resolved);
+            if (mapped?.id) {
+              nextThread = {
+                ...thread,
+                ...mapped,
+                avatar: thread.avatar || mapped.avatar,
+                isGroup: false,
+              };
+              addChatThread(nextThread);
+            }
+          } catch {
+            // Keep fallback to existing thread id so UI still navigates.
+          }
+        }
+      }
+
+      router.push({
+        pathname: "/chat/[id]",
+        params: {
+          id: nextThread.id,
+          name: nextThread.name,
+          avatar: nextThread.avatar,
+          isGroup: nextThread.isGroup ? "true" : "false",
+        },
+      });
+    },
+    [addChatThread, router]
+  );
 
   const openEntityConfig = useCallback(
     (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
