@@ -12,6 +12,7 @@
 - Every behavior change should include tests or a clear test gap note.
 
 ## Command Preflight
+- Before executing any command, always load and strictly follow `rules/ULTRA_REACT_NATIVE_STATE_ENGINEERING_STRICT_LOOP_PROMPT.md`.
 - Before executing any command, always load and follow the skill at `skills/.agents/skills/vercel-react-native-skills/SKILL.md`.
 
 ## Local Validation
