@@ -364,7 +364,7 @@ export default function SignInScreen() {
     : tr("输入手机号获取验证码", "Enter phone number to request code");
 
   return (
-    <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
+    <SafeAreaView testID="screen.signin" edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.brandCard}>
           <View style={styles.logoCircle}>
@@ -425,6 +425,7 @@ export default function SignInScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("账号密码登录", "Email & Password")}</Text>
           <TextInput
+            testID="input.email"
             style={styles.input}
             value={email}
             onChangeText={setEmail}
@@ -433,6 +434,7 @@ export default function SignInScreen() {
             autoCapitalize="none"
           />
           <TextInput
+            testID="input.password"
             style={styles.input}
             value={password}
             onChangeText={setPassword}
@@ -442,6 +444,7 @@ export default function SignInScreen() {
           />
           {__DEV__ ? (
             <Pressable
+              testID="btn.fillDev"
               style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
               disabled={busyKey !== null}
               onPress={handleFillDevAccount}
@@ -451,6 +454,7 @@ export default function SignInScreen() {
             </Pressable>
           ) : null}
           <Pressable
+            testID="btn.signIn"
             style={[styles.primaryBtn, busyKey !== null && styles.btnDisabled]}
             disabled={busyKey !== null}
             onPress={handlePasswordSignIn}
@@ -551,6 +555,7 @@ export default function SignInScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("快速体验", "Quick Start")}</Text>
           <Pressable
+            testID="btn.guest"
             style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
             disabled={busyKey !== null}
             onPress={handleGuestSignIn}

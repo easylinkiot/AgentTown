@@ -442,7 +442,7 @@ export default function HomeScreen() {
 
   return (
     <KeyframeBackground>
-      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
+      <SafeAreaView testID="screen.home" edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.topBar}>
             <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>
@@ -500,6 +500,7 @@ export default function HomeScreen() {
             <LoadingSkeleton kind="chat_list" />
           ) : (
             <FlatList
+              testID="list.threads"
               data={list}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (

@@ -1145,7 +1145,7 @@ export default function ChatDetailScreen() {
 
   return (
     <KeyframeBackground>
-      <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, { paddingBottom: insets.bottom }]}>
+      <SafeAreaView testID="screen.chat" edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, { paddingBottom: insets.bottom }]}>
         <KeyboardAvoidingView
           style={styles.keyboardAvoid}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -1154,7 +1154,7 @@ export default function ChatDetailScreen() {
         >
         <ContainerView style={containerStyle}>
           <View style={styles.headerRow}>
-            <Pressable style={styles.backBtn} onPress={() => router.back()}>
+            <Pressable testID="btn.chat.back" style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
             </Pressable>
             <Pressable

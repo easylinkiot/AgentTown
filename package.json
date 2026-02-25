@@ -21,7 +21,10 @@
     "check": "npm run typecheck && npm run lint && npm run test:ci",
     "fastlane:prepare:ios": "fastlane ios prepare --env fastlane",
     "fastlane:build:ios": "fastlane ios build_release --env fastlane",
-    "fastlane:deploy:ios": "fastlane ios deploy_testflight --env fastlane"
+    "fastlane:deploy:ios": "fastlane ios deploy_testflight --env fastlane",
+    "detox:build:ios": "detox build -c ios.sim.debug",
+    "detox:test:ios": "bash e2e/run-detox-ios.sh",
+    "detox:test:ios:headless": "bash e2e/run-detox-ios.sh --headless"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -59,6 +62,7 @@
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.1.0",
+    "detox": "^20.17.1",
     "eas-cli": "^18.0.1",
     "eslint": "^9.39.2",
     "eslint-config-expo": "^10.0.0",
