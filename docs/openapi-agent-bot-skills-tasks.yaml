@@ -1,16 +1,16 @@
 openapi: 3.0.3
 info:
-  title: AgentTown Backend API
-  version: 0.1.0
+  title: AgentTown API
+  version: 1.0.0
   description: |
     Contract skeleton for Bot / Tasks / Agents / Skills / Knowledge.
     This file is designed as a Swagger-ready OpenAPI baseline and can be expanded incrementally.
 
 servers:
-  - url: https://agenttown-api.kittens.cloud
-    description: Production
   - url: http://localhost:8080
     description: Local
+  - url: https://api.agtown.ai
+    description: Production
 
 tags:
   - name: System
@@ -23,6 +23,7 @@ tags:
   - name: Skills
   - name: Knowledge
   - name: Chat
+  - name: Memory
   - name: Social
   - name: MiniApps
   - name: Realtime
@@ -176,6 +177,29 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
+  /v1/auth/me/profile:
+    patch:
+      tags: [Auth]
+      summary: Update current user profile
+      operationId: authUpdateProfile
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthProfileUpdateRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
   /v1/admin/backup:
     get:
       tags: [Admin]
@@ -243,6 +267,72 @@ paths:
             text/plain:
               schema:
                 type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/runtime/reload:
+    post:
+      tags: [Admin]
+      summary: Reload AgentTown runtime (admin only)
+      operationId: adminRuntimeReload
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Reloaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/memory-jobs/run:
+    post:
+      tags: [Admin]
+      summary: Run memory jobs (admin only)
+      operationId: adminRunMemoryJobs
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryJobRunRequest"
+      responses:
+        "200":
+          description: Job triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryJobRunResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/admin/memory-jobs:
+    get:
+      tags: [Admin]
+      summary: List memory jobs (admin only)
+      operationId: adminMemoryJobs
+      parameters:
+        - $ref: "#/components/parameters/UserIdQuerySnake"
+        - $ref: "#/components/parameters/StatusQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryJobListResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -324,6 +414,27 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
+  /v1/bot-config/chat/completions:
+    post:
+      tags: [Bot]
+      summary: Bot chat completions (SSE only)
+      operationId: botChatCompletions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionsRequest"
+      responses:
+        "200":
+          description: Streamed events (SSE)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
   /v1/bot/skills/{skillId}:
     post:
       tags: [Bot]
@@ -383,6 +494,144 @@ paths:
       responses:
         "101":
           description: Switching Protocols
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/completions:
+    post:
+      tags: [Chat]
+      summary: Chat completions (SSE only)
+      operationId: chatCompletions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionsRequest"
+      responses:
+        "200":
+          description: Streamed events (SSE)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/assist:
+    post:
+      tags: [Chat]
+      summary: Chat assist (SSE only)
+      operationId: chatAssist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatAssistRequest"
+      responses:
+        "200":
+          description: Streamed events (SSE)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/sessions:
+    get:
+      tags: [Chat]
+      summary: List chat sessions
+      operationId: listChatSessions
+      parameters:
+        - $ref: "#/components/parameters/TargetTypeQuery"
+        - $ref: "#/components/parameters/TargetIdQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ATChatSessionListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/sessions/{sessionId}/messages:
+    get:
+      tags: [Chat]
+      summary: List session messages
+      operationId: listChatSessionMessages
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/RoleQuery"
+        - $ref: "#/components/parameters/MessageTypeQuery"
+        - $ref: "#/components/parameters/FromQuery"
+        - $ref: "#/components/parameters/ToQuery"
+        - $ref: "#/components/parameters/IncludeToolQuery"
+        - $ref: "#/components/parameters/BeforeSeqNoQuery"
+        - $ref: "#/components/parameters/AfterSeqNoQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ATChatMessageListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/history:
+    get:
+      tags: [Chat]
+      summary: Query chat history
+      operationId: queryChatHistory
+      parameters:
+        - $ref: "#/components/parameters/TargetTypeQuery"
+        - $ref: "#/components/parameters/TargetIdQuery"
+        - $ref: "#/components/parameters/SessionTypeQuery"
+        - $ref: "#/components/parameters/RoleQuery"
+        - $ref: "#/components/parameters/MessageTypeQuery"
+        - $ref: "#/components/parameters/FromQuery"
+        - $ref: "#/components/parameters/ToQuery"
+        - $ref: "#/components/parameters/IncludeToolQuery"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ATChatHistoryResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/chat/targets/{target_type}/{target_id}/history:
+    get:
+      tags: [Chat]
+      summary: Query chat history by target
+      operationId: queryChatTargetHistory
+      parameters:
+        - $ref: "#/components/parameters/TargetTypePathSnake"
+        - $ref: "#/components/parameters/TargetIdPathSnake"
+        - $ref: "#/components/parameters/SessionTypeQuery"
+        - $ref: "#/components/parameters/RoleQuery"
+        - $ref: "#/components/parameters/MessageTypeQuery"
+        - $ref: "#/components/parameters/FromQuery"
+        - $ref: "#/components/parameters/ToQuery"
+        - $ref: "#/components/parameters/IncludeToolQuery"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ATChatHistoryResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -540,7 +789,7 @@ paths:
             schema:
               $ref: "#/components/schemas/AddThreadMemberRequest"
       responses:
-        "200":
+        "201":
           description: Added
           content:
             application/json:
@@ -602,7 +851,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Friend"
+                $ref: "#/components/schemas/CreateFriendResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -621,6 +870,99 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FriendDeleteResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friend-requests:
+    get:
+      tags: [Social]
+      summary: List friend requests
+      operationId: listFriendRequests
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FriendRequest"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friend-requests/{requestId}/accept:
+    post:
+      tags: [Social]
+      summary: Accept friend request
+      operationId: acceptFriendRequest
+      parameters:
+        - $ref: "#/components/parameters/FriendRequestIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendRequestActionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friend-requests/{requestId}/reject:
+    post:
+      tags: [Social]
+      summary: Reject or cancel friend request
+      operationId: rejectFriendRequest
+      parameters:
+        - $ref: "#/components/parameters/FriendRequestIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendRequestActionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friend-qr/create:
+    post:
+      tags: [Social]
+      summary: Create friend QR token
+      operationId: createFriendQR
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateFriendQRResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/friend-qr/scan:
+    post:
+      tags: [Social]
+      summary: Scan friend QR token
+      operationId: scanFriendQR
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScanFriendQRRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateFriendResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -645,6 +987,25 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
 
   /v1/miniapps:
+    post:
+      tags: [MiniApps]
+      summary: Create miniapp (SSE)
+      operationId: createMiniApp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MiniAppCreateRequest"
+      responses:
+        "200":
+          description: Streamed events (SSE)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
     get:
       tags: [MiniApps]
       summary: List miniapps
@@ -655,9 +1016,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/MiniApp"
+                $ref: "#/components/schemas/ATMiniAppListResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -750,6 +1109,21 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
 
   /v1/miniapps/{miniAppId}:
+    get:
+      tags: [MiniApps]
+      summary: Get miniapp
+      operationId: getMiniApp
+      parameters:
+        - $ref: "#/components/parameters/MiniAppIdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ATMiniApp"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [MiniApps]
       summary: Delete miniapp
@@ -763,7 +1137,47 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeleteResult"
+                $ref: "#/components/schemas/OkResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/{miniAppId}/chat/completions:
+    post:
+      tags: [MiniApps]
+      summary: Miniapp chat completions (SSE only)
+      operationId: miniAppChatCompletions
+      parameters:
+        - $ref: "#/components/parameters/MiniAppIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MiniAppChatRequest"
+      responses:
+        "200":
+          description: Streamed events (SSE)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/miniapps/{miniAppId}/versions:
+    get:
+      tags: [MiniApps]
+      summary: List miniapp versions
+      operationId: listMiniAppVersions
+      parameters:
+        - $ref: "#/components/parameters/MiniAppIdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ATMiniAppVersionListResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -877,6 +1291,43 @@ paths:
       responses:
         "200":
           description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      tags: [Tasks]
+      summary: Put task
+      operationId: putTask
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchTaskRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Tasks]
+      summary: Get task
+      operationId: getTask
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
               schema:
@@ -1086,11 +1537,11 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
-  /v1/skills/custom:
+  /v1/skills:
     get:
       tags: [Skills]
-      summary: List custom skills
-      operationId: listCustomSkills
+      summary: List skills
+      operationId: listSkills
       parameters:
         - $ref: "#/components/parameters/CursorQuery"
         - $ref: "#/components/parameters/LimitQuery"
@@ -1107,8 +1558,8 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
     post:
       tags: [Skills]
-      summary: Create custom skill
-      operationId: createCustomSkill
+      summary: Create skill
+      operationId: createSkill
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1127,11 +1578,33 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
-  /v1/skills/custom/{skillId}:
+  /v1/skills/{skillId}:
     patch:
       tags: [Skills]
-      summary: Patch custom skill
-      operationId: patchCustomSkill
+      summary: Patch skill
+      operationId: patchSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchCustomSkillRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomSkill"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      tags: [Skills]
+      summary: Put skill
+      operationId: putSkill
       parameters:
         - $ref: "#/components/parameters/SkillIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1152,8 +1625,8 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Skills]
-      summary: Delete custom skill
-      operationId: deleteCustomSkill
+      summary: Delete skill
+      operationId: deleteSkill
       parameters:
         - $ref: "#/components/parameters/SkillIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1167,11 +1640,82 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
-  /v1/skills/custom/{skillId}/execute:
+  /v1/skills/{skillId}/publish:
     post:
       tags: [Skills]
-      summary: Execute custom skill
-      operationId: executeCustomSkill
+      summary: Publish skill
+      operationId: publishSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillPublishRequest"
+      responses:
+        "200":
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomSkill"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/{skillId}/toggle:
+    post:
+      tags: [Skills]
+      summary: Toggle skill enabled status
+      operationId: toggleSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillToggleRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomSkill"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/{skillId}/validate:
+    post:
+      tags: [Skills]
+      summary: Validate skill content
+      operationId: validateSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillValidateRequest"
+      responses:
+        "200":
+          description: Valid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/skills/{skillId}/execute:
+    post:
+      tags: [Skills]
+      summary: Execute skill
+      operationId: executeSkill
       parameters:
         - $ref: "#/components/parameters/SkillIdPath"
       requestBody:
@@ -1190,11 +1734,11 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
-  /v1/skills/custom/{skillId}/runs:
+  /v1/skills/{skillId}/runs:
     get:
       tags: [Skills]
-      summary: List runs of a custom skill
-      operationId: listCustomSkillRuns
+      summary: List runs of a skill
+      operationId: listSkillRuns
       parameters:
         - $ref: "#/components/parameters/SkillIdPath"
         - $ref: "#/components/parameters/CursorQuery"
@@ -1208,6 +1752,137 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SkillRun"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/memory/profiles:
+    get:
+      tags: [Memory]
+      summary: List memory profiles
+      operationId: listMemoryProfiles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProfileListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/memory/profiles/{profileId}:
+    put:
+      tags: [Memory]
+      summary: Update memory profile
+      operationId: updateMemoryProfile
+      parameters:
+        - $ref: "#/components/parameters/MemoryProfileIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryProfileUpdateRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProfile"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Memory]
+      summary: Delete memory profile
+      operationId: deleteMemoryProfile
+      parameters:
+        - $ref: "#/components/parameters/MemoryProfileIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/memory/items:
+    get:
+      tags: [Memory]
+      summary: List memory items
+      operationId: listMemoryItems
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItemListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Memory]
+      summary: Create memory item
+      operationId: createMemoryItem
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryItemCreateRequest"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItem"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/memory/items/{itemId}:
+    put:
+      tags: [Memory]
+      summary: Update memory item
+      operationId: updateMemoryItem
+      parameters:
+        - $ref: "#/components/parameters/MemoryItemIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryItemUpdateRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItem"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Memory]
+      summary: Delete memory item
+      operationId: deleteMemoryItem
+      parameters:
+        - $ref: "#/components/parameters/MemoryItemIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 
@@ -1424,6 +2099,124 @@ components:
       required: true
       schema:
         type: string
+    SessionIdPath:
+      in: path
+      name: sessionId
+      required: true
+      schema:
+        type: string
+    FriendRequestIdPath:
+      in: path
+      name: requestId
+      required: true
+      schema:
+        type: string
+    MemoryProfileIdPath:
+      in: path
+      name: profileId
+      required: true
+      schema:
+        type: string
+    MemoryItemIdPath:
+      in: path
+      name: itemId
+      required: true
+      schema:
+        type: string
+    TargetTypePathSnake:
+      in: path
+      name: target_type
+      required: true
+      schema:
+        type: string
+    TargetIdPathSnake:
+      in: path
+      name: target_id
+      required: true
+      schema:
+        type: string
+    UserIdQuerySnake:
+      in: query
+      name: user_id
+      required: false
+      schema:
+        type: string
+    StatusQuery:
+      in: query
+      name: status
+      required: false
+      schema:
+        type: string
+    TargetTypeQuery:
+      in: query
+      name: target_type
+      required: false
+      schema:
+        type: string
+    TargetIdQuery:
+      in: query
+      name: target_id
+      required: false
+      schema:
+        type: string
+    SessionTypeQuery:
+      in: query
+      name: session_type
+      required: false
+      schema:
+        type: string
+    RoleQuery:
+      in: query
+      name: role
+      required: false
+      schema:
+        type: string
+    MessageTypeQuery:
+      in: query
+      name: message_type
+      required: false
+      schema:
+        type: string
+    FromQuery:
+      in: query
+      name: from
+      required: false
+      schema:
+        type: string
+    ToQuery:
+      in: query
+      name: to
+      required: false
+      schema:
+        type: string
+    IncludeToolQuery:
+      in: query
+      name: include_tool
+      required: false
+      schema:
+        type: boolean
+    BeforeSeqNoQuery:
+      in: query
+      name: before_seq_no
+      required: false
+      schema:
+        type: integer
+        format: int64
+    AfterSeqNoQuery:
+      in: query
+      name: after_seq_no
+      required: false
+      schema:
+        type: integer
+        format: int64
+    PageSizeQuery:
+      in: query
+      name: page_size
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
     BeforeQuery:
       in: query
       name: before
@@ -1984,6 +2777,30 @@ components:
           type: array
           items:
             type: string
+        botEnabled:
+          type: boolean
+        bot_enabled:
+          type: boolean
+        visibility:
+          type: string
+        botPrompt:
+          type: string
+        bot_prompt:
+          type: string
+        ownerUserID:
+          type: string
+        owner_user_id:
+          type: string
+        settingId:
+          type: string
+        setting_id:
+          type: string
+        settingUpdatedAt:
+          type: string
+          format: date-time
+        setting_updated_at:
+          type: string
+          format: date-time
         updatedAt:
           type: string
           format: date-time
@@ -1992,8 +2809,46 @@ components:
       required: [name]
 
     BotConfigUpdateRequest:
-      allOf:
-        - $ref: "#/components/schemas/BotConfig"
+      type: object
+      properties:
+        name:
+          type: string
+        avatar:
+          type: string
+        systemInstruction:
+          type: string
+        system_instruction:
+          type: string
+        documents:
+          type: array
+          items:
+            type: string
+        installedSkillIds:
+          type: array
+          items:
+            type: string
+        installed_skill_ids:
+          type: array
+          items:
+            type: string
+        knowledgeKeywords:
+          type: array
+          items:
+            type: string
+        knowledge_keywords:
+          type: array
+          items:
+            type: string
+        botEnabled:
+          type: boolean
+        bot_enabled:
+          type: boolean
+        visibility:
+          type: string
+        botPrompt:
+          type: string
+        bot_prompt:
+          type: string
 
     Agent:
       type: object
@@ -2248,6 +3103,30 @@ components:
           format: date-time
       required: [id, name, kind]
 
+    FriendRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        fromUserId:
+          type: string
+        toUserId:
+          type: string
+        fromName:
+          type: string
+        fromAvatar:
+          type: string
+        status:
+          type: string
+          enum: [pending, accepted, rejected, canceled]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, fromUserId, toUserId, status]
+
     CreateFriendRequest:
       type: object
       properties:
@@ -2264,12 +3143,14 @@ components:
           type: string
         company:
           type: string
+        threadId:
+          type: string
       required: [userId]
 
     DiscoverUserItem:
       type: object
       properties:
-        userId:
+        id:
           type: string
         displayName:
           type: string
@@ -2279,7 +3160,9 @@ components:
           type: string
         provider:
           type: string
-      additionalProperties: true
+        role:
+          type: string
+      required: [id, displayName, provider, role, avatar]
 
     AgentChatResponse:
       type: object
@@ -2409,17 +3292,25 @@ components:
           type: string
         description:
           type: string
+        skill_content:
+          type: string
+        skillContent:
+          type: string
         markdown:
-          type: string
-        permissionScope:
-          type: string
-        executor:
           type: string
         enabled:
           type: boolean
-        version:
+        auto_load:
+          type: boolean
+        autoLoad:
+          type: boolean
+        priority:
+          type: integer
+        change_log:
           type: string
-      required: [name, markdown]
+        changeLog:
+          type: string
+      required: [name]
 
     PatchCustomSkillRequest:
       type: object
@@ -2428,15 +3319,23 @@ components:
           type: string
         description:
           type: string
+        skill_content:
+          type: string
+        skillContent:
+          type: string
         markdown:
-          type: string
-        permissionScope:
-          type: string
-        executor:
           type: string
         enabled:
           type: boolean
-        version:
+        auto_load:
+          type: boolean
+        autoLoad:
+          type: boolean
+        priority:
+          type: integer
+        change_log:
+          type: string
+        changeLog:
           type: string
 
     ExecuteCustomSkillRequest:
@@ -2449,7 +3348,10 @@ components:
         variables:
           type: object
           additionalProperties: true
-      required: [input]
+        dryRun:
+          type: boolean
+        confirm:
+          type: boolean
 
     ExecuteCustomSkillResponse:
       type: object
@@ -2650,3 +3552,556 @@ components:
         message:
           $ref: "#/components/schemas/ConversationMessage"
       required: [appId, output, ranAt]
+
+    AuthProfileUpdateRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        email:
+          type: string
+      required: [displayName, email]
+
+    ChatCompletionsRequest:
+      type: object
+      properties:
+        stream:
+          type: boolean
+        input:
+          type: string
+        prompt:
+          type: string
+        session_id:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        bot_owner_user_id:
+          type: string
+        skill_ids:
+          type: array
+          items:
+            type: string
+      required: [stream]
+
+    ChatAssistRequest:
+      type: object
+      properties:
+        stream:
+          type: boolean
+        action:
+          type: string
+        input:
+          type: string
+        question:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        selected_message_id:
+          type: string
+        selected_message_content:
+          type: string
+        session_id:
+          type: string
+      required: [stream, action]
+
+    ATChatSession:
+      type: object
+      properties:
+        id:
+          type: string
+        owner_user_id:
+          type: string
+        session_type:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        bot_owner_user_id:
+          type: string
+        title:
+          type: string
+        last_message_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        updated_by:
+          type: string
+        record_status:
+          type: string
+      required: [id]
+
+    ATChatSessionListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ATChatSession"
+      required: [list]
+
+    ATChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        owner_user_id:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        seq_no:
+          type: integer
+          format: int64
+        role:
+          type: string
+        message_type:
+          type: string
+        content:
+          type: string
+        external_message_id:
+          type: string
+        reply_to_message_id:
+          type: string
+        tool_name:
+          type: string
+        tool_input:
+          type: string
+        tool_output:
+          type: string
+        model:
+          type: string
+        prompt_tokens:
+          type: integer
+          format: int64
+        completion_tokens:
+          type: integer
+          format: int64
+        token_count:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        record_status:
+          type: string
+      required: [id]
+
+    ATChatMessageListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ATChatMessage"
+      required: [list]
+
+    ATChatHistoryPagination:
+      type: object
+      properties:
+        page_size:
+          type: integer
+        next_cursor:
+          type: string
+
+    ATChatHistoryResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ATChatMessage"
+        pagination:
+          $ref: "#/components/schemas/ATChatHistoryPagination"
+      required: [list]
+
+    CreateFriendResponse:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [friend, request]
+        friend:
+          $ref: "#/components/schemas/Friend"
+        request:
+          $ref: "#/components/schemas/FriendRequest"
+      required: [mode]
+
+    FriendRequestActionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        request:
+          $ref: "#/components/schemas/FriendRequest"
+      required: [ok]
+
+    CreateFriendQRResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required: [token, expiresAt]
+
+    ScanFriendQRRequest:
+      type: object
+      properties:
+        token:
+          type: string
+      required: [token]
+
+    SkillPublishRequest:
+      type: object
+      properties:
+        change_log:
+          type: string
+
+    SkillToggleRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required: [enabled]
+
+    SkillValidateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        skill_content:
+          type: string
+        skillContent:
+          type: string
+        markdown:
+          type: string
+
+    MiniAppCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        requirement:
+          type: string
+      required: [name, requirement]
+
+    MiniAppChatRequest:
+      type: object
+      properties:
+        stream:
+          type: boolean
+        session_id:
+          type: string
+        input:
+          type: string
+        prompt:
+          type: string
+      required: [stream]
+
+    ATMiniApp:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        latest_version:
+          type: integer
+        s3_base_path:
+          type: string
+        preview_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        record_status:
+          type: string
+      required: [id, name]
+
+    ATMiniAppListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ATMiniApp"
+      required: [list]
+
+    ATMiniAppVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        app_id:
+          type: string
+        version:
+          type: integer
+        prompt:
+          type: string
+        diff_summary:
+          type: string
+        local_build_dir:
+          type: string
+        s3_path:
+          type: string
+        preview_url:
+          type: string
+        status:
+          type: string
+        build_log:
+          type: string
+        files_json:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        record_status:
+          type: string
+      required: [id, app_id, version]
+
+    ATMiniAppVersionListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ATMiniAppVersion"
+      required: [list]
+
+    MemoryProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        category:
+          type: string
+        summary:
+          type: string
+        source_date:
+          type: string
+          format: date-time
+        version:
+          type: integer
+        quality_score:
+          type: number
+        status:
+          type: string
+        source_message_ids:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        record_status:
+          type: string
+      required: [id]
+
+    MemoryProfileListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryProfile"
+      required: [list]
+
+    MemoryProfileUpdateRequest:
+      type: object
+      properties:
+        summary:
+          type: string
+        quality_score:
+          type: number
+        status:
+          type: string
+
+    MemoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        profile_id:
+          type: string
+        user_id:
+          type: string
+        category:
+          type: string
+        content:
+          type: string
+        confidence:
+          type: number
+        importance:
+          type: number
+        source_message_ids:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        record_status:
+          type: string
+      required: [id]
+
+    MemoryItemListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryItem"
+      required: [list]
+
+    MemoryItemCreateRequest:
+      type: object
+      properties:
+        category:
+          type: string
+        content:
+          type: string
+        confidence:
+          type: number
+        importance:
+          type: number
+        status:
+          type: string
+        profile_id:
+          type: string
+        source_message_ids:
+          type: array
+          items:
+            type: string
+      required: [category, content]
+
+    MemoryItemUpdateRequest:
+      type: object
+      properties:
+        category:
+          type: string
+        content:
+          type: string
+        confidence:
+          type: number
+        importance:
+          type: number
+        status:
+          type: string
+        source_message_ids:
+          type: array
+          items:
+            type: string
+
+    MemoryJob:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        window_start:
+          type: string
+          format: date-time
+        window_end:
+          type: string
+          format: date-time
+        status:
+          type: string
+        retry_count:
+          type: integer
+        input_message_count:
+          type: integer
+        output_profile_count:
+          type: integer
+        quality_score:
+          type: number
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        record_status:
+          type: string
+      required: [id]
+
+    MemoryJobListResponse:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryJob"
+      required: [list]
+
+    MemoryJobRunRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+        date:
+          type: string
+
+    MemoryJobRunResponse:
+      type: object
+      properties:
+        window_start:
+          type: string
+          format: date-time
+        window_end:
+          type: string
+          format: date-time
+        processed:
+          type: integer
+        success:
+          type: integer
+        partial:
+          type: integer
+        failed:
+          type: integer
