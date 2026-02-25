@@ -196,6 +196,10 @@ Reason:
 Reason:
 - Runtime logs are needed for debugging and trust in production.
 
+Catalog note (2026-02):
+- Built-in skill `skill_reminder_scheduler` should be present in `GET /v1/skills/catalog`.
+- Expected behavior: parse natural-language time (e.g. "10分钟后提醒我喝水"), then create a task with `dueAt`.
+
 ## 4.5 Knowledge (new, required)
 
 - `POST /v1/knowledge/files` (upload)
@@ -289,4 +293,3 @@ Module-specific:
 2. Phase 2: Realtime event completion (`bot.updated`, `skill.custom.updated/deleted`).
 3. Phase 3: Knowledge APIs and agent orchestration endpoint.
 4. Phase 4: Batch task operations and runtime observability APIs.
-

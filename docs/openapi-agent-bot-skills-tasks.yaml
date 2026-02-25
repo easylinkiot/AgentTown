@@ -1068,6 +1068,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SkillCatalogItem"
+              example:
+                - id: "skill_task_decomposer"
+                  name: "Task Decomposer"
+                  description: "Breaks messages into actionable tasks with owners and due dates."
+                  type: "workflow"
+                  permissionScope: "chat:read,tasks:write"
+                  version: "1.0.0"
+                  tags: ["task", "planning"]
+                - id: "skill_reminder_scheduler"
+                  name: "Reminder Scheduler"
+                  description: "Convert natural language reminder requests into scheduled reminder tasks."
+                  type: "automation"
+                  permissionScope: "chat:read,tasks:write"
+                  version: "1.0.0"
+                  tags: ["reminder", "calendar", "task"]
         default:
           $ref: "#/components/responses/ErrorResponse"
 

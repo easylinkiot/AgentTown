@@ -57,6 +57,11 @@ import {
 } from "@/src/types";
 
 import { useAuth } from "@/src/state/auth-context";
+import {
+  clearTaskReminderNotifications,
+  ensureTaskReminderPermission,
+  syncTaskReminderNotifications,
+} from "@/src/services/task-notifications";
 
 interface AgentTownContextValue {
   botConfig: BotConfig;
@@ -382,6 +387,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<AppLanguage>("en");
   const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
   const [bootstrapReady, setBootstrapReady] = useState(false);
+  const notificationSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshAll = useCallback(async () => {
     const payload = await fetchBootstrap();
@@ -555,6 +561,32 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [isSignedIn, refreshAll, userID]);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      void clearTaskReminderNotifications();
+      return;
+    }
+    void ensureTaskReminderPermission();
+  }, [isSignedIn]);
+
+  useEffect(() => {
+    if (!isSignedIn || !bootstrapReady) return;
+
+    if (notificationSyncTimerRef.current) {
+      clearTimeout(notificationSyncTimerRef.current);
+    }
+    notificationSyncTimerRef.current = setTimeout(() => {
+      void syncTaskReminderNotifications(tasks, language);
+    }, 250);
+
+    return () => {
+      if (notificationSyncTimerRef.current) {
+        clearTimeout(notificationSyncTimerRef.current);
+        notificationSyncTimerRef.current = null;
+      }
+    };
+  }, [bootstrapReady, isSignedIn, language, tasks]);
 
   useEffect(() => {
     if (!isSignedIn) return;

@@ -35,7 +35,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.jason.agenttown",
       "permissions": [
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -46,6 +47,7 @@
     "plugins": [
       "expo-router",
       "expo-apple-authentication",
+      "expo-notifications",
       [
         "expo-speech-recognition",
         {
