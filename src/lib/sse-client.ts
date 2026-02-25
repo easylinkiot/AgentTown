@@ -267,6 +267,26 @@ export class SSEClient<CustomEvent extends string = never> {
       lineEndingCharacter: this.options.lineEndingCharacter,
     });
     this.source = source;
+    const knownCustomEvents = new Set(this.options.customEvents || []);
+    const builtinEvents = new Set(["open", "message", "error", "close"]);
+    const sourceWithDispatch = source as unknown as {
+      dispatch?: (type: string, event: unknown) => void;
+    };
+    const originalDispatch = sourceWithDispatch.dispatch;
+    if (typeof originalDispatch === "function") {
+      sourceWithDispatch.dispatch = (type: string, event: unknown) => {
+        originalDispatch.call(source, type, event);
+        if (!this.isCurrentSource(seq)) return;
+        if (builtinEvents.has(type)) return;
+        if (knownCustomEvents.has(type as CustomEvent)) return;
+        this.captureLastEventId(event);
+        this.touchActivity(seq);
+        this.options.onCustomEvent?.(
+          type as CustomEvent,
+          event as EventSourceEvent<CustomEvent, CustomEvent>
+        );
+      };
+    }
 
     source.addEventListener("open", (event) => {
       if (!this.isCurrentSource(seq)) return;
@@ -286,6 +306,18 @@ export class SSEClient<CustomEvent extends string = never> {
 
     source.addEventListener("error", (event) => {
       if (!this.isCurrentSource(seq)) return;
+      const maybeSSEErrorEvent = event as { data?: unknown };
+      const hasEventPayload =
+        typeof maybeSSEErrorEvent.data === "string" && maybeSSEErrorEvent.data.trim().length > 0;
+      if (hasEventPayload && (this.options.customEvents || []).includes("error" as CustomEvent)) {
+        this.captureLastEventId(event);
+        this.touchActivity(seq);
+        this.options.onCustomEvent?.(
+          "error" as CustomEvent,
+          event as EventSourceEvent<CustomEvent, CustomEvent>
+        );
+        return;
+      }
       this.options.onError?.({
         type: "source-error",
         reason: "error",
@@ -301,7 +333,7 @@ export class SSEClient<CustomEvent extends string = never> {
       this.scheduleReconnect(seq, "close");
     });
 
-    for (const eventName of new Set(this.options.customEvents || [])) {
+    for (const eventName of knownCustomEvents) {
       source.addEventListener(eventName, (event) => {
         if (!this.isCurrentSource(seq)) return;
         this.captureLastEventId(event);

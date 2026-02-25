@@ -34,6 +34,12 @@ import {
   listFriends as listFriendsApi,
   type DiscoverUser,
 } from "@/src/lib/api";
+import {
+  type AssistCandidate,
+  type ChatAssistAction,
+  type ChatAssistRequest,
+  runChatAssist,
+} from "@/src/services/chatAssist";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
 import { Agent, ConversationMessage, Friend, ThreadMember } from "@/src/types";
@@ -188,7 +194,6 @@ export default function ChatDetailScreen() {
     refreshThreadMessages,
     loadOlderMessages,
     sendMessage,
-    createTaskFromMessage,
     createFriend,
     listMembers,
     addMember,
@@ -487,9 +492,14 @@ export default function ChatDetailScreen() {
   } | null>(null);
   const [aiCardHeight, setAiCardHeight] = useState(164);
   const [askAI, setAskAI] = useState("");
-  const [askAIAnswer, setAskAIAnswer] = useState<string | null>(null);
+  const [askAICandidates, setAskAICandidates] = useState<AssistCandidate[]>([]);
+  const [askAISelectedIndex, setAskAISelectedIndex] = useState(0);
+  const [askAIAction, setAskAIAction] = useState<ChatAssistAction>("ask_anything");
   const [askAIError, setAskAIError] = useState<string | null>(null);
-  const [askAIBusy, setAskAIBusy] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const askAIAbortRef = useRef<AbortController | null>(null);
+  const askAIRequestSeqRef = useRef(0);
+  const askAIMountedRef = useRef(true);
   const [myBotPanel, setMyBotPanel] = useState(false);
   const [memberNameListModal, setMemberNameListModal] = useState(false);
   const [myBotQuestion, setMyBotQuestion] = useState("");
@@ -763,23 +773,126 @@ export default function ChatDetailScreen() {
     }
   };
 
+  const abortAskAIStream = useCallback(() => {
+    askAIAbortRef.current?.abort();
+    askAIAbortRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    askAIMountedRef.current = true;
+    return () => {
+      askAIMountedRef.current = false;
+      abortAskAIStream();
+    };
+  }, [abortAskAIStream]);
+
+  const closeActionModal = useCallback(() => {
+    abortAskAIStream();
+    setActionModal(false);
+  }, [abortAskAIStream]);
+
+  const runAssistGeneration = useCallback(
+    async (action: ChatAssistAction) => {
+      if (!actionMessage || isStreaming) return;
+      const selectedMessageContent = (actionMessage.content || "").trim();
+      if (!selectedMessageContent && action !== "ask_anything") {
+        setAskAIError(tr("消息内容为空，无法生成。", "Message is empty and cannot be used."));
+        return;
+      }
+
+      const requestPayload = {
+        action,
+        selected_message_id: actionMessage.id,
+        selected_message_content: selectedMessageContent,
+      } as const;
+
+      if (action === "ask_anything") {
+        const question = askAI.trim();
+        if (!question) {
+          setAskAIError(tr("请输入问题。", "Please enter a question."));
+          return;
+        }
+      }
+
+      abortAskAIStream();
+      const controller = new AbortController();
+      askAIAbortRef.current = controller;
+      const requestSeq = ++askAIRequestSeqRef.current;
+
+      setAskAIAction(action);
+      setAskAIError(null);
+      setAskAICandidates([]);
+      setAskAISelectedIndex(0);
+      setIsStreaming(true);
+
+      const assistRequest: ChatAssistRequest = { ...requestPayload };
+      if (action === "ask_anything") {
+        assistRequest.input = askAI.trim();
+      }
+
+      try {
+        await runChatAssist(
+          assistRequest,
+          {
+            onCandidates: (next) => {
+              if (controller.signal.aborted) return;
+              if (!askAIMountedRef.current) return;
+              if (requestSeq !== askAIRequestSeqRef.current) return;
+              setAskAICandidates(next);
+              setAskAISelectedIndex((prev) => {
+                if (next.length === 0) return 0;
+                if (prev >= 0 && prev < next.length) return prev;
+                return 0;
+              });
+            },
+          },
+          controller.signal
+        );
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (!askAIMountedRef.current) return;
+        if (requestSeq !== askAIRequestSeqRef.current) return;
+        setAskAIError(formatApiError(err));
+      } finally {
+        if (askAIAbortRef.current === controller) {
+          askAIAbortRef.current = null;
+        }
+        if (!askAIMountedRef.current) return;
+        if (requestSeq !== askAIRequestSeqRef.current) return;
+        setIsStreaming(false);
+      }
+    },
+    [abortAskAIStream, actionMessage, askAI, isStreaming, tr]
+  );
+
   const handleLongPress = (message: ConversationMessage) => {
+    abortAskAIStream();
     setActionMessage(message);
+    setAskAI("");
+    setAskAICandidates([]);
+    setAskAISelectedIndex(0);
+    setAskAIError(null);
+    setAskAIAction("ask_anything");
+    setIsStreaming(false);
+    setActionAnchor(null);
     setActionModal(true);
   };
 
   const handleMessagePress = (message: ConversationMessage, ev?: GestureResponderEvent) => {
     if (isDraggingRef.current) return;
+    abortAskAIStream();
     setActionMessage(message);
     setAskAI("");
-    setAskAIAnswer(null);
+    setAskAICandidates([]);
+    setAskAISelectedIndex(0);
     setAskAIError(null);
+    setAskAIAction("ask_anything");
+    setIsStreaming(false);
     if (ev?.nativeEvent) {
       const h = bubbleHeightsRef.current[message.id] || 56;
       const top = ev.nativeEvent.pageY - ev.nativeEvent.locationY;
       const bottom = top + h;
-      const meFinal =
-        isCurrentUserMessage(message, currentUserId);
+      const meFinal = isCurrentUserMessage(message, currentUserId);
       setActionAnchor({
         yTop: top,
         yBottom: bottom,
@@ -792,25 +905,7 @@ export default function ChatDetailScreen() {
   };
 
   const runAskAI = async () => {
-    if (!actionMessage) return;
-    const question = askAI.trim();
-    if (!question || askAIBusy) return;
-    setAskAIError(null);
-    setAskAIAnswer(null);
-    setAskAIBusy(true);
-    try {
-      const prompt = `${tr("用户问题：", "User question: ")}${question}\n\n${tr("消息内容：", "Message: ")}${actionMessage.content}`;
-      const result = await aiText({
-        prompt,
-        systemInstruction: botConfig.systemInstruction || undefined,
-        fallback: "Noted.",
-      });
-      setAskAIAnswer((result.text || "").trim() || "Noted.");
-    } catch (err) {
-      setAskAIError(formatApiError(err));
-    } finally {
-      setAskAIBusy(false);
-    }
+    await runAssistGeneration("ask_anything");
   };
 
   const runGroupMyBot = async () => {
@@ -858,55 +953,34 @@ export default function ChatDetailScreen() {
   };
 
   const runAddToTask = async () => {
-    if (!actionMessage) return;
-    try {
-      const fallbackTitle = tr("来自聊天的任务", "Task from chat");
-      const created = await createTaskFromMessage(
-        chatId,
-        actionMessage.id,
-        (actionMessage.content || "").slice(0, 80) || fallbackTitle
-      );
-      Alert.alert(
-        tr("已添加任务", "Task added"),
-        created?.title || tr("任务已创建", "Task created")
-      );
-      setActionModal(false);
-    } catch (err) {
-      Alert.alert(
-        tr("添加任务失败", "Add task failed"),
-        err instanceof Error ? err.message : tr("请稍后重试", "Please try again")
-      );
-    }
+    await runAssistGeneration("add_task");
   };
 
   const runReplyDraft = async () => {
-    if (!actionMessage || askAIBusy) return;
-    setAskAIError(null);
-    setAskAIBusy(true);
-    try {
-      const prompt = `${tr("请帮我写一个简短得体的回复。仅输出回复正文。", "Write a short, polite reply. Output only the reply text.")}\n\n${tr("对方消息：", "Incoming message: ")}${actionMessage.content}`;
-      const result = await aiText({
-        prompt,
-        systemInstruction: botConfig.systemInstruction || undefined,
-        fallback: "OK.",
-      });
-      const draft = (result.text || "").trim();
-      if (draft) {
-        const targetName = (actionMessage.senderName || "").trim();
-        if (thread.isGroup && targetName) {
-          const mention = `@${targetName}`;
-          const hasMentionPrefix = draft.toLowerCase().startsWith(mention.toLowerCase());
-          setInput(hasMentionPrefix ? draft : `${mention} ${draft}`);
-        } else {
-          setInput(draft);
-        }
+    await runAssistGeneration("auto_reply");
+  };
+
+  const applySelectedCandidate = () => {
+    if (isStreaming) return;
+    if (askAICandidates.length === 0) return;
+    const index = Math.max(0, Math.min(askAISelectedIndex, askAICandidates.length - 1));
+    const picked = askAICandidates[index];
+    const text = (picked?.text || "").trim();
+    if (!text) return;
+
+    if (askAIAction === "auto_reply" && actionMessage) {
+      const targetName = (actionMessage.senderName || "").trim();
+      if (thread.isGroup && targetName) {
+        const mention = `@${targetName}`;
+        const hasMentionPrefix = text.toLowerCase().startsWith(mention.toLowerCase());
+        setInput(hasMentionPrefix ? text : `${mention} ${text}`);
+      } else {
+        setInput(text);
       }
-      setActionModal(false);
-    } catch (err) {
-      setAskAIError(formatApiError(err));
-    } finally {
-      setAskAIBusy(false);
+    } else {
+      setInput(text);
     }
+    closeActionModal();
   };
 
   const insertMention = (name?: string) => {
@@ -1142,6 +1216,16 @@ export default function ChatDetailScreen() {
 
   const ContainerView = Animated.View;
   const containerStyle = [styles.container, { paddingBottom: keyboardPadding }];
+  const askAICanGenerate =
+    Boolean(actionMessage) &&
+    !isStreaming &&
+    (askAIAction !== "ask_anything" || Boolean(askAI.trim()));
+  const askAICanApply = !isStreaming && askAICandidates.length > 0;
+  const askAIGenerateLabel = isStreaming
+    ? tr("生成中...", "Generating...")
+    : askAICandidates.length > 0
+      ? tr("重新生成", "Regenerate")
+      : tr("生成", "Generate");
 
   return (
     <KeyframeBackground>
@@ -1326,8 +1410,9 @@ export default function ChatDetailScreen() {
         </ContainerView>
         </KeyboardAvoidingView>
 
-        <Modal visible={actionModal} transparent animationType="fade" onRequestClose={() => setActionModal(false)}>
-          <Pressable style={styles.actionOverlay} onPress={() => setActionModal(false)}>
+        {/* Ask AI Modal 组件 */}
+        <Modal visible={actionModal} transparent animationType="fade" onRequestClose={closeActionModal}>
+          <Pressable style={styles.actionOverlay} onPress={closeActionModal}>
             <AnimatedPressable
               ref={aiCardRef}
               style={[
@@ -1371,6 +1456,30 @@ export default function ChatDetailScreen() {
               onLayout={(e) => setAiCardHeight(e.nativeEvent.layout.height)}
               onPress={() => null}
             >
+              <View style={styles.aiModeRow}>
+                <Pressable
+                  style={[styles.aiModeBtn, askAIAction === "ask_anything" && styles.aiModeBtnActive]}
+                  onPress={() => setAskAIAction("ask_anything")}
+                  disabled={isStreaming}
+                >
+                  <Text style={styles.aiModeBtnText}>{tr("问答", "Ask")}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.aiModeBtn, askAIAction === "auto_reply" && styles.aiModeBtnActive]}
+                  onPress={() => setAskAIAction("auto_reply")}
+                  disabled={isStreaming}
+                >
+                  <Text style={styles.aiModeBtnText}>{tr("回复", "Reply")}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.aiModeBtn, askAIAction === "add_task" && styles.aiModeBtnActive]}
+                  onPress={() => setAskAIAction("add_task")}
+                  disabled={isStreaming}
+                >
+                  <Text style={styles.aiModeBtnText}>{tr("任务", "Task")}</Text>
+                </Pressable>
+              </View>
+
               <View style={styles.aiAskRow}>
                 <Ionicons name="sparkles-outline" size={16} color="rgba(191,219,254,0.95)" />
                 <TextInput
@@ -1381,35 +1490,66 @@ export default function ChatDetailScreen() {
                   placeholder={tr("Ask AI...", "Ask AI...")}
                   placeholderTextColor="rgba(148,163,184,0.9)"
                   style={styles.aiAskInput}
-                  editable={!askAIBusy}
+                  editable={!isStreaming}
                 />
-                <Pressable
-                  style={[styles.aiSend, (askAIBusy || !askAI.trim() || !actionMessage) && styles.aiSendDisabled]}
-                  onPress={() => void runAskAI()}
-                >
-                  <Ionicons name="arrow-up" size={16} color="#0b1220" />
-                </Pressable>
               </View>
 
               {askAIError ? <Text style={styles.aiError}>{askAIError}</Text> : null}
-              {askAIAnswer ? (
-                <View style={styles.aiAnswerBox}>
-                  <Text style={styles.aiAnswerText}>{askAIAnswer}</Text>
-                </View>
-              ) : null}
+              {isStreaming ? <Text style={styles.aiHint}>{tr("生成中...", "Generating...")}</Text> : null}
+
+              <ScrollView style={styles.aiCandidatesList} contentContainerStyle={styles.aiCandidatesListContent}>
+                {askAICandidates.length === 0 ? (
+                  <Text style={styles.aiHint}>
+                    {tr("生成后可在这里选择候选内容。", "Generated candidates will appear here.")}
+                  </Text>
+                ) : (
+                  askAICandidates.map((candidate, index) => (
+                    <Pressable
+                      key={`${candidate.id || "candidate"}_${index}`}
+                      style={[
+                        styles.aiCandidateItem,
+                        askAISelectedIndex === index && styles.aiCandidateItemSelected,
+                      ]}
+                      onPress={() => setAskAISelectedIndex(index)}
+                      disabled={isStreaming}
+                    >
+                      {candidate.kind === "task" && candidate.title ? (
+                        <Text style={styles.aiCandidateTitle}>{candidate.title}</Text>
+                      ) : null}
+                      <Text style={styles.aiCandidateText}>{candidate.text}</Text>
+                      {candidate.kind === "task" && candidate.priority ? (
+                        <Text style={styles.aiCandidateMeta}>{candidate.priority}</Text>
+                      ) : null}
+                    </Pressable>
+                  ))
+                )}
+              </ScrollView>
 
               <View style={styles.aiButtonsRow}>
                 <Pressable
-                  style={[styles.aiBtn, askAIBusy && styles.aiBtnDisabled]}
-                  onPress={() => void runReplyDraft()}
+                  style={[styles.aiBtn, !askAICanGenerate && styles.aiBtnDisabled]}
+                  onPress={() => {
+                    if (askAIAction === "ask_anything") {
+                      void runAskAI();
+                    } else if (askAIAction === "auto_reply") {
+                      void runReplyDraft();
+                    } else {
+                      void runAddToTask();
+                    }
+                  }}
+                  disabled={!askAICanGenerate}
                 >
-                  <Text style={styles.aiBtnText}>{tr("回复", "Reply")}</Text>
+                  <Text style={styles.aiBtnText}>{askAIGenerateLabel}</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.aiBtn, styles.aiBtnSecondary, askAIBusy && styles.aiBtnDisabled]}
-                  onPress={() => void runAddToTask()}
+                  style={[styles.aiBtn, styles.aiBtnSecondary, !askAICanApply && styles.aiBtnDisabled]}
+                  onPress={applySelectedCandidate}
+                  disabled={!askAICanApply}
                 >
-                  <Text style={styles.aiBtnText}>{tr("任务", "Task")}</Text>
+                  <Text style={styles.aiBtnText}>{tr("采用", "Adopt")}</Text>
+                </Pressable>
+                <Pressable style={[styles.aiBtn, styles.aiBtnSecondary]} onPress={closeActionModal}>
+                  <Text style={styles.aiBtnText}>{tr("取消", "Cancel")}</Text>
                 </Pressable>
               </View>
             </AnimatedPressable>
@@ -2146,6 +2286,29 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
   },
+  aiModeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  aiModeBtn: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  aiModeBtnActive: {
+    backgroundColor: "rgba(59,130,246,0.30)",
+    borderColor: "rgba(147,197,253,0.62)",
+  },
+  aiModeBtnText: {
+    color: "rgba(226,232,240,0.94)",
+    fontSize: 12,
+    fontWeight: "900",
+  },
   aiAskRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2164,16 +2327,45 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     paddingVertical: 0,
   },
-  aiSend: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#e2e8f0",
-    alignItems: "center",
-    justifyContent: "center",
+  aiCandidatesList: {
+    maxHeight: 220,
   },
-  aiSendDisabled: {
-    opacity: 0.5,
+  aiCandidatesListContent: {
+    gap: 8,
+  },
+  aiCandidateItem: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 4,
+  },
+  aiCandidateItemSelected: {
+    borderColor: "rgba(147,197,253,0.78)",
+    backgroundColor: "rgba(59,130,246,0.20)",
+  },
+  aiCandidateTitle: {
+    color: "rgba(191,219,254,0.98)",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  aiCandidateText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  aiCandidateMeta: {
+    color: "rgba(148,163,184,0.95)",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  aiHint: {
+    color: "rgba(148,163,184,0.95)",
+    fontSize: 12,
+    fontWeight: "700",
   },
   aiButtonsRow: {
     flexDirection: "row",
