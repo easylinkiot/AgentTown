@@ -108,6 +108,23 @@ It is based on current frontend behavior in `src/lib/api.ts` and `src/state/agen
 
 ## 4. API Requirements
 
+## 4.0 Auth (Password Recovery)
+
+- `POST /v1/auth/forgot`
+  - request: `{ "email": "user@example.com" }`
+  - response: `{ "ok": true, "expiresAt": "...", "verificationCode": "755984" }`
+- `POST /v1/auth/verify`
+  - request: `{ "email": "user@example.com", "code": "123456" }`
+  - response: `{ "resetToken": "token_xxx", "resetTokenExpiresAt": "..." }`
+- `POST /v1/auth/reset`
+  - request: `{ "email": "user@example.com", "resetToken": "token_xxx", "password": "Password123!" }`
+  - response: `{ "ok": true, "message": "password reset successful" }`
+
+Constraints (align with existing register/login behavior):
+- Keep email/password field naming and validation style consistent with `/v1/auth/register`.
+- Keep error envelope style consistent with existing auth APIs (`error.code`, `error.message`, `error.requestId`, top-level `message`).
+- Password policy should remain at least 8 chars unless globally updated.
+
 ## 4.1 Bot
 
 - `GET /v1/bot-config`

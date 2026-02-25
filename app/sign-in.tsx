@@ -3,7 +3,7 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import Constants from "expo-constants";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -70,6 +70,7 @@ async function fetchGoogleProfile(accessToken: string) {
 
 export default function SignInScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ email?: string }>();
   const { language, updateLanguage } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const {
@@ -96,6 +97,12 @@ export default function SignInScreen() {
   const [profileEmail, setProfileEmail] = useState("");
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const isExpoGo = Constants.appOwnership === "expo";
+
+  useEffect(() => {
+    const emailParam = typeof params.email === "string" ? params.email.trim() : "";
+    if (!emailParam || email) return;
+    setEmail(emailParam);
+  }, [email, params.email]);
 
   const googleWebClientId = useMemo(
     () => sanitizeGoogleClientId(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID),
@@ -446,6 +453,13 @@ export default function SignInScreen() {
             secureTextEntry
             autoCapitalize="none"
           />
+          <Pressable
+            style={[styles.ghostBtn, busyKey !== null && styles.btnDisabled]}
+            disabled={busyKey !== null}
+            onPress={() => router.push("/forgot-password")}
+          >
+            <Text style={styles.ghostBtnText}>{tr("忘记密码？", "Forgot Password?")}</Text>
+          </Pressable>
           {__DEV__ ? (
             <Pressable
               style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
@@ -725,6 +739,18 @@ const styles = StyleSheet.create({
     color: "#1f2937",
     fontWeight: "700",
     fontSize: 13,
+  },
+  ghostBtn: {
+    minHeight: 32,
+    alignSelf: "flex-end",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  ghostBtnText: {
+    color: "#2563eb",
+    fontSize: 13,
+    fontWeight: "700",
   },
   helperText: {
     fontSize: 12,
