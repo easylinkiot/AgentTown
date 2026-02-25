@@ -453,13 +453,22 @@ export default function SignInScreen() {
             secureTextEntry
             autoCapitalize="none"
           />
-          <Pressable
-            style={[styles.ghostBtn, busyKey !== null && styles.btnDisabled]}
-            disabled={busyKey !== null}
-            onPress={() => router.push("/forgot-password")}
-          >
-            <Text style={styles.ghostBtnText}>{tr("忘记密码？", "Forgot Password?")}</Text>
-          </Pressable>
+          <View style={styles.auxActionRow}>
+            <Pressable
+              style={[styles.ghostBtn, busyKey !== null && styles.btnDisabled]}
+              disabled={busyKey !== null}
+              onPress={() => router.push("/sign-up")}
+            >
+              <Text style={styles.ghostBtnText}>{tr("注册", "Create Account")}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.ghostBtn, busyKey !== null && styles.btnDisabled]}
+              disabled={busyKey !== null}
+              onPress={() => router.push("/forgot-password")}
+            >
+              <Text style={styles.ghostBtnText}>{tr("忘记密码？", "Forgot Password?")}</Text>
+            </Pressable>
+          </View>
           {__DEV__ ? (
             <Pressable
               style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
@@ -481,14 +490,6 @@ export default function SignInScreen() {
               <Ionicons name="log-in-outline" size={16} color="white" />
             )}
             <Text style={styles.primaryBtnText}>{tr("登录", "Sign In")}</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
-            disabled={busyKey !== null}
-            onPress={() => router.push("/sign-up")}
-          >
-            <Ionicons name="person-add-outline" size={16} color="#1f2937" />
-            <Text style={styles.secondaryBtnText}>{tr("注册", "Create Account")}</Text>
           </Pressable>
         </View>
 
@@ -740,9 +741,14 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 13,
   },
+  auxActionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
   ghostBtn: {
     minHeight: 32,
-    alignSelf: "flex-end",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
