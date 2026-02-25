@@ -416,7 +416,7 @@ async function apiFetch<T>(
 export async function authRegister(payload: {
   email: string;
   password: string;
-  displayName: string;
+  displayName?: string;
 }) {
   return apiFetch<AuthSessionPayload>("/v1/auth/register", {
     method: "POST",

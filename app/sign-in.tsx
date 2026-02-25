@@ -32,6 +32,12 @@ const DEV_LOGIN_PRESET = {
   displayName: "Local Admin",
 };
 
+const DEV_LOGIN_PRESET_ = {
+  email: "fulladmin.20260225@agenttown.dev",
+  password: "AgentTown#2026",
+  displayName: "Local Admin",
+};
+
 interface GoogleProfile {
   sub?: string;
   name?: string;
@@ -461,6 +467,14 @@ export default function SignInScreen() {
               <Ionicons name="log-in-outline" size={16} color="white" />
             )}
             <Text style={styles.primaryBtnText}>{tr("登录", "Sign In")}</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
+            disabled={busyKey !== null}
+            onPress={() => router.push("/sign-up")}
+          >
+            <Ionicons name="person-add-outline" size={16} color="#1f2937" />
+            <Text style={styles.secondaryBtnText}>{tr("注册", "Create Account")}</Text>
           </Pressable>
         </View>
 

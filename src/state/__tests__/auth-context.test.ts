@@ -1,6 +1,6 @@
 import mockAsyncStorage from "@react-native-async-storage/async-storage/jest/async-storage-mock";
 
-import { displayNameFromEmail, normalizePhone } from "../auth-context";
+import { defaultDisplayNameForEmail, displayNameFromEmail, normalizePhone } from "../auth-context";
 
 jest.mock("@react-native-async-storage/async-storage", () => mockAsyncStorage);
 
@@ -17,5 +17,11 @@ describe("auth-context helpers", () => {
   it("extracts display name from email", () => {
     expect(displayNameFromEmail("jason@biceek.com")).toBe("jason");
     expect(displayNameFromEmail(undefined)).toBeNull();
+  });
+
+  it("falls back to Member when deriving default register display name", () => {
+    expect(defaultDisplayNameForEmail("  lucy@example.com ")).toBe("lucy");
+    expect(defaultDisplayNameForEmail("")).toBe("Member");
+    expect(defaultDisplayNameForEmail("@example.com")).toBe("Member");
   });
 });

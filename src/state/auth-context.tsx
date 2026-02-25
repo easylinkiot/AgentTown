@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { authGuest, authLogin, authMe, authProvider, authUpdateProfile, setAuthToken } from "@/src/lib/api";
+import { authGuest, authLogin, authMe, authProvider, authRegister, authUpdateProfile, setAuthToken } from "@/src/lib/api";
 import { AuthUser } from "@/src/types";
 
 export type AuthMethod = "guest" | "google" | "apple" | "phone" | "password";
@@ -18,6 +18,7 @@ interface AuthContextValue {
   token: string | null;
   isSignedIn: boolean;
   signInAsGuest: () => Promise<void>;
+  signUpWithPassword: (email: string, password: string) => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (input: {
     id: string;
@@ -61,6 +62,10 @@ export function displayNameFromEmail(email?: string | null) {
   if (!email) return null;
   const [local] = email.split("@");
   return local || null;
+}
+
+export function defaultDisplayNameForEmail(email: string) {
+  return displayNameFromEmail(email.trim()) || "Member";
 }
 
 function mapBackendUser(input: {
@@ -162,6 +167,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: mapBackendUser(session.user),
     });
   }, [applySession]);
+
+  const signUpWithPassword = useCallback<AuthContextValue["signUpWithPassword"]>(
+    async (email, password) => {
+      const normalizedEmail = email.trim();
+      const session = await authRegister({
+        email: normalizedEmail,
+        password,
+        displayName: defaultDisplayNameForEmail(normalizedEmail),
+      });
+      await applySession({ token: session.token, user: mapBackendUser(session.user) });
+    },
+    [applySession]
+  );
 
   const signInWithPassword = useCallback<AuthContextValue["signInWithPassword"]>(
     async (email, password) => {
@@ -278,6 +296,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       isSignedIn: Boolean(user && token && !user.requireProfileSetup),
       signInAsGuest,
+      signUpWithPassword,
       signInWithPassword,
       signInWithGoogle,
       signInWithApple,
@@ -291,6 +310,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       token,
       signInAsGuest,
+      signUpWithPassword,
       signInWithPassword,
       signInWithGoogle,
       signInWithApple,
