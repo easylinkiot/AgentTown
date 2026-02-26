@@ -1382,6 +1382,7 @@ export default function ChatDetailScreen() {
             </Pressable> */}
             <View style={styles.inputBox}>
               <TextInput
+                testID="chat-message-input"
                 value={input}
                 onChangeText={setInput}
                 onFocus={() => setKeyboardTarget("chat")}
@@ -1400,6 +1401,7 @@ export default function ChatDetailScreen() {
               <Ionicons name="mic-outline" size={18} color="rgba(226,232,240,0.78)" />
             </Pressable>
             <Pressable
+              testID="chat-send-button"
               style={[styles.sendBtn, (submitting || !input.trim()) && styles.sendBtnDisabled]}
               onPress={() => void handleSend()}
               disabled={submitting || !input.trim()}

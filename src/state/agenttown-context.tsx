@@ -57,6 +57,7 @@ import {
 } from "@/src/types";
 
 import { useAuth } from "@/src/state/auth-context";
+import { isE2ETestMode } from "@/src/utils/e2e";
 import {
   clearTaskReminderNotifications,
   ensureTaskReminderPermission,
@@ -356,6 +357,7 @@ function normalizeMessageForUser(message: ConversationMessage, userID: string): 
 }
 
 export function AgentTownProvider({ children }: { children: React.ReactNode }) {
+  const isE2E = isE2ETestMode();
   const { isSignedIn, user } = useAuth();
   const userID = (user?.id || "").trim();
 
@@ -545,33 +547,37 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    (async () => {
-      try {
-        await refreshAll();
-      } catch {
-        // Keep local fallback state when backend is unavailable.
-      } finally {
-        if (!cancelled) {
-          setBootstrapReady(true);
+    if (isE2E) {
+      setBootstrapReady(true);
+    } else {
+      (async () => {
+        try {
+          await refreshAll();
+        } catch {
+          // Keep local fallback state when backend is unavailable.
+        } finally {
+          if (!cancelled) {
+            setBootstrapReady(true);
+          }
         }
-      }
-    })();
+      })();
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, refreshAll, userID]);
+  }, [isE2E, isSignedIn, refreshAll, userID]);
 
   useEffect(() => {
-    if (!isSignedIn) {
+    if (!isSignedIn || isE2E) {
       void clearTaskReminderNotifications();
       return;
     }
     void ensureTaskReminderPermission();
-  }, [isSignedIn]);
+  }, [isE2E, isSignedIn]);
 
   useEffect(() => {
-    if (!isSignedIn || !bootstrapReady) return;
+    if (!isSignedIn || !bootstrapReady || isE2E) return;
 
     if (notificationSyncTimerRef.current) {
       clearTimeout(notificationSyncTimerRef.current);
@@ -586,10 +592,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         notificationSyncTimerRef.current = null;
       }
     };
-  }, [bootstrapReady, isSignedIn, language, tasks]);
+  }, [bootstrapReady, isE2E, isSignedIn, language, tasks]);
 
   useEffect(() => {
-    if (!isSignedIn) return;
+    if (!isSignedIn || isE2E) return;
 
     const unsubscribe = subscribeRealtime((event: RealtimeEvent) => {
       if (!event?.type) return;
@@ -814,7 +820,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unsubscribe();
     };
-  }, [isSignedIn, userID]);
+  }, [isE2E, isSignedIn, userID]);
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {
