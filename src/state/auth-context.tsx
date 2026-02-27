@@ -14,6 +14,7 @@ import {
   setAuthToken,
 } from "@/src/lib/api";
 import { AuthUser } from "@/src/types";
+import { isE2ETestMode } from "@/src/utils/e2e";
 
 export type AuthMethod = "guest" | "google" | "apple" | "phone" | "password";
 
@@ -67,6 +68,7 @@ interface PersistedSession {
 const SESSION_KEY = "agenttown.auth.session.v2";
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
+const E2E_LOCAL_TOKEN = "agenttown-e2e-token";
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -111,6 +113,7 @@ function mapBackendUser(input: {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const isE2E = isE2ETestMode();
   const [isHydrated, setIsHydrated] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -158,13 +161,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           false
         );
 
-        try {
-          const me = await authMe();
-          if (!alive) return;
-          await applySession({ token: parsed.token, user: mapBackendUser(me) });
-        } catch {
-          if (!alive) return;
-          await applySession(null);
+        if (!isE2E) {
+          try {
+            const me = await authMe();
+            if (!alive) return;
+            await applySession({ token: parsed.token, user: mapBackendUser(me) });
+          } catch {
+            if (!alive) return;
+            await applySession(null);
+          }
         }
       } catch {
         await AsyncStorage.removeItem(SESSION_KEY);
@@ -178,15 +183,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       alive = false;
     };
-  }, [applySession]);
+  }, [applySession, isE2E]);
 
   const signInAsGuest = useCallback(async () => {
+    if (isE2E) {
+      const now = new Date().toISOString();
+      await applySession({
+        token: E2E_LOCAL_TOKEN,
+        user: {
+          id: "e2e-guest-user",
+          provider: "guest",
+          displayName: "E2E Guest",
+          email: "e2e.guest@agenttown.local",
+          requireProfileSetup: false,
+          role: "guest",
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      return;
+    }
     const session = await authGuest("Guest Explorer");
     await applySession({
       token: session.token,
       user: mapBackendUser(session.user),
     });
-  }, [applySession]);
+  }, [applySession, isE2E]);
 
   const signUpWithPassword = useCallback<AuthContextValue["signUpWithPassword"]>(
     async (email, password) => {

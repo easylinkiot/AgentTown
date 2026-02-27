@@ -394,7 +394,7 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView testID="auth-sign-in-scroll" contentContainerStyle={styles.container}>
         <View style={styles.brandCard}>
           <View style={styles.logoCircle}>
             <Ionicons name="planet" size={24} color="#15803d" />
@@ -596,6 +596,7 @@ export default function SignInScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("快速体验", "Quick Start")}</Text>
           <Pressable
+            testID="auth-guest-login-button"
             style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
             disabled={busyKey !== null}
             onPress={handleGuestSignIn}

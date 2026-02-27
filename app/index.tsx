@@ -468,6 +468,7 @@ export default function HomeScreen() {
           <MiniAppDock />
 
           <Pressable
+            testID="home-mybot-entry"
             style={styles.askBar}
             onPress={() =>
               router.push({

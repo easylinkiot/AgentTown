@@ -94,6 +94,9 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        missingDimensionStrategy 'detox', 'full'
+        testBuildType System.getProperty('testBuildType', 'debug')
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -179,4 +182,8 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    androidTestImplementation(project(path: ':detox'))
+    androidTestImplementation('androidx.test:runner:1.6.2')
+    androidTestImplementation('androidx.test:rules:1.6.1')
 }
