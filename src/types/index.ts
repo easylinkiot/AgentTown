@@ -4,6 +4,8 @@ export interface ChatThread {
   avatar: string;
   message: string;
   time: string;
+  targetType?: "user" | "group" | "agent" | "user_bot" | string;
+  targetId?: string;
   unreadCount?: number;
   isVoiceCall?: boolean;
   isSystem?: boolean;
