@@ -284,7 +284,7 @@ export function MiniAppDock() {
 
             <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
               <View style={styles.promptBox}>
-                <Text style={styles.aiLabel}>AI GENERATOR</Text>
+                <Text style={styles.aiLabel}>{tr("AI 生成器", "AI GENERATOR")}</Text>
                 <TextInput
                   value={prompt}
                   onChangeText={setPrompt}
@@ -305,7 +305,7 @@ export function MiniAppDock() {
                 <View style={styles.readyRow}>
                   <View style={styles.readyLeft}>
                     <Ionicons name="checkmark-circle-outline" size={16} color="#86efac" />
-                    <Text style={styles.readyText}>{tr("READY TO INSTALL", "READY TO INSTALL")}</Text>
+                    <Text style={styles.readyText}>{tr("准备安装", "READY TO INSTALL")}</Text>
                   </View>
                   <Pressable
                     style={styles.readyGhost}

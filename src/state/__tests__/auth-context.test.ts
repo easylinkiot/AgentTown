@@ -1,6 +1,11 @@
 import mockAsyncStorage from "@react-native-async-storage/async-storage/jest/async-storage-mock";
 
-import { defaultDisplayNameForEmail, displayNameFromEmail, normalizePhone } from "../auth-context";
+import {
+  AUTH_ERROR_PHONE_INVALID,
+  defaultDisplayNameForEmail,
+  displayNameFromEmail,
+  normalizePhone,
+} from "../auth-context";
 
 jest.mock("@react-native-async-storage/async-storage", () => mockAsyncStorage);
 
@@ -11,7 +16,7 @@ describe("auth-context helpers", () => {
   });
 
   it("throws when phone is too short", () => {
-    expect(() => normalizePhone("1234")).toThrow("请输入有效手机号");
+    expect(() => normalizePhone("1234")).toThrow(AUTH_ERROR_PHONE_INVALID);
   });
 
   it("extracts display name from email", () => {

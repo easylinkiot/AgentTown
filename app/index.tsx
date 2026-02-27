@@ -452,7 +452,7 @@ export default function HomeScreen() {
 
             <Pressable style={styles.worldMapPill} onPress={() => router.push("/town-map" as never)}>
               <Ionicons name="globe-outline" size={14} color="rgba(226,232,240,0.92)" />
-              <Text style={styles.worldMapText}>WORLD MAP</Text>
+              <Text style={styles.worldMapText}>{tr("世界地图", "WORLD MAP")}</Text>
             </Pressable>
 
             <View style={styles.topActions}>

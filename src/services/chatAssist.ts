@@ -214,8 +214,15 @@ function sanitizeAskAnythingText(input: string) {
 
   const questionMatch = text.match(/UserQuestion:\s*([^\n]+)/i);
   const question = (questionMatch?.[1] || "").trim();
-  const suffix = question ? `（问题：${question}）` : "";
-  return `当前后端未返回真实模型答案，正在使用回退输出。请检查 agenttown-api 的模型配置${suffix}`;
+  const useZh = /[\u3400-\u9FFF]/.test(`${text}${question}`);
+  const suffix = question
+    ? useZh
+      ? `（问题：${question}）`
+      : ` (Question: ${question})`
+    : "";
+  return useZh
+    ? `当前后端未返回真实模型答案，正在使用回退输出。请检查 agenttown-api 的模型配置${suffix}`
+    : `The backend did not return a real model answer. Showing fallback output. Please check the agenttown-api model configuration${suffix}`;
 }
 
 function toEventError(payload: unknown, fallback = "Assist stream error") {

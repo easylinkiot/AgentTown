@@ -69,13 +69,17 @@ const SESSION_KEY = "agenttown.auth.session.v2";
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const E2E_LOCAL_TOKEN = "agenttown-e2e-token";
+export const AUTH_ERROR_PHONE_INVALID = "AUTH_PHONE_INVALID";
+export const AUTH_ERROR_OTP_NOT_REQUESTED = "AUTH_OTP_NOT_REQUESTED";
+export const AUTH_ERROR_OTP_EXPIRED = "AUTH_OTP_EXPIRED";
+export const AUTH_ERROR_OTP_INVALID = "AUTH_OTP_INVALID";
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function normalizePhone(phone: string) {
   const value = phone.trim().replace(/[^\d+]/g, "");
   if (!value || value.length < 7) {
-    throw new Error("请输入有效手机号");
+    throw new Error(AUTH_ERROR_PHONE_INVALID);
   }
   return value;
 }
@@ -316,11 +320,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const normalizedCode = code.trim();
       const record = otpMapRef.current.get(normalizedPhone);
       if (!record) {
-        throw new Error("验证码已失效，请重新发送");
+        throw new Error(AUTH_ERROR_OTP_NOT_REQUESTED);
       }
       if (Date.now() > record.expiresAt) {
         otpMapRef.current.delete(normalizedPhone);
-        throw new Error("验证码已过期，请重新发送");
+        throw new Error(AUTH_ERROR_OTP_EXPIRED);
       }
       if (normalizedCode !== record.code) {
         record.attempts += 1;
@@ -329,7 +333,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           otpMapRef.current.set(normalizedPhone, record);
         }
-        throw new Error("验证码错误");
+        throw new Error(AUTH_ERROR_OTP_INVALID);
       }
 
       otpMapRef.current.delete(normalizedPhone);
