@@ -149,6 +149,68 @@ export interface ATCreateSessionInput {
   title?: string;
 }
 
+export interface ATListSessionsInput {
+  targetType?: string;
+  targetId?: string;
+  limit?: number;
+}
+
+export interface ATListSessionMessagesInput {
+  role?: string;
+  messageType?: string;
+  from?: string;
+  to?: string;
+  includeTool?: boolean;
+  beforeSeqNo?: number;
+  afterSeqNo?: number;
+  limit?: number;
+}
+
+export interface ATQueryChatHistoryInput {
+  targetType?: string;
+  targetId?: string;
+  sessionType?: string;
+  role?: string;
+  messageType?: string;
+  from?: string;
+  to?: string;
+  includeTool?: boolean;
+  cursor?: string;
+  pageSize?: number;
+}
+
+export interface ATChatMessage {
+  id: string;
+  session_id?: string;
+  owner_user_id?: string;
+  target_type?: string;
+  target_id?: string;
+  seq_no?: number;
+  role?: string;
+  message_type?: string;
+  content?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ATChatSessionListResponse {
+  list: ATSession[];
+}
+
+export interface ATChatMessageListResponse {
+  list: ATChatMessage[];
+}
+
+export interface ATChatHistoryPagination {
+  page_size?: number;
+  next_cursor?: string;
+}
+
+export interface ATChatHistoryResponse {
+  list: ATChatMessage[];
+  pagination?: ATChatHistoryPagination;
+}
+
 export interface CreateFriendInput {
   userId: string;
   name?: string;
@@ -561,9 +623,11 @@ export async function listChatThreads() {
 }
 
 export async function createChatThread(payload: ChatThread) {
+  const requestPayload: Record<string, unknown> = { ...payload };
+  delete requestPayload.groupCommanderUserId;
   return apiFetch<ChatThread>("/v1/chat/threads", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   });
 }
 
@@ -593,15 +657,144 @@ export async function atCreateSession(payload: ATCreateSessionInput): Promise<AT
 
 export function mapATSessionToThread(session: ATSession): ChatThread {
   const isGroup = (session.target_type || "").toLowerCase() === "group";
+  const updatedAt = (session.updated_at || "").trim();
   return {
     id: session.id,
     name: session.title || session.id,
     avatar: "",
     message: "",
-    time: "Now",
+    time: updatedAt || "Now",
     isGroup,
     targetType: session.target_type,
     targetId: session.target_id,
+  };
+}
+
+export function mapATMessageToConversation(
+  row: ATChatMessage,
+  currentUserId: string,
+  threadId?: string
+): ConversationMessage {
+  const role = (row.role || "").trim().toLowerCase();
+  const isUserRole = role === "user";
+  const isMe = isUserRole && Boolean(currentUserId);
+  const messageType = (row.message_type || "text").trim() || "text";
+  const content = row.content || "";
+  const createdAt = row.created_at || row.updated_at || "";
+  const senderName = isUserRole ? "Me" : role === "assistant" ? "Assistant" : "System";
+  const senderType = isUserRole ? "human" : role === "assistant" ? "agent" : "system";
+  return {
+    id: row.id,
+    threadId: threadId || row.session_id,
+    seqNo: typeof row.seq_no === "number" ? row.seq_no : undefined,
+    senderId: isUserRole ? currentUserId : row.target_id,
+    senderName,
+    senderAvatar: "",
+    senderType,
+    content,
+    type: messageType,
+    isMe,
+    time: createdAt,
+  };
+}
+
+export async function listChatSessions(options: ATListSessionsInput = {}): Promise<ATSession[]> {
+  const params = new URLSearchParams();
+  if (options.targetType?.trim()) params.set("target_type", options.targetType.trim());
+  if (options.targetId?.trim()) params.set("target_id", options.targetId.trim());
+  if (typeof options.limit === "number" && options.limit > 0) params.set("limit", String(options.limit));
+  const qs = params.toString();
+  const payload = await apiFetch<ATChatSessionListResponse | ATSession[]>(
+    `/v1/chat/sessions${qs ? `?${qs}` : ""}`
+  );
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.list) ? payload.list : [];
+}
+
+export async function listChatSessionMessages(
+  sessionId: string,
+  options: ATListSessionMessagesInput = {}
+): Promise<ATChatMessage[]> {
+  const params = new URLSearchParams();
+  if (options.role?.trim()) params.set("role", options.role.trim());
+  if (options.messageType?.trim()) params.set("message_type", options.messageType.trim());
+  if (options.from?.trim()) params.set("from", options.from.trim());
+  if (options.to?.trim()) params.set("to", options.to.trim());
+  if (typeof options.includeTool === "boolean") params.set("include_tool", String(options.includeTool));
+  if (typeof options.beforeSeqNo === "number" && Number.isFinite(options.beforeSeqNo)) {
+    params.set("before_seq_no", String(options.beforeSeqNo));
+  }
+  if (typeof options.afterSeqNo === "number" && Number.isFinite(options.afterSeqNo)) {
+    params.set("after_seq_no", String(options.afterSeqNo));
+  }
+  if (typeof options.limit === "number" && options.limit > 0) params.set("limit", String(options.limit));
+  const qs = params.toString();
+  const payload = await apiFetch<ATChatMessageListResponse | ATChatMessage[]>(
+    `/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ""}`
+  );
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.list) ? payload.list : [];
+}
+
+export async function queryChatHistory(options: ATQueryChatHistoryInput = {}): Promise<ATChatHistoryResponse> {
+  const params = new URLSearchParams();
+  if (options.targetType?.trim()) params.set("target_type", options.targetType.trim());
+  if (options.targetId?.trim()) params.set("target_id", options.targetId.trim());
+  if (options.sessionType?.trim()) params.set("session_type", options.sessionType.trim());
+  if (options.role?.trim()) params.set("role", options.role.trim());
+  if (options.messageType?.trim()) params.set("message_type", options.messageType.trim());
+  if (options.from?.trim()) params.set("from", options.from.trim());
+  if (options.to?.trim()) params.set("to", options.to.trim());
+  if (typeof options.includeTool === "boolean") params.set("include_tool", String(options.includeTool));
+  if (options.cursor?.trim()) params.set("cursor", options.cursor.trim());
+  if (typeof options.pageSize === "number" && options.pageSize > 0) {
+    params.set("page_size", String(options.pageSize));
+  }
+  const qs = params.toString();
+  const payload = await apiFetch<ATChatHistoryResponse | ATChatMessage[]>(
+    `/v1/chat/history${qs ? `?${qs}` : ""}`
+  );
+  if (Array.isArray(payload)) {
+    return {
+      list: payload,
+      pagination: {},
+    };
+  }
+  return {
+    list: Array.isArray(payload.list) ? payload.list : [],
+    pagination: payload.pagination || {},
+  };
+}
+
+export async function queryChatTargetHistory(
+  targetType: string,
+  targetId: string,
+  options: Omit<ATQueryChatHistoryInput, "targetType" | "targetId"> = {}
+): Promise<ATChatHistoryResponse> {
+  const params = new URLSearchParams();
+  if (options.sessionType?.trim()) params.set("session_type", options.sessionType.trim());
+  if (options.role?.trim()) params.set("role", options.role.trim());
+  if (options.messageType?.trim()) params.set("message_type", options.messageType.trim());
+  if (options.from?.trim()) params.set("from", options.from.trim());
+  if (options.to?.trim()) params.set("to", options.to.trim());
+  if (typeof options.includeTool === "boolean") params.set("include_tool", String(options.includeTool));
+  if (options.cursor?.trim()) params.set("cursor", options.cursor.trim());
+  if (typeof options.pageSize === "number" && options.pageSize > 0) {
+    params.set("page_size", String(options.pageSize));
+  }
+  const qs = params.toString();
+  const payload = await apiFetch<ATChatHistoryResponse | ATChatMessage[]>(
+    `/v1/chat/targets/${encodeURIComponent(targetType)}/${encodeURIComponent(targetId)}/history${qs ? `?${qs}` : ""}`
+  );
+  if (Array.isArray(payload)) {
+    return {
+      list: payload,
+      pagination: {},
+    };
+  }
+  return {
+    list: Array.isArray(payload.list) ? payload.list : [],
+    pagination: payload.pagination || {},
   };
 }
 

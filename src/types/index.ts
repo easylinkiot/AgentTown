@@ -4,6 +4,8 @@ export interface ChatThread {
   avatar: string;
   message: string;
   time: string;
+  targetType?: string;
+  targetId?: string;
   unreadCount?: number;
   isVoiceCall?: boolean;
   isSystem?: boolean;
@@ -58,6 +60,7 @@ export type ConversationType =
 export interface ConversationMessage {
   id: string;
   threadId?: string;
+  seqNo?: number;
   senderId?: string;
   senderName?: string;
   senderAvatar: string;

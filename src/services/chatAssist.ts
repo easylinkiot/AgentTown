@@ -22,6 +22,17 @@ export interface ChatAssistRequest {
   session_id?: string;
 }
 
+export interface ChatCompletionsRequest {
+  stream?: boolean;
+  input?: string;
+  prompt?: string;
+  session_id?: string;
+  target_type?: string;
+  target_id?: string;
+  bot_owner_user_id?: string;
+  skill_ids?: string[];
+}
+
 export interface AssistCandidate {
   id?: string;
   kind: "reply" | "task" | "text";
@@ -49,6 +60,13 @@ interface ChatAssistPayloadEnvelope {
 
 interface RunChatAssistHandlers {
   onCandidates?: (candidates: AssistCandidate[]) => void;
+  onEvent?: (eventName: string, payload: unknown) => void;
+  onDone?: () => void;
+  onError?: (error: Error) => void;
+}
+
+interface RunChatCompletionsHandlers {
+  onText?: (text: string) => void;
   onEvent?: (eventName: string, payload: unknown) => void;
   onDone?: () => void;
   onError?: (error: Error) => void;
@@ -436,6 +454,120 @@ export async function runChatAssist(
           return;
         }
         const err = new Error(error.message || "Assist stream disconnected");
+        handlers.onError?.(err);
+        finish(err);
+      },
+      onClose: () => {
+        if (finished) return;
+        if (abortSignal?.aborted) {
+          finish();
+          return;
+        }
+        handlers.onDone?.();
+        finish();
+      },
+    });
+
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", handleAbort, { once: true });
+    }
+
+    client.start();
+  });
+}
+
+export async function runChatCompletions(
+  request: ChatCompletionsRequest,
+  handlers: RunChatCompletionsHandlers = {},
+  abortSignal?: AbortSignal
+) {
+  if (abortSignal?.aborted) return;
+
+  const url = `${getApiBaseUrl()}/v1/chat/completions`;
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const payload = {
+    ...request,
+    stream: true,
+  };
+
+  let streamText = "";
+
+  await new Promise<void>((resolve, reject) => {
+    let finished = false;
+
+    const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      abortSignal?.removeEventListener("abort", handleAbort);
+      client.stop();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    const handleAbort = () => {
+      finish();
+    };
+
+    const handleEvent = (eventName: string, event: EventSourceEvent<string, string>) => {
+      const data = parseEventData(event.data);
+      handlers.onEvent?.(eventName, data);
+
+      if (eventName === "done") {
+        handlers.onDone?.();
+        finish();
+        return;
+      }
+      if (eventName === "error" || eventName === "response.error") {
+        const err = toEventError(data, "Chat completions stream error");
+        handlers.onError?.(err);
+        finish(err);
+        return;
+      }
+
+      const delta = extractTextDelta(eventName, data);
+      if (!delta) return;
+      streamText = `${streamText}${delta}`;
+      handlers.onText?.(streamText);
+    };
+
+    const client = new SSEClient<ChatAssistSSEEventName>({
+      url,
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      reconnect: {
+        enabled: false,
+        initialDelayMs: 0,
+        maxDelayMs: 0,
+        multiplier: 1,
+        jitterRatio: 0,
+        maxAttempts: 0,
+      },
+      pauseWhenBackground: false,
+      customEvents: CHAT_ASSIST_CUSTOM_EVENTS,
+      onMessage: (event) => {
+        handleEvent("message", event as EventSourceEvent<string, string>);
+      },
+      onCustomEvent: (eventName, event) => {
+        handleEvent(eventName, event as EventSourceEvent<string, string>);
+      },
+      onError: (error) => {
+        if (abortSignal?.aborted) {
+          finish();
+          return;
+        }
+        const err = new Error(error.message || "Completions stream disconnected");
         handlers.onError?.(err);
         finish(err);
       },

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Modal,
@@ -19,14 +19,48 @@ import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { useAuth } from "@/src/state/auth-context";
+import { ChatThread, ThreadMember } from "@/src/types";
 
 type InviteFilter = "all" | "human" | "agent" | "role";
 
+function resolveGroupOwnerId(thread?: ChatThread) {
+  if (!thread) return "";
+  const alias = thread as ChatThread & {
+    group_commander_user_id?: string;
+    commanderUserId?: string;
+    ownerUserId?: string;
+    owner_user_id?: string;
+    createdByUserId?: string;
+    created_by_user_id?: string;
+    creatorUserId?: string;
+    creator_user_id?: string;
+  };
+  const candidates = [
+    thread.groupCommanderUserId,
+    alias.group_commander_user_id,
+    alias.commanderUserId,
+    alias.ownerUserId,
+    alias.owner_user_id,
+    alias.createdByUserId,
+    alias.created_by_user_id,
+    alias.creatorUserId,
+    alias.creator_user_id,
+  ];
+  for (const value of candidates) {
+    const id = (value || "").trim();
+    if (id) return id;
+  }
+  return "";
+}
+
 export default function GroupsScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const { chatThreads, threadMembers, friends, agents, language, bootstrapReady, listMembers, addMember, removeMember } =
     useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
+  const currentUserId = (user?.id || "").trim();
 
   const groups = useMemo(() => chatThreads.filter((t) => t.isGroup), [chatThreads]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(groups[0]?.id || null);
@@ -52,6 +86,56 @@ export default function GroupsScreen() {
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
   const members = selectedGroupId ? threadMembers[selectedGroupId] || [] : [];
+
+  const isSelfGroupMember = useCallback(
+    (member: ThreadMember) => {
+      if (!currentUserId || member.memberType !== "human") return false;
+
+      const memberUserId =
+        (
+          (member as ThreadMember & { userId?: string; user_id?: string }).userId ||
+          (member as ThreadMember & { userId?: string; user_id?: string }).user_id ||
+          ""
+        ).trim();
+      if (memberUserId && memberUserId === currentUserId) return true;
+
+      if (member.friendId) {
+        const linkedFriend = friends.find((f) => f.id === member.friendId);
+        const linkedUserId = (linkedFriend?.userId || "").trim();
+        if (linkedUserId && linkedUserId === currentUserId) return true;
+      }
+
+      return (member.id || "").trim() === currentUserId;
+    },
+    [currentUserId, friends]
+  );
+
+  const isGroupOwner = useMemo(() => {
+    if (!selectedGroup?.isGroup || !currentUserId) return false;
+    const ownerId = resolveGroupOwnerId(selectedGroup);
+    if (ownerId) return ownerId === currentUserId;
+
+    // Backward compatibility: for legacy groups with missing owner metadata,
+    // treat the earliest human member as the creator/owner.
+    const humans = members.filter((item) => item.memberType === "human");
+    if (humans.length === 0) return false;
+    const earliestHuman = [...humans].sort((a, b) => {
+      const at = Date.parse(a.createdAt || "");
+      const bt = Date.parse(b.createdAt || "");
+      if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+      return 0;
+    })[0];
+    return isSelfGroupMember(earliestHuman);
+  }, [currentUserId, isSelfGroupMember, members, selectedGroup, selectedGroup?.isGroup]);
+
+  const canOperateGroupMember = useCallback(
+    (member: ThreadMember) => {
+      if (!selectedGroup?.isGroup) return true;
+      if (isSelfGroupMember(member)) return true;
+      return isGroupOwner;
+    },
+    [isGroupOwner, isSelfGroupMember, selectedGroup?.isGroup]
+  );
 
   const candidates = useMemo(() => {
     const usedFriendIds = new Set(members.map((m) => m.friendId).filter(Boolean));
@@ -100,20 +184,35 @@ export default function GroupsScreen() {
     });
   }, [addMember, agents, candidateQuery, friends, inviteFilter, listMembers, members, selectedGroupId, tr]);
 
-  const confirmRemoveMember = (groupId: string, memberId: string, memberName: string) => {
+  const confirmRemoveMember = (groupId: string, member: ThreadMember) => {
+    const canOperate = canOperateGroupMember(member);
+    if (!canOperate) {
+      setError(
+        tr(
+          "你没有权限移除其他成员，只能退出你自己。",
+          "You cannot remove other members. You can only leave by removing yourself."
+        )
+      );
+      return;
+    }
+    const isSelf = isSelfGroupMember(member);
     Alert.alert(
-      tr("移除成员", "Remove member"),
+      tr(isSelf ? "退出群聊" : "移除成员", isSelf ? "Leave group" : "Remove member"),
       tr(
-        `确认将 ${memberName || tr("该成员", "this member")} 移出群聊吗？`,
-        `Remove ${memberName || "this member"} from this group?`
+        isSelf
+          ? "确认退出当前群聊吗？"
+          : `确认将 ${member.name || tr("该成员", "this member")} 移出群聊吗？`,
+        isSelf
+          ? "Leave this group?"
+          : `Remove ${member.name || "this member"} from this group?`
       ),
       [
         { text: tr("取消", "Cancel"), style: "cancel" },
         {
-          text: tr("移除", "Remove"),
+          text: tr(isSelf ? "退出" : "移除", isSelf ? "Leave" : "Remove"),
           style: "destructive",
           onPress: () => {
-            void removeMember(groupId, memberId).catch((err) =>
+            void removeMember(groupId, member.id).catch((err) =>
               setError(formatApiError(err))
             );
           },
@@ -184,20 +283,30 @@ export default function GroupsScreen() {
                   </View>
 
                   <ScrollView contentContainerStyle={styles.memberList} showsVerticalScrollIndicator={false}>
-                    {members.map((m) => (
-                      <View key={m.id} style={styles.memberItem}>
-                        <View style={styles.memberMain}>
-                          <Text style={styles.memberName}>{m.name}</Text>
-                          <Text style={styles.memberDesc}>{m.memberType.toUpperCase()}</Text>
+                    {members.map((m) => {
+                      const canOperate = canOperateGroupMember(m);
+                      const isSelf = isSelfGroupMember(m);
+                      return (
+                        <View key={m.id} style={styles.memberItem}>
+                          <View style={styles.memberMain}>
+                            <Text style={styles.memberName}>{m.name}</Text>
+                            <Text style={styles.memberDesc}>{m.memberType.toUpperCase()}</Text>
+                          </View>
+                          {canOperate ? (
+                            <Pressable
+                              style={styles.removeBtn}
+                              onPress={() => confirmRemoveMember(selectedGroup.id, m)}
+                            >
+                              <Ionicons
+                                name={isSelf ? "exit-outline" : "trash-outline"}
+                                size={16}
+                                color="rgba(248,113,113,0.95)"
+                              />
+                            </Pressable>
+                          ) : null}
                         </View>
-                        <Pressable
-                          style={styles.removeBtn}
-                          onPress={() => confirmRemoveMember(selectedGroup.id, m.id, m.name)}
-                        >
-                          <Ionicons name="trash-outline" size={16} color="rgba(248,113,113,0.95)" />
-                        </Pressable>
-                      </View>
-                    ))}
+                      );
+                    })}
                     {members.length === 0 ? (
                       <EmptyState title={tr("暂无成员", "No members")} hint={tr("点右上角添加成员", "Tap the plus to add members")} icon="person-add-outline" />
                     ) : null}

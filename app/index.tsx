@@ -7,6 +7,7 @@ import {
   Image,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -104,6 +105,7 @@ export default function HomeScreen() {
   const [groupNpcName, setGroupNpcName] = useState("");
   const [groupCommanderUserId, setGroupCommanderUserId] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [refreshingChats, setRefreshingChats] = useState(false);
 
   const list = useMemo(() => {
     const sorted = [...chatThreads];
@@ -421,7 +423,7 @@ export default function HomeScreen() {
         groupType: groupTypeFromSubCategory(groupSubCategory),
         groupSubCategory,
         groupNpcName: groupNpcName.trim() || undefined,
-        groupCommanderUserId: groupCommanderUserId.trim() || undefined,
+        groupCommanderUserId: groupCommanderUserId.trim() || (user?.id || "").trim() || undefined,
       });
       setGroupModal(false);
       setPeopleModal(false);
@@ -439,6 +441,25 @@ export default function HomeScreen() {
       setCreatingGroup(false);
     }
   };
+
+  const handleRefreshChats = useCallback(async () => {
+    if (refreshingChats) return;
+    const startedAt = Date.now();
+    setUiError(null);
+    setRefreshingChats(true);
+    try {
+      await refreshAll();
+    } catch (err) {
+      setUiError(formatApiError(err));
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      const remain = Math.max(0, 500 - elapsed);
+      if (remain > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remain));
+      }
+      setRefreshingChats(false);
+    }
+  }, [refreshAll, refreshingChats]);
 
   return (
     <KeyframeBackground>
@@ -496,6 +517,12 @@ export default function HomeScreen() {
               onAction={() => setUiError(null)}
             />
           ) : null}
+          {refreshingChats ? (
+            <View style={styles.refreshHint}>
+              <ActivityIndicator size="small" color="#93c5fd" />
+              <Text style={styles.refreshHintText}>{tr("刷新会话中...", "Refreshing chats...")}</Text>
+            </View>
+          ) : null}
 
           {!bootstrapReady ? (
             <LoadingSkeleton kind="chat_list" />
@@ -503,6 +530,18 @@ export default function HomeScreen() {
             <FlatList
               data={list}
               keyExtractor={(item) => item.id}
+              style={styles.chatList}
+              alwaysBounceVertical
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshingChats}
+                  onRefresh={handleRefreshChats}
+                  tintColor="rgba(226,232,240,0.92)"
+                  colors={["#60a5fa"]}
+                  progressBackgroundColor="rgba(15,23,42,0.92)"
+                  progressViewOffset={10}
+                />
+              }
               renderItem={({ item }) => (
                 <ChatListItem
                   chat={item}
@@ -988,8 +1027,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   listContent: {
+    flexGrow: 1,
     paddingTop: 6,
     paddingBottom: 18,
+  },
+  refreshHint: {
+    minHeight: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.28)",
+    backgroundColor: "rgba(15,23,42,0.55)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    marginTop: -2,
+    marginBottom: 2,
+  },
+  refreshHintText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  chatList: {
+    flex: 1,
   },
   presenceRow: {
     gap: 10,

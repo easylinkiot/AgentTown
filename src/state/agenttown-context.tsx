@@ -23,8 +23,12 @@ import {
   installMiniApp as installMiniAppApi,
   listThreadMembers as listThreadMembersApi,
   listThreadMessages as listThreadMessagesApi,
+  listChatSessions as listChatSessionsApi,
+  listChatThreads as listChatThreadsApi,
+  listChatSessionMessages as listChatSessionMessagesApi,
   patchCustomSkill as patchCustomSkillApi,
   patchTask as patchTaskApi,
+  queryChatTargetHistory as queryChatTargetHistoryApi,
   removeThreadMember as removeThreadMemberApi,
   runMiniApp as runMiniAppApi,
   saveBotConfig,
@@ -32,6 +36,7 @@ import {
   subscribeRealtime,
   toggleAgentSkill as toggleAgentSkillApi,
   uninstallBotSkill as uninstallBotSkillApi,
+  mapATMessageToConversation,
   mapATSessionToThread,
   type AddThreadMemberInput,
   type CreateAgentInput,
@@ -336,6 +341,71 @@ function updateThreadPreview(threads: ChatThread[], threadId: string, preview: s
   return next;
 }
 
+function mergeThreadsById(...lists: ChatThread[][]): ChatThread[] {
+  const order: string[] = [];
+  const byId = new Map<string, ChatThread>();
+  for (const list of lists) {
+    for (const thread of list) {
+      if (!thread?.id) continue;
+      const prev = byId.get(thread.id);
+      if (!prev) {
+        byId.set(thread.id, thread);
+        order.push(thread.id);
+        continue;
+      }
+      byId.set(thread.id, {
+        ...prev,
+        ...thread,
+        targetType: thread.targetType || prev.targetType,
+        targetId: thread.targetId || prev.targetId,
+      });
+    }
+  }
+  return order.map((id) => byId.get(id)).filter((thread): thread is ChatThread => Boolean(thread));
+}
+
+function pickGroupOwnerId(thread?: ChatThread) {
+  if (!thread) return "";
+  const alias = thread as ChatThread & {
+    group_commander_user_id?: string;
+    commanderUserId?: string;
+    ownerUserId?: string;
+    owner_user_id?: string;
+    createdByUserId?: string;
+    created_by_user_id?: string;
+    creatorUserId?: string;
+    creator_user_id?: string;
+  };
+  const candidates = [
+    thread.groupCommanderUserId,
+    alias.group_commander_user_id,
+    alias.commanderUserId,
+    alias.ownerUserId,
+    alias.owner_user_id,
+    alias.createdByUserId,
+    alias.created_by_user_id,
+    alias.creatorUserId,
+    alias.creator_user_id,
+  ];
+  for (const value of candidates) {
+    const id = (value || "").trim();
+    if (id) return id;
+  }
+  return "";
+}
+
+function sortMessagesBySeqOrTime(messages: ConversationMessage[]): ConversationMessage[] {
+  return [...messages].sort((a, b) => {
+    if (typeof a.seqNo === "number" && typeof b.seqNo === "number") {
+      return a.seqNo - b.seqNo;
+    }
+    const at = Date.parse(a.time || "");
+    const bt = Date.parse(b.time || "");
+    if (Number.isFinite(at) && Number.isFinite(bt)) return at - bt;
+    return 0;
+  });
+}
+
 function previewMessage(message: ConversationMessage): string {
   if (message.type === "image") {
     return message.content ? `[Image] ${message.content}` : "[Image]";
@@ -364,9 +434,14 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [botConfig, setBotConfig] = useState<BotConfig>(defaultBotConfig);
   const [tasks, setTasks] = useState<TaskItem[]>(defaultTasks);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>(defaultChatThreads);
+  const chatThreadsRef = useRef<ChatThread[]>(defaultChatThreads);
+  useEffect(() => {
+    chatThreadsRef.current = chatThreads;
+  }, [chatThreads]);
   const [messagesByThread, setMessagesByThread] =
     useState<Record<string, ConversationMessage[]>>(defaultMessagesByThread);
   const messagesByThreadRef = useRef<Record<string, ConversationMessage[]>>(defaultMessagesByThread);
+  const historyCursorByThreadRef = useRef<Record<string, string | null>>({});
   useEffect(() => {
     messagesByThreadRef.current = messagesByThread;
   }, [messagesByThread]);
@@ -392,53 +467,85 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const notificationSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshAll = useCallback(async () => {
-    const payload = await fetchBootstrap();
+    const [bootstrapResult, sessionsResult, threadsResult] = await Promise.allSettled([
+      fetchBootstrap(),
+      listChatSessionsApi({ limit: 200 }),
+      listChatThreadsApi(),
+    ]);
+    const payload = bootstrapResult.status === "fulfilled" ? bootstrapResult.value : null;
 
-    if (payload.botConfig) {
+    const sessionThreads =
+      sessionsResult.status === "fulfilled"
+        ? sessionsResult.value.map((session) => mapATSessionToThread(session))
+        : [];
+    const listedThreads = threadsResult.status === "fulfilled" && Array.isArray(threadsResult.value)
+      ? threadsResult.value
+      : [];
+    const mergedThreadsRaw = mergeThreadsById(sessionThreads, listedThreads);
+    const currentById = new Map(chatThreadsRef.current.map((thread) => [thread.id, thread] as const));
+    const mergedThreads = mergedThreadsRaw.map((thread) => {
+      const current = currentById.get(thread.id);
+      const ownerId = pickGroupOwnerId(thread) || pickGroupOwnerId(current);
+      if (!ownerId) return thread;
+      return {
+        ...thread,
+        groupCommanderUserId: ownerId,
+      };
+    });
+
+    if (payload?.botConfig) {
       setBotConfig(payload.botConfig);
       setChatThreads((prev) => syncMyBotThreads(prev, payload.botConfig));
     }
-    if (Array.isArray(payload.tasks)) setTasks(payload.tasks);
-    if (Array.isArray(payload.chatThreads)) {
+    if (Array.isArray(payload?.tasks)) setTasks(payload.tasks);
+    if (mergedThreads.length > 0) {
       setChatThreads(
-        payload.botConfig ? syncMyBotThreads(payload.chatThreads, payload.botConfig) : payload.chatThreads
+        payload?.botConfig ? syncMyBotThreads(mergedThreads, payload.botConfig) : mergedThreads
       );
     }
-    if (payload.messages && typeof payload.messages === "object") {
+    if (payload?.messages && typeof payload.messages === "object") {
       setMessagesByThread(payload.messages);
     }
-    if (Array.isArray(payload.friends)) {
+    if (Array.isArray(payload?.friends)) {
       setFriends(payload.friends);
     }
-    if (payload.threadMembers && typeof payload.threadMembers === "object") {
+    if (payload?.threadMembers && typeof payload.threadMembers === "object") {
       setThreadMembers(payload.threadMembers);
     }
-    if (Array.isArray(payload.agents)) {
+    if (Array.isArray(payload?.agents)) {
       setAgents(payload.agents);
     }
-    if (Array.isArray(payload.skillCatalog)) {
+    if (Array.isArray(payload?.skillCatalog)) {
       setSkillCatalog(payload.skillCatalog);
     }
-    if (Array.isArray(payload.customSkills)) {
+    if (Array.isArray(payload?.customSkills)) {
       setCustomSkills(payload.customSkills);
     }
-    if (Array.isArray(payload.miniApps)) {
+    if (Array.isArray(payload?.miniApps)) {
       setMiniApps(payload.miniApps);
     }
-    if (Array.isArray(payload.miniAppTemplates)) {
+    if (Array.isArray(payload?.miniAppTemplates)) {
       setMiniAppTemplates(payload.miniAppTemplates);
     }
-    if (typeof payload.myHouseType === "number") {
+    if (typeof payload?.myHouseType === "number") {
       setMyHouseType(payload.myHouseType);
     }
-    if (payload.uiTheme === "classic" || payload.uiTheme === "neo") {
+    if (payload?.uiTheme === "classic" || payload?.uiTheme === "neo") {
       setUiTheme(payload.uiTheme);
     }
-    if (payload.language === "zh" || payload.language === "en") {
+    if (payload?.language === "zh" || payload?.language === "en") {
       setLanguage(payload.language);
     }
-    if (typeof payload.voiceModeEnabled === "boolean") {
+    if (typeof payload?.voiceModeEnabled === "boolean") {
       setVoiceModeEnabled(payload.voiceModeEnabled);
+    }
+
+    if (
+      bootstrapResult.status === "rejected" &&
+      sessionsResult.status === "rejected" &&
+      threadsResult.status === "rejected"
+    ) {
+      throw bootstrapResult.reason;
     }
   }, []);
 
@@ -454,8 +561,28 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       }));
     }
 
-    const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
-    const latest = Array.isArray(latestRaw) ? latestRaw : [];
+    let latest: ConversationMessage[] = [];
+    historyCursorByThreadRef.current[threadId] = null;
+    try {
+      const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+      latest = Array.isArray(latestRaw) ? latestRaw : [];
+    } catch {
+      const thread = chatThreadsRef.current.find((item) => item.id === threadId);
+      const targetType = (thread?.targetType || "").trim();
+      const targetId = (thread?.targetId || "").trim();
+
+      if (targetType && targetId) {
+        const response = await queryChatTargetHistoryApi(targetType, targetId, {
+          pageSize: MESSAGE_PAGE_SIZE,
+        });
+        latest = (response.list || []).map((row) => mapATMessageToConversation(row, userID, threadId));
+        historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
+      } else {
+        const response = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+        latest = response.map((row) => mapATMessageToConversation(row, userID, threadId));
+      }
+    }
+    latest = sortMessagesBySeqOrTime(latest);
     const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
     const safeMerged = Array.isArray(merged) ? merged : [];
     void writeThreadCache(userID, threadId, safeMerged);
@@ -493,15 +620,43 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // Fetch older page from server.
-    const older = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE, before: oldest });
+    let older: ConversationMessage[] = [];
+    try {
+      older = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE, before: oldest });
+    } catch {
+      const thread = chatThreadsRef.current.find((item) => item.id === threadId);
+      const targetType = (thread?.targetType || "").trim();
+      const targetId = (thread?.targetId || "").trim();
+      const cursor = historyCursorByThreadRef.current[threadId];
+      if (targetType && targetId && cursor) {
+        const response = await queryChatTargetHistoryApi(targetType, targetId, {
+          cursor,
+          pageSize: MESSAGE_PAGE_SIZE,
+        });
+        older = (response.list || []).map((row) => mapATMessageToConversation(row, userID, threadId));
+        historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
+      } else {
+        const oldestSeqNo = current[0]?.seqNo;
+        if (typeof oldestSeqNo === "number" && Number.isFinite(oldestSeqNo)) {
+          const response = await listChatSessionMessagesApi(threadId, {
+            limit: MESSAGE_PAGE_SIZE,
+            beforeSeqNo: oldestSeqNo,
+          });
+          older = response.map((row) => mapATMessageToConversation(row, userID, threadId));
+        }
+      }
+    }
+    older = sortMessagesBySeqOrTime(older);
     if (!Array.isArray(older) || older.length === 0) return 0;
 
     setMessagesByThread((prev) => {
       const history = prev[threadId] || [];
+      const historyIds = new Set(history.map((item) => item.id));
+      const uniqueOlder = older.filter((item) => item.id && !historyIds.has(item.id));
+      if (uniqueOlder.length === 0) return prev;
       return {
         ...prev,
-        [threadId]: [...older, ...history],
+        [threadId]: [...uniqueOlder, ...history],
       };
     });
     void (async () => {
@@ -534,6 +689,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       setTasks(defaultTasks);
       setChatThreads(defaultChatThreads);
       setMessagesByThread(defaultMessagesByThread);
+      historyCursorByThreadRef.current = {};
       setFriends(defaultFriends);
       setThreadMembers(defaultThreadMembers);
       setAgents(defaultAgents);
@@ -617,6 +773,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             delete next[threadId];
             return next;
           });
+          delete historyCursorByThreadRef.current[threadId];
           setThreadMembers((prev) => {
             const next = { ...prev };
             delete next[threadId];
@@ -877,6 +1034,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           delete next[threadId];
           return next;
         });
+        delete historyCursorByThreadRef.current[threadId];
         setThreadMembers((prev) => {
           const next = { ...prev };
           delete next[threadId];
@@ -987,6 +1145,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             delete next[linkedThreadID];
             return next;
           });
+          delete historyCursorByThreadRef.current[linkedThreadID];
           setThreadMembers((prev) => {
             const next = { ...prev };
             delete next[linkedThreadID];
@@ -1035,6 +1194,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       },
       createGroup: async (input) => {
         if (!input.name.trim()) return null;
+        const commanderUserId = input.groupCommanderUserId?.trim() || userID || undefined;
 
         const draft: ChatThread = {
           id: `group_${Date.now()}`,
@@ -1050,14 +1210,18 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           groupType: input.groupType || "toc",
           groupSubCategory: input.groupSubCategory?.trim() || undefined,
           groupNpcName: input.groupNpcName?.trim() || undefined,
-          groupCommanderUserId: input.groupCommanderUserId?.trim() || undefined,
+          groupCommanderUserId: commanderUserId,
         };
 
         setChatThreads((prev) => upsertById(prev, draft, true));
         try {
           const created = await createChatThread(draft);
-          setChatThreads((prev) => upsertById(prev, created, true));
-          return created;
+          const mergedCreated: ChatThread = {
+            ...created,
+            groupCommanderUserId: pickGroupOwnerId(created) || commanderUserId,
+          };
+          setChatThreads((prev) => upsertById(prev, mergedCreated, true));
+          return mergedCreated;
         } catch (err) {
           setChatThreads((prev) => prev.filter((thread) => thread.id !== draft.id));
           throw err;
@@ -1389,6 +1553,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     friends,
     language,
     listMembers,
+    loadOlderMessages,
     messagesByThread,
     miniAppTemplates,
     miniAppGeneration,
