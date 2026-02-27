@@ -16,7 +16,10 @@ function RootStack() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    const inAuthRoute = segments[0] === "sign-in" || segments[0] === "sign-up";
+    const inAuthRoute =
+      segments[0] === "sign-in" ||
+      segments[0] === "sign-up" ||
+      segments[0] === "forgot-password";
     if (!isSignedIn && !inAuthRoute) {
       router.replace("/sign-in");
       return;
@@ -44,6 +47,7 @@ function RootStack() {
     >
       <Stack.Screen name="sign-in" options={{ animation: "fade" }} />
       <Stack.Screen name="sign-up" options={{ animation: "fade" }} />
+      <Stack.Screen name="forgot-password" options={{ animation: "fade" }} />
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[id]" />
       <Stack.Screen name="tasks" />

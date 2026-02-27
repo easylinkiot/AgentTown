@@ -25,6 +25,25 @@ export interface AuthSessionPayload {
   user: AuthUser;
 }
 
+export interface AuthPasswordResetSendCodeResponse {
+  message?: string;
+  expiresAt?: string;
+  verificationCode?: string;
+  devCode?: string;
+  retryAfterSeconds?: number;
+}
+
+export interface AuthPasswordResetVerifyCodeResponse {
+  message?: string;
+  resetToken: string;
+  resetTokenExpiresAt?: string;
+}
+
+export interface AuthPasswordResetCompleteResponse {
+  ok?: boolean;
+  message?: string;
+}
+
 export interface SendThreadMessageInput {
   content: string;
   type?: string;
@@ -434,6 +453,27 @@ export async function authRegister(payload: {
 
 export async function authLogin(payload: { email: string; password: string }) {
   return apiFetch<AuthSessionPayload>("/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, { skipAuth: true });
+}
+
+export async function authRequestPasswordResetCode(payload: { email: string }) {
+  return apiFetch<AuthPasswordResetSendCodeResponse>("/v1/auth/forgot", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, { skipAuth: true });
+}
+
+export async function authVerifyPasswordResetCode(payload: { email: string; code: string }) {
+  return apiFetch<AuthPasswordResetVerifyCodeResponse>("/v1/auth/verify", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, { skipAuth: true });
+}
+
+export async function authResetPassword(payload: { email: string; resetToken: string; password: string }) {
+  return apiFetch<AuthPasswordResetCompleteResponse>("/v1/auth/reset", {
     method: "POST",
     body: JSON.stringify(payload),
   }, { skipAuth: true });

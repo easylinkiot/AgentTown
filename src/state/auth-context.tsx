@@ -1,7 +1,18 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { authGuest, authLogin, authMe, authProvider, authRegister, authUpdateProfile, setAuthToken } from "@/src/lib/api";
+import {
+  authGuest,
+  authLogin,
+  authMe,
+  authProvider,
+  authRegister,
+  authRequestPasswordResetCode,
+  authResetPassword,
+  authUpdateProfile,
+  authVerifyPasswordResetCode,
+  setAuthToken,
+} from "@/src/lib/api";
 import { AuthUser } from "@/src/types";
 import { isE2ETestMode } from "@/src/utils/e2e";
 
@@ -36,6 +47,15 @@ interface AuthContextValue {
   }) => Promise<void>;
   sendPhoneCode: (phone: string) => Promise<{ expiresAt: number; devCode?: string }>;
   verifyPhoneCode: (phone: string, code: string) => Promise<void>;
+  requestPasswordResetCode: (email: string) => Promise<{
+    message?: string;
+    expiresAt?: string;
+    verificationCode?: string;
+    devCode?: string;
+    retryAfterSeconds?: number;
+  }>;
+  verifyPasswordResetCode: (email: string, code: string) => Promise<{ resetToken: string; resetTokenExpiresAt?: string }>;
+  resetPassword: (input: { email: string; resetToken: string; password: string }) => Promise<{ ok?: boolean; message?: string }>;
   completeProfile: (input: { displayName: string; email: string }) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -211,6 +231,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applySession]
   );
 
+  const requestPasswordResetCode = useCallback<AuthContextValue["requestPasswordResetCode"]>(async (email) => {
+    return authRequestPasswordResetCode({ email: email.trim() });
+  }, []);
+
+  const verifyPasswordResetCode = useCallback<AuthContextValue["verifyPasswordResetCode"]>(
+    async (email, code) => {
+      return authVerifyPasswordResetCode({ email: email.trim(), code: code.trim() });
+    },
+    []
+  );
+
+  const resetPassword = useCallback<AuthContextValue["resetPassword"]>(async (input) => {
+    return authResetPassword({
+      email: input.email.trim(),
+      resetToken: input.resetToken.trim(),
+      password: input.password,
+    });
+  }, []);
+
   const signInWithGoogle = useCallback<AuthContextValue["signInWithGoogle"]>(
     async (input) => {
       const normalizedName = input.name?.trim() || displayNameFromEmail(input.email) || undefined;
@@ -324,6 +363,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithApple,
       sendPhoneCode,
       verifyPhoneCode,
+      requestPasswordResetCode,
+      verifyPasswordResetCode,
+      resetPassword,
       completeProfile,
       signOut,
     }),
@@ -338,6 +380,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithApple,
       sendPhoneCode,
       verifyPhoneCode,
+      requestPasswordResetCode,
+      verifyPasswordResetCode,
+      resetPassword,
       completeProfile,
       signOut,
     ]

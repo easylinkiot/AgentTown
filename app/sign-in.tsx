@@ -3,7 +3,7 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import Constants from "expo-constants";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -22,7 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { useAgentTown } from "@/src/state/agenttown-context";
-import { useAuth } from "@/src/state/auth-context";
+import { normalizePhone, useAuth } from "@/src/state/auth-context";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -68,8 +68,17 @@ async function fetchGoogleProfile(accessToken: string) {
   return payload;
 }
 
+function validatePhoneForOtp(phone: string, tr: (zh: string, en: string) => string) {
+  try {
+    return normalizePhone(phone);
+  } catch {
+    throw new Error(tr("请输入有效手机号。", "Please enter a valid phone number."));
+  }
+}
+
 export default function SignInScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ email?: string }>();
   const { language, updateLanguage } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const {
@@ -96,6 +105,12 @@ export default function SignInScreen() {
   const [profileEmail, setProfileEmail] = useState("");
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const isExpoGo = Constants.appOwnership === "expo";
+
+  useEffect(() => {
+    const emailParam = typeof params.email === "string" ? params.email.trim() : "";
+    if (!emailParam || email) return;
+    setEmail(emailParam);
+  }, [email, params.email]);
 
   const googleWebClientId = useMemo(
     () => sanitizeGoogleClientId(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID),
@@ -311,8 +326,10 @@ export default function SignInScreen() {
 
   const handleSendCode = async () => {
     try {
+      const normalizedPhone = validatePhoneForOtp(phone, tr);
+      setPhone(normalizedPhone);
       setBusyKey("phone");
-      const result = await sendPhoneCode(phone);
+      const result = await sendPhoneCode(normalizedPhone);
       setOtpExpiresAt(result.expiresAt);
       setDevOtpHint(result.devCode || null);
       Alert.alert(
@@ -329,8 +346,14 @@ export default function SignInScreen() {
 
   const handleVerifyCode = async () => {
     try {
+      const normalizedPhone = validatePhoneForOtp(phone, tr);
+      setPhone(normalizedPhone);
+      if (!otpCode.trim()) {
+        Alert.alert(tr("信息不完整", "Incomplete"), tr("请输入验证码。", "Please enter the verification code."));
+        return;
+      }
       setBusyKey("phone");
-      await verifyPhoneCode(phone, otpCode);
+      await verifyPhoneCode(normalizedPhone, otpCode);
     } catch (error) {
       const msg = error instanceof Error ? error.message : tr("验证码校验失败", "Code verification failed");
       Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
@@ -446,6 +469,22 @@ export default function SignInScreen() {
             secureTextEntry
             autoCapitalize="none"
           />
+          <View style={styles.auxActionRow}>
+            <Pressable
+              style={[styles.ghostBtn, busyKey !== null && styles.btnDisabled]}
+              disabled={busyKey !== null}
+              onPress={() => router.push("/sign-up")}
+            >
+              <Text style={styles.ghostBtnText}>{tr("注册", "Create Account")}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.ghostBtn, busyKey !== null && styles.btnDisabled]}
+              disabled={busyKey !== null}
+              onPress={() => router.push("/forgot-password")}
+            >
+              <Text style={styles.ghostBtnText}>{tr("忘记密码？", "Forgot Password?")}</Text>
+            </Pressable>
+          </View>
           {__DEV__ ? (
             <Pressable
               style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
@@ -467,14 +506,6 @@ export default function SignInScreen() {
               <Ionicons name="log-in-outline" size={16} color="white" />
             )}
             <Text style={styles.primaryBtnText}>{tr("登录", "Sign In")}</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.secondaryBtn, busyKey !== null && styles.btnDisabled]}
-            disabled={busyKey !== null}
-            onPress={() => router.push("/sign-up")}
-          >
-            <Ionicons name="person-add-outline" size={16} color="#1f2937" />
-            <Text style={styles.secondaryBtnText}>{tr("注册", "Create Account")}</Text>
           </Pressable>
         </View>
 
@@ -726,6 +757,23 @@ const styles = StyleSheet.create({
     color: "#1f2937",
     fontWeight: "700",
     fontSize: 13,
+  },
+  auxActionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  ghostBtn: {
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  ghostBtnText: {
+    color: "#2563eb",
+    fontSize: 13,
+    fontWeight: "700",
   },
   helperText: {
     fontSize: 12,

@@ -118,6 +118,72 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
 
+  /v1/auth/forgot:
+    post:
+      tags: [Auth]
+      summary: Request password reset code
+      operationId: authPasswordForgot
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthPasswordForgotRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthPasswordForgotResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/auth/verify:
+    post:
+      tags: [Auth]
+      summary: Verify password reset code
+      operationId: authPasswordVerify
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthPasswordVerifyRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthPasswordVerifyResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /v1/auth/reset:
+    post:
+      tags: [Auth]
+      summary: Reset password with verified token
+      operationId: authPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthPasswordResetRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthPasswordResetResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
   /v1/auth/guest:
     post:
       tags: [Auth]
@@ -2310,6 +2376,69 @@ components:
         password:
           type: string
       required: [email, password]
+
+    AuthPasswordForgotRequest:
+      type: object
+      properties:
+        email:
+          type: string
+      required: [email]
+
+    AuthPasswordForgotResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        verificationCode:
+          type: string
+        devCode:
+          type: string
+        retryAfterSeconds:
+          type: integer
+
+    AuthPasswordVerifyRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        code:
+          type: string
+      required: [email, code]
+
+    AuthPasswordVerifyResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        resetToken:
+          type: string
+        resetTokenExpiresAt:
+          type: string
+          format: date-time
+      required: [resetToken]
+
+    AuthPasswordResetRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        resetToken:
+          type: string
+        password:
+          type: string
+      required: [email, resetToken, password]
+
+    AuthPasswordResetResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+      required: [ok]
 
     AuthGuestRequest:
       type: object
