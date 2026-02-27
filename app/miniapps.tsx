@@ -23,11 +23,12 @@ export default function MiniAppsScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const confirmUninstall = (appId: string, appName: string) => {
+    const safeName = appName || tr("Mini 应用", "Mini App");
     Alert.alert(
       tr("卸载 Mini App", "Uninstall mini app"),
       tr(
-        `确认卸载 ${appName || "Mini App"} 吗？`,
-        `Uninstall ${appName || "this mini app"}?`
+        `确认卸载 ${safeName} 吗？`,
+        `Uninstall ${safeName}?`
       ),
       [
         { text: tr("取消", "Cancel"), style: "cancel" },
@@ -43,11 +44,12 @@ export default function MiniAppsScreen() {
   };
 
   const confirmDeleteMiniApp = (appId: string, appName: string) => {
+    const safeName = appName || tr("Mini 应用", "Mini App");
     Alert.alert(
       tr("删除 Mini App", "Delete mini app"),
       tr(
-        `确认删除 ${appName || "Mini App"} 吗？此操作不可撤销。`,
-        `Delete ${appName || "this mini app"}? This cannot be undone.`
+        `确认删除 ${safeName} 吗？此操作不可撤销。`,
+        `Delete ${safeName}? This cannot be undone.`
       ),
       [
         { text: tr("取消", "Cancel"), style: "cancel" },

@@ -243,7 +243,7 @@ export default function ChatDetailScreen() {
       name: params.name || tr("未知会话", "Unknown chat"),
       avatar: params.avatar || botConfig.avatar,
       message: "",
-      time: "Now",
+      time: tr("刚刚", "Now"),
       isGroup: params.isGroup === "true",
       supportsVideo: true,
     };
@@ -620,7 +620,7 @@ export default function ChatDetailScreen() {
         type: "human" as const,
         group: "humans" as const,
         label: f.name,
-        desc: f.role || f.company || "Human",
+        desc: f.role || f.company || tr("真人", "Human"),
         onAdd: async () => {
           await addMember(chatId, { friendId: f.id, memberType: "human" });
         },
@@ -633,7 +633,7 @@ export default function ChatDetailScreen() {
         type: "agent" as const,
         group: "agents" as const,
         label: a.name,
-        desc: a.persona || a.description || "Agent",
+        desc: a.persona || a.description || tr("智能体", "Agent"),
         onAdd: async () => {
           await addMember(chatId, { agentId: a.id, memberType: "agent" });
         },
@@ -656,8 +656,8 @@ export default function ChatDetailScreen() {
         key: `discover:${u.id}`,
         type: "human" as const,
         group: "humans" as const,
-        label: u.displayName || "User",
-        desc: [u.email, u.provider].filter(Boolean).join(" · ") || "User",
+        label: u.displayName || tr("用户", "User"),
+        desc: [u.email, u.provider].filter(Boolean).join(" · ") || tr("用户", "User"),
         onAdd: async () => {
           setMemberPoolError(null);
           try {
@@ -707,6 +707,7 @@ export default function ChatDetailScreen() {
     memberPoolFriends,
     memberQuery,
     members,
+    tr,
   ]);
 
   const selectedMemberKeys = useMemo(
@@ -752,7 +753,7 @@ export default function ChatDetailScreen() {
       id: localId,
       threadId: chatId,
       senderId: user?.id,
-      senderName: user?.displayName || "Me",
+      senderName: user?.displayName || tr("我", "Me"),
       senderAvatar: user?.avatar || botConfig.avatar,
       senderType: "human",
       content,
@@ -777,7 +778,7 @@ export default function ChatDetailScreen() {
           content,
           type: "text",
           senderId: user?.id,
-          senderName: user?.displayName || "Me",
+          senderName: user?.displayName || tr("我", "Me"),
           senderAvatar: botConfig.avatar,
           senderType: "human",
           isMe: true,
@@ -947,7 +948,7 @@ export default function ChatDetailScreen() {
       const transcript = messages
         .slice(-40)
         .map((m) => {
-          const sender = (m.senderName || (m.isMe ? "Me" : "Member")).trim();
+          const sender = (m.senderName || (m.isMe ? tr("我", "Me") : tr("成员", "Member"))).trim();
           const content = normalizeDisplayedContent(m.content || "", m.senderName);
           const text = (content || "").trim();
           if (!text) return "";
@@ -957,24 +958,33 @@ export default function ChatDetailScreen() {
         .join("\n");
 
       const prompt = [
-        `Group: ${thread.name}`,
+        `${tr("群聊", "Group")}: ${thread.name}`,
         "",
-        "Latest context:",
-        transcript || "(empty)",
+        tr("最新上下文：", "Latest context:"),
+        transcript || tr("(空)", "(empty)"),
         "",
-        `User question: ${question}`,
+        `${tr("用户问题", "User question")}: ${question}`,
         "",
-        "Answer as the user's private assistant. Keep concise and actionable.",
+        tr(
+          "请以用户的私人助手身份回答，保持简洁并可执行。",
+          "Answer as the user's private assistant. Keep concise and actionable."
+        ),
       ].join("\n");
 
       const result = await aiText({
         prompt,
         systemInstruction:
-          (botConfig.systemInstruction || "You are MyBot.") +
-          "\nYou are private to the current user. Never reveal private guidance as if it were a group message.",
-        fallback: "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner.",
+          (botConfig.systemInstruction || tr("你是 MyBot。", "You are MyBot.")) +
+          `\n${tr(
+            "你仅对当前用户私有，不要把私人建议伪装成群聊消息。",
+            "You are private to the current user. Never reveal private guidance as if it were a group message."
+          )}`,
+        fallback: tr(
+          "收到。我建议一个可执行的下一步：先总结最新结论并指定负责人。",
+          "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner."
+        ),
       });
-      setMyBotAnswer((result.text || "").trim() || "Noted.");
+      setMyBotAnswer((result.text || "").trim() || tr("收到。", "Noted."));
     } catch (err) {
       setMyBotError(formatApiError(err));
     } finally {
@@ -1379,7 +1389,7 @@ export default function ChatDetailScreen() {
             ) : (
               <GiftedChat
                 messages={giftedMessages}
-                user={{ _id: giftedUserId, name: user?.displayName || "Me" }}
+                user={{ _id: giftedUserId, name: user?.displayName || tr("我", "Me") }}
                 renderInputToolbar={() => null}
                 minInputToolbarHeight={0}
                 isKeyboardInternallyHandled={false}
@@ -1762,7 +1772,7 @@ export default function ChatDetailScreen() {
                               {m.memberType === "human"
                                 ? tr("真人", "Human")
                                 : m.memberType === "agent"
-                                  ? "Agent"
+                                  ? tr("智能体", "Agent")
                                   : tr("角色", "Role")}
                             </Text>
                           </View>
@@ -1801,7 +1811,7 @@ export default function ChatDetailScreen() {
                 {([
                   { key: "all", zh: "全部", en: "All" },
                   { key: "human", zh: "真人", en: "Human" },
-                  { key: "agent", zh: "Agent", en: "Agent" },
+                  { key: "agent", zh: "智能体", en: "Agent" },
                   { key: "role", zh: "角色", en: "Role" },
                 ] as const).map((item) => (
                   <Pressable
@@ -1944,15 +1954,15 @@ export default function ChatDetailScreen() {
                     disabled={pendingMemberAdds.length === 0 || memberApplyBusy}
                     onPress={() => {
                       Alert.alert(
-                        tr("确认创建 Group", "Confirm create Group"),
+                        tr("确认创建群聊", "Confirm Group Creation"),
                         tr(
-                          "确定要创建Group并添加所选成员吗？",
-                          "Are you sure you want to create Group and add selected members?"
+                          "确定要创建群聊并添加所选成员吗？",
+                          "Are you sure you want to create the group and add selected members?"
                         ),
                         [
                           { text: tr("取消", "Cancel"), style: "cancel" },
                           {
-                            text: tr("确定", "OK"),
+                            text: tr("确定", "Confirm"),
                             style: "default",
                             onPress: () => {
                               void (async () => {
@@ -1979,7 +1989,7 @@ export default function ChatDetailScreen() {
                     }}
                   >
                     <Text style={styles.memberFooterCtaText}>
-                      {memberApplyBusy ? tr("处理中...", "Applying...") : "OK"}
+                      {memberApplyBusy ? tr("处理中...", "Applying...") : tr("确定", "Confirm")}
                     </Text>
                   </Pressable>
                 </View>

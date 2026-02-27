@@ -63,7 +63,10 @@ export default function GroupsScreen() {
         key: `friend:${f.id}`,
         type: f.kind === "bot" ? ("role" as const) : ("human" as const),
         label: f.name,
-        desc: f.role || f.company || f.kind,
+        desc:
+          f.role ||
+          f.company ||
+          (f.kind === "bot" ? tr("角色", "Role") : tr("真人", "Human")),
         onAdd: async () => {
           if (!selectedGroupId) return;
           await addMember(selectedGroupId, { friendId: f.id, memberType: f.kind === "bot" ? "role" : "human" });
@@ -78,7 +81,7 @@ export default function GroupsScreen() {
         key: `agent:${a.id}`,
         type: "agent" as const,
         label: a.name,
-        desc: a.persona || "agent",
+        desc: a.persona || tr("智能体", "Agent"),
         onAdd: async () => {
           if (!selectedGroupId) return;
           await addMember(selectedGroupId, { agentId: a.id, memberType: "agent" });
@@ -95,7 +98,7 @@ export default function GroupsScreen() {
       if (!keyword) return true;
       return item.label.toLowerCase().includes(keyword) || item.desc.toLowerCase().includes(keyword);
     });
-  }, [addMember, agents, candidateQuery, friends, inviteFilter, listMembers, members, selectedGroupId]);
+  }, [addMember, agents, candidateQuery, friends, inviteFilter, listMembers, members, selectedGroupId, tr]);
 
   const confirmRemoveMember = (groupId: string, memberId: string, memberName: string) => {
     Alert.alert(

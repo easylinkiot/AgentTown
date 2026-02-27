@@ -230,7 +230,9 @@ export default function AgentsScreen() {
                       </Text>
                       <View style={styles.agentFooter}>
                         <Text style={styles.agentStatus}>{agent.status}</Text>
-                        <Text style={styles.agentSkillCount}>{agent.installedSkillIds.length} skills</Text>
+                        <Text style={styles.agentSkillCount}>
+                          {tr(`${agent.installedSkillIds.length} 个技能`, `${agent.installedSkillIds.length} skills`)}
+                        </Text>
                       </View>
                     </Pressable>
                   );
@@ -384,9 +386,9 @@ export default function AgentsScreen() {
                       <Ionicons name="cloud-upload-outline" size={16} color="#ffffff" />
                     </Pressable>
                   </View>
-                  <Text style={styles.avatarLabel}>{tr("Upload Avatar", "Upload Avatar")}</Text>
+                  <Text style={styles.avatarLabel}>{tr("上传头像", "Upload Avatar")}</Text>
                   <Text style={styles.avatarHint}>
-                    {avatarUrl.trim() ? tr("已选择", "Selected") : tr("No file chosen", "No file chosen")}
+                    {avatarUrl.trim() ? tr("已选择", "Selected") : tr("未选择文件", "No file chosen")}
                   </Text>
                 </View>
 
@@ -409,7 +411,7 @@ export default function AgentsScreen() {
                 ) : null}
 
                 <View style={styles.inlineBox}>
-                  <Text style={styles.fieldLabel}>NAME</Text>
+                  <Text style={styles.fieldLabel}>{tr("名称", "NAME")}</Text>
                   <View style={styles.inputRow}>
                     <TextInput
                       value={name}
@@ -422,7 +424,7 @@ export default function AgentsScreen() {
                 </View>
 
                 <View style={styles.inlineBox}>
-                  <Text style={styles.fieldLabel}>{tr("ROLE / EXPERTISE", "ROLE / EXPERTISE")}</Text>
+                  <Text style={styles.fieldLabel}>{tr("角色 / 专长", "ROLE / EXPERTISE")}</Text>
                   <View style={styles.inputRow}>
                     <Ionicons name="briefcase-outline" size={16} color="rgba(148,163,184,0.9)" style={styles.inputIcon} />
                     <TextInput
@@ -436,7 +438,7 @@ export default function AgentsScreen() {
                 </View>
 
                 <View style={styles.inlineBox}>
-                  <Text style={styles.fieldLabel}>{tr("SYSTEM INSTRUCTIONS", "SYSTEM INSTRUCTIONS")}</Text>
+                  <Text style={styles.fieldLabel}>{tr("系统指令", "SYSTEM INSTRUCTIONS")}</Text>
                   <View style={[styles.inputRow, styles.inputRowTall]}>
                     <TextInput
                       value={rolePrompt}
@@ -464,7 +466,7 @@ export default function AgentsScreen() {
                     color={!name.trim() || creatingAgent ? "rgba(226,232,240,0.40)" : "#ffffff"}
                   />
                   <Text style={[styles.createBtnText, (!name.trim() || creatingAgent) && styles.createBtnTextDisabled]}>
-                    {creatingAgent ? tr("Creating...", "Creating...") : tr("Create Member", "Create Member")}
+                    {creatingAgent ? tr("创建中...", "Creating...") : tr("创建成员", "Create Member")}
                   </Text>
                 </Pressable>
               </ScrollView>
@@ -509,11 +511,11 @@ export default function AgentsScreen() {
                   />
                 </View>
                 <View style={styles.inlineBox}>
-                  <Text style={styles.fieldLabel}>MARKDOWN</Text>
+                  <Text style={styles.fieldLabel}>{tr("Markdown", "MARKDOWN")}</Text>
                   <TextInput
                     value={skillMarkdown}
                     onChangeText={setSkillMarkdown}
-                    placeholder="Markdown"
+                    placeholder={tr("Markdown 内容", "Markdown")}
                     placeholderTextColor="rgba(148,163,184,0.9)"
                     style={[styles.fieldInput, styles.fieldInputXL]}
                     multiline

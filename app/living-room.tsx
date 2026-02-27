@@ -179,7 +179,7 @@ export default function LivingRoomScreen() {
                   </View>
                   <View style={styles.jobCard}>
                     <Text style={styles.jobTag}>{tr("项目制 · $1200", "Projects · $1200")}</Text>
-                    <Text style={styles.jobTitle}>React Dashboard</Text>
+                    <Text style={styles.jobTitle}>{tr("React 管理面板", "React Dashboard")}</Text>
                     <Text style={styles.jobDesc}>{tr("构建响应式管理面板。", "Build a responsive admin panel.")}</Text>
                   </View>
                 </View>

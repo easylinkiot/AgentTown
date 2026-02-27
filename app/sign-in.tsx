@@ -22,7 +22,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { useAgentTown } from "@/src/state/agenttown-context";
-import { normalizePhone, useAuth } from "@/src/state/auth-context";
+import {
+  AUTH_ERROR_OTP_EXPIRED,
+  AUTH_ERROR_OTP_INVALID,
+  AUTH_ERROR_OTP_NOT_REQUESTED,
+  AUTH_ERROR_PHONE_INVALID,
+  normalizePhone,
+  useAuth,
+} from "@/src/state/auth-context";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -73,6 +80,25 @@ function validatePhoneForOtp(phone: string, tr: (zh: string, en: string) => stri
     return normalizePhone(phone);
   } catch {
     throw new Error(tr("请输入有效手机号。", "Please enter a valid phone number."));
+  }
+}
+
+function localizeAuthErrorMessage(
+  error: unknown,
+  tr: (zh: string, en: string) => string
+) {
+  const message = error instanceof Error ? error.message : String(error);
+  switch (message) {
+    case AUTH_ERROR_PHONE_INVALID:
+      return tr("请输入有效手机号。", "Please enter a valid phone number.");
+    case AUTH_ERROR_OTP_NOT_REQUESTED:
+      return tr("验证码已失效，请重新发送。", "Code is no longer valid. Please send a new one.");
+    case AUTH_ERROR_OTP_EXPIRED:
+      return tr("验证码已过期，请重新发送。", "Code expired. Please send a new one.");
+    case AUTH_ERROR_OTP_INVALID:
+      return tr("验证码错误。", "Incorrect verification code.");
+    default:
+      return message;
   }
 }
 
@@ -337,7 +363,7 @@ export default function SignInScreen() {
         tr("请输入短信验证码完成登录。", "Enter the SMS code to finish sign-in.")
       );
     } catch (error) {
-      const msg = error instanceof Error ? error.message : tr("发送失败", "Failed to send");
+      const msg = localizeAuthErrorMessage(error, tr);
       Alert.alert(tr("发送失败", "Failed to Send"), msg);
     } finally {
       setBusyKey(null);
@@ -355,7 +381,7 @@ export default function SignInScreen() {
       setBusyKey("phone");
       await verifyPhoneCode(normalizedPhone, otpCode);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : tr("验证码校验失败", "Code verification failed");
+      const msg = localizeAuthErrorMessage(error, tr);
       Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
     } finally {
       setBusyKey(null);
@@ -407,7 +433,7 @@ export default function SignInScreen() {
               onPress={() => updateLanguage("zh")}
             >
               <Text style={[styles.langBtnText, language === "zh" && styles.langBtnTextActive]}>
-                中文
+                {tr("中文", "Chinese")}
               </Text>
             </Pressable>
             <Pressable
@@ -415,7 +441,7 @@ export default function SignInScreen() {
               onPress={() => updateLanguage("en")}
             >
               <Text style={[styles.langBtnText, language === "en" && styles.langBtnTextActive]}>
-                English
+                {tr("英文", "English")}
               </Text>
             </Pressable>
           </View>

@@ -65,6 +65,66 @@ const NEO_CATEGORY_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   "megaphone-outline",
 ];
 
+const MARKET_CATEGORY_I18N: Record<
+  string,
+  { title: { zh: string; en: string }; subtitle: { zh: string; en: string } }
+> = {
+  eng: {
+    title: { zh: "工程师类", en: "Engineering" },
+    subtitle: { zh: "AI 代理与本地模型库", en: "AI agents and local model libraries" },
+  },
+  pm: {
+    title: { zh: "产品经理类", en: "Product Management" },
+    subtitle: { zh: "提示词模板与执行框架", en: "Prompt templates and execution frameworks" },
+  },
+  mgmt: {
+    title: { zh: "管理层类", en: "Leadership" },
+    subtitle: { zh: "资源中心与人机协作", en: "Resource hub and human-AI collaboration" },
+  },
+  mkt: {
+    title: { zh: "市场与销售类", en: "Marketing & Sales" },
+    subtitle: { zh: "多模态工具与自动化营销", en: "Multimodal tools and automated marketing" },
+  },
+};
+
+const MARKET_ITEM_I18N: Record<
+  string,
+  { description: { zh: string; en: string }; fullDetail: { zh: string; en: string } }
+> = {
+  "anthropic-skills": {
+    description: { zh: "官方开源技能规范，支持 MCP 工具链。", en: "Official open-source skills spec with MCP toolchain support." },
+    fullDetail: { zh: "已集成 MCP 能力：文件系统操作、命令执行与屏幕交互工具。", en: "Integrated MCP capabilities: file operations, command execution, and screen interaction tools." },
+  },
+  "langgraph-agents": {
+    description: { zh: "基于 LangGraph 的专业 Agent 集合。", en: "A professional collection of agents built with LangGraph." },
+    fullDetail: { zh: "已安装 LangGraph Agent 模板，可执行 GitHub 与市场调研任务。", en: "Includes LangGraph agent templates for GitHub and market research workflows." },
+  },
+  "claude-skills": {
+    description: { zh: "87+ CLI 工具：Sprint 计划、Jira 自动化、PRD 生成。", en: "87+ CLI tools for sprint planning, Jira automation, and PRD generation." },
+    fullDetail: { zh: "已集成 PM 生产力套件：Sprint/Jira/PRD 自动化模板。", en: "Includes PM productivity kit templates for Sprint, Jira, and PRD automation." },
+  },
+  "pm-resources": {
+    description: { zh: "AI 策略框架、数据分析路径和课程清单。", en: "AI strategy frameworks, data analysis paths, and learning resources." },
+    fullDetail: { zh: "已接入 PM 知识库：策略框架、数据分析与认证路线。", en: "Connected PM knowledge base covering strategy, analytics, and certification tracks." },
+  },
+  "eng-manager": {
+    description: { zh: "团队建设、冲突解决、技术领导力资料库。", en: "A library for team building, conflict resolution, and technical leadership." },
+    fullDetail: { zh: "已安装工程管理知识模块，可用于团队协作建议。", en: "Includes engineering management modules for collaboration guidance." },
+  },
+  "500-agents": {
+    description: { zh: "500 个行业 AI Agent 落地案例。", en: "500 industry AI agent implementation cases." },
+    fullDetail: { zh: "已集成行业落地案例库，覆盖金融、医疗、电商等场景。", en: "Includes an implementation case library across finance, healthcare, e-commerce, and more." },
+  },
+  antigravity: {
+    description: { zh: "230+ 自动化运营和营销技能。", en: "230+ automation skills for operations and marketing." },
+    fullDetail: { zh: "已安装营销工具包：社媒发布、市场调研和线索生成。", en: "Includes a marketing toolkit for social posting, market research, and lead generation." },
+  },
+  synthesia: {
+    description: { zh: "视频脚本、个性化邮件营销工具指南。", en: "Guides for video scripting and personalized email marketing tools." },
+    fullDetail: { zh: "已集成多模态营销助手：视频脚本、邮件个性化和素材建议。", en: "Includes a multimodal marketing assistant for video scripts, email personalization, and asset suggestions." },
+  },
+};
+
 export default function ConfigScreen() {
   const router = useRouter();
   const {
@@ -155,6 +215,40 @@ export default function ConfigScreen() {
     }
     return map;
   }, [runtimeSkills]);
+
+  const localizedMarketData = useMemo(
+    () =>
+      MARKET_DATA.map((category) => {
+        const categoryI18n = MARKET_CATEGORY_I18N[category.id];
+        return {
+          ...category,
+          title: categoryI18n
+            ? tx(language, categoryI18n.title.zh, categoryI18n.title.en)
+            : category.title,
+          subtitle: categoryI18n
+            ? tx(language, categoryI18n.subtitle.zh, categoryI18n.subtitle.en)
+            : category.subtitle,
+          items: category.items.map((item) => {
+            const itemI18n = MARKET_ITEM_I18N[item.id];
+            if (!itemI18n) return item;
+            return {
+              ...item,
+              description: tx(
+                language,
+                itemI18n.description.zh,
+                itemI18n.description.en
+              ),
+              fullDetail: tx(
+                language,
+                itemI18n.fullDetail.zh,
+                itemI18n.fullDetail.en
+              ),
+            };
+          }),
+        };
+      }),
+    [language]
+  );
 
   const installedSkills = useMemo(() => {
     const out: RuntimeSkillItem[] = [];
@@ -380,7 +474,7 @@ export default function ConfigScreen() {
                 style={styles.neoNameInput}
                 value={name}
                 onChangeText={setName}
-                placeholder="MyBot"
+                placeholder={tr("我的 Bot", "MyBot")}
                 placeholderTextColor="rgba(148,163,184,0.9)"
               />
             </View>
@@ -549,7 +643,7 @@ export default function ConfigScreen() {
                     language === "zh" && styles.themeBtnTextActive,
                   ]}
                 >
-                  中文
+                  {tr("中文", "Chinese")}
                 </Text>
               </Pressable>
               <Pressable
@@ -572,7 +666,7 @@ export default function ConfigScreen() {
                     language === "en" && styles.themeBtnTextActive,
                   ]}
                 >
-                  English
+                  {tr("英文", "English")}
                 </Text>
               </Pressable>
             </View>
@@ -760,7 +854,7 @@ export default function ConfigScreen() {
             >
               <Ionicons name="language-outline" size={16} color={language === "zh" ? "white" : "#334155"} />
               <Text style={[styles.themeBtnText, language === "zh" && styles.themeBtnTextActive]}>
-                中文
+                {tr("中文", "Chinese")}
               </Text>
             </Pressable>
             <Pressable
@@ -769,7 +863,7 @@ export default function ConfigScreen() {
             >
               <Ionicons name="language-outline" size={16} color={language === "en" ? "white" : "#334155"} />
               <Text style={[styles.themeBtnText, language === "en" && styles.themeBtnTextActive]}>
-                English
+                {tr("英文", "English")}
               </Text>
             </Pressable>
           </View>
@@ -924,7 +1018,7 @@ export default function ConfigScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("技能市场", "Skill Marketplace")}</Text>
-          {MARKET_DATA.map((category) => (
+          {localizedMarketData.map((category) => (
             <View style={styles.marketCategory} key={category.id}>
               <Text style={styles.marketCategoryTitle}>{category.title}</Text>
               <Text style={styles.marketCategorySubtitle}>{category.subtitle}</Text>

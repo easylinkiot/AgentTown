@@ -11,13 +11,23 @@ export type LotViewTag =
   | "park-view"
   | "city-view";
 
-export const LOT_VIEW_LABELS: Record<LotViewTag, string> = {
+export const LOT_VIEW_LABELS_ZH: Record<LotViewTag, string> = {
   "sea-view": "海景房",
   "river-view": "河景房",
   "mountain-view": "山景房",
   "park-view": "园景房",
   "city-view": "城景房",
 };
+
+export const LOT_VIEW_LABELS_EN: Record<LotViewTag, string> = {
+  "sea-view": "sea-view homes",
+  "river-view": "river-view homes",
+  "mountain-view": "mountain-view homes",
+  "park-view": "park-view homes",
+  "city-view": "city-view homes",
+};
+
+export const LOT_VIEW_LABELS = LOT_VIEW_LABELS_ZH;
 
 export type LotVisualType =
   | "red-cottage"
@@ -501,7 +511,7 @@ function makeNpc(
     name: `${label} Bot`,
     role,
     avatar: `https://api.dicebear.com/7.x/avataaars/png?seed=${label}&backgroundColor=c0aede`,
-    greeting: `Hi, I am ${label}, your ${role}. I currently manage ${LOT_VIEW_LABELS[viewTag]} projects.`,
+    greeting: `Hi, I am ${label}, your ${role}. I currently manage ${LOT_VIEW_LABELS_EN[viewTag]} projects.`,
     skills: role,
   };
 }
