@@ -27,6 +27,7 @@ import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/State
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import {
+  agentChat as agentChatApi,
   aiText,
   discoverUsers as discoverUsersApi,
   formatApiError,
@@ -37,12 +38,14 @@ import {
 import {
   type AssistCandidate,
   type ChatAssistAction,
+  type ChatCompletionsRequest,
   type ChatAssistRequest,
+  runChatCompletions,
   runChatAssist,
 } from "@/src/services/chatAssist";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
-import { Agent, ConversationMessage, Friend, ThreadMember } from "@/src/types";
+import { Agent, ChatThread, ConversationMessage, Friend, ThreadMember } from "@/src/types";
 
 type MemberFilter = "all" | "human" | "agent" | "role";
 type MemberCandidate = {
@@ -137,6 +140,35 @@ function normalizeDisplayedContent(content: string, senderName?: string) {
     }
   }
   return text;
+}
+
+function resolveGroupOwnerId(thread: ChatThread) {
+  const alias = thread as ChatThread & {
+    group_commander_user_id?: string;
+    commanderUserId?: string;
+    ownerUserId?: string;
+    owner_user_id?: string;
+    createdByUserId?: string;
+    created_by_user_id?: string;
+    creatorUserId?: string;
+    creator_user_id?: string;
+  };
+  const candidates = [
+    thread.groupCommanderUserId,
+    alias.group_commander_user_id,
+    alias.commanderUserId,
+    alias.ownerUserId,
+    alias.owner_user_id,
+    alias.createdByUserId,
+    alias.created_by_user_id,
+    alias.creatorUserId,
+    alias.creator_user_id,
+  ];
+  for (const value of candidates) {
+    const id = (value || "").trim();
+    if (id) return id;
+  }
+  return "";
 }
 
 function isBotLikeName(value?: string) {
@@ -253,6 +285,52 @@ export default function ChatDetailScreen() {
   const messages = messagesByThread[chatId] || [];
   const linkedFriend = useMemo(() => friends.find((item) => item.threadId === chatId), [chatId, friends]);
   const currentUserId = (user?.id || "").trim();
+
+  const isSelfThreadMember = useCallback(
+    (member: ThreadMember) => {
+      if (!currentUserId || member.memberType !== "human") return false;
+      const memberLike = member as ThreadMember & { userId?: string; user_id?: string };
+      const directMemberUserId = (memberLike.userId || memberLike.user_id || "").trim();
+      if (directMemberUserId && directMemberUserId === currentUserId) return true;
+
+      const friendId = (member.friendId || "").trim();
+      if (friendId) {
+        const relatedFriend = friends.find((item) => item.id === friendId);
+        const friendUserId = (relatedFriend?.userId || "").trim();
+        if (friendUserId && friendUserId === currentUserId) return true;
+      }
+
+      return (member.id || "").trim() === currentUserId;
+    },
+    [currentUserId, friends]
+  );
+
+  const isGroupOwner = useMemo(() => {
+    if (!thread.isGroup || !currentUserId) return false;
+    const ownerId = resolveGroupOwnerId(thread);
+    if (ownerId) return ownerId === currentUserId;
+
+    // Backward compatibility: for legacy groups with missing owner metadata,
+    // treat the earliest human member as the creator/owner.
+    const humans = members.filter((item) => item.memberType === "human");
+    if (humans.length === 0) return false;
+    const earliestHuman = [...humans].sort((a, b) => {
+      const at = Date.parse(a.createdAt || "");
+      const bt = Date.parse(b.createdAt || "");
+      if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+      return 0;
+    })[0];
+    return isSelfThreadMember(earliestHuman);
+  }, [currentUserId, isSelfThreadMember, members, thread, thread.isGroup]);
+
+  const canOperateThreadMember = useCallback(
+    (member: ThreadMember) => {
+      if (!thread.isGroup) return false;
+      if (isSelfThreadMember(member)) return true;
+      return isGroupOwner;
+    },
+    [isGroupOwner, isSelfThreadMember, thread.isGroup]
+  );
   const giftedUserId = currentUserId || "me";
   useEffect(() => {
     messagesByThreadRef.current = messagesByThread;
@@ -291,8 +369,18 @@ export default function ChatDetailScreen() {
         return;
       }
 
-      const node =
-        target === "askAI" ? aiCardRef.current : inputRowRef.current;
+      if (target === "chat") {
+        const clearance = Platform.OS === "ios" ? KEYBOARD_CLEARANCE_IOS : KEYBOARD_CLEARANCE;
+        const usableKeyboardHeight =
+          Platform.OS === "ios"
+            ? Math.max(0, keyboardHeight - insets.bottom)
+            : Math.max(0, keyboardHeight);
+        animateKeyboardValue(keyboardPadding, usableKeyboardHeight + clearance, duration);
+        animateKeyboardValue(aiKeyboardShift, 0, duration);
+        return;
+      }
+
+      const node = aiCardRef.current;
 
       if (!node) {
         resetKeyboardOffsets(duration);
@@ -340,12 +428,14 @@ export default function ChatDetailScreen() {
     const hideEvent = isIOS ? "keyboardWillHide" : "keyboardDidHide";
     const showSub = Keyboard.addListener(showEvent, handleFrame);
     const hideSub = Keyboard.addListener(hideEvent, handleHide);
+    const didHideSub = Keyboard.addListener("keyboardDidHide", handleHide);
     const changeSub = isIOS
       ? Keyboard.addListener("keyboardWillChangeFrame", handleFrame)
       : null;
     return () => {
       showSub.remove();
       hideSub.remove();
+      didHideSub.remove();
       changeSub?.remove();
     };
   }, [applyKeyboardAvoidance, resetKeyboardOffsets]);
@@ -353,11 +443,15 @@ export default function ChatDetailScreen() {
   const setKeyboardTarget = useCallback(
     (target: KeyboardTarget | null) => {
       activeKeyboardTargetRef.current = target;
+      if (!target) {
+        resetKeyboardOffsets(lastKeyboardDurationRef.current || 120);
+        return;
+      }
       if (target && lastKeyboardHeightRef.current > 0) {
         applyKeyboardAvoidance(lastKeyboardHeightRef.current, lastKeyboardDurationRef.current || 120);
       }
     },
-    [applyKeyboardAvoidance]
+    [applyKeyboardAvoidance, resetKeyboardOffsets]
   );
 
   const [devStreamEnabled, setDevStreamEnabled] = useState(__DEV__);
@@ -862,6 +956,44 @@ export default function ChatDetailScreen() {
       }
 
       try {
+        if (action === "ask_anything") {
+          const completionsRequest: ChatCompletionsRequest = {
+            input: askAI.trim(),
+            session_id: chatId,
+          };
+          const targetType = (thread.targetType || "").trim();
+          const targetId = (thread.targetId || "").trim();
+          if (targetType) completionsRequest.target_type = targetType;
+          if (targetId) completionsRequest.target_id = targetId;
+
+          try {
+            await runChatCompletions(
+              completionsRequest,
+              {
+                onText: (text) => {
+                  if (controller.signal.aborted) return;
+                  if (!askAIMountedRef.current) return;
+                  if (requestSeq !== askAIRequestSeqRef.current) return;
+                  const safeText = text.trim();
+                  if (!safeText) return;
+                  setAskAICandidates([
+                    {
+                      id: "completion_primary",
+                      kind: "text",
+                      text: safeText,
+                    },
+                  ]);
+                  setAskAISelectedIndex(0);
+                },
+              },
+              controller.signal
+            );
+            return;
+          } catch {
+            // Fallback to assist endpoint when completions stream is unavailable.
+          }
+        }
+
         await runChatAssist(
           assistRequest,
           {
@@ -893,7 +1025,7 @@ export default function ChatDetailScreen() {
         setIsStreaming(false);
       }
     },
-    [abortAskAIStream, actionMessage, askAI, isStreaming, tr]
+    [abortAskAIStream, actionMessage, askAI, chatId, isStreaming, thread.targetId, thread.targetType, tr]
   );
 
   const handleLongPress = (message: ConversationMessage) => {
@@ -971,20 +1103,51 @@ export default function ChatDetailScreen() {
         ),
       ].join("\n");
 
-      const result = await aiText({
-        prompt,
-        systemInstruction:
-          (botConfig.systemInstruction || tr("你是 MyBot。", "You are MyBot.")) +
-          `\n${tr(
-            "你仅对当前用户私有，不要把私人建议伪装成群聊消息。",
-            "You are private to the current user. Never reveal private guidance as if it were a group message."
-          )}`,
-        fallback: tr(
-          "收到。我建议一个可执行的下一步：先总结最新结论并指定负责人。",
-          "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner."
-        ),
-      });
-      setMyBotAnswer((result.text || "").trim() || tr("收到。", "Noted."));
+      const history = messages
+        .slice(-20)
+        .map((m) => {
+          const text = normalizeDisplayedContent(m.content || "", m.senderName).trim();
+          if (!text) return null;
+          return {
+            role: m.isMe ? ("user" as const) : ("model" as const),
+            text,
+          };
+        })
+        .filter((item): item is { role: "user" | "model"; text: string } => Boolean(item));
+
+      const primaryAgentId = (thread.id || "").startsWith("agent_") ? thread.id : "agent_mybot";
+      let answered = false;
+      try {
+        const agentResult = await agentChatApi(primaryAgentId, {
+          threadId: chatId,
+          message: question,
+          history,
+        });
+        const reply = (agentResult.reply || "").trim();
+        if (reply) {
+          setMyBotAnswer(reply);
+          answered = true;
+        }
+      } catch {
+        // Fallback to aiText below.
+      }
+
+      if (!answered) {
+        const result = await aiText({
+          prompt,
+          systemInstruction:
+            (botConfig.systemInstruction || tr("你是 MyBot。", "You are MyBot.")) +
+            `\n${tr(
+              "你仅对当前用户私有，不要把私人建议伪装成群聊消息。",
+              "You are private to the current user. Never reveal private guidance as if it were a group message."
+            )}`,
+          fallback: tr(
+            "收到。我建议一个可执行的下一步：先总结最新结论并指定负责人。",
+            "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner."
+          ),
+        });
+        setMyBotAnswer((result.text || "").trim() || tr("收到。", "Noted."));
+      }
     } catch (err) {
       setMyBotError(formatApiError(err));
     } finally {
@@ -1083,21 +1246,39 @@ export default function ChatDetailScreen() {
   };
 
   const confirmRemoveThreadMember = (member: ThreadMember) => {
+    const canOperate = canOperateThreadMember(member);
+    if (!canOperate) {
+      setMemberPoolError(
+        tr(
+          "你没有权限移除其他成员，只能退出你自己。",
+          "You cannot remove other members. You can only leave by removing yourself."
+        )
+      );
+      return;
+    }
+    const isSelf = isSelfThreadMember(member);
     Alert.alert(
-      tr("移除成员", "Remove member"),
+      tr(isSelf ? "退出群聊" : "移除成员", isSelf ? "Leave group" : "Remove member"),
       tr(
-        `确认移除 ${member.name || tr("该成员", "this member")} 吗？`,
-        `Remove ${member.name || "this member"} from this chat?`
+        isSelf
+          ? "确认退出当前群聊吗？"
+          : `确认移除 ${member.name || tr("该成员", "this member")} 吗？`,
+        isSelf
+          ? "Leave this group chat?"
+          : `Remove ${member.name || "this member"} from this chat?`
       ),
       [
         { text: tr("取消", "Cancel"), style: "cancel" },
         {
-          text: tr("移除", "Remove"),
+          text: tr(isSelf ? "退出" : "移除", isSelf ? "Leave" : "Remove"),
           style: "destructive",
           onPress: () => {
             void removeMember(chatId, member.id).catch((err) =>
               setMemberPoolError(formatApiError(err))
             );
+            if (isSelf) {
+              router.back();
+            }
           },
         },
       ]
@@ -1928,14 +2109,24 @@ export default function ChatDetailScreen() {
                 ) : null}
                 <Text style={styles.currentTitle}>{tr("当前成员", "Members")}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.currentChips}>
-                  {members.map((m) => (
-                    <View key={m.id} style={styles.currentChip}>
-                      <Text style={styles.currentChipText}>{m.name}</Text>
-                      <Pressable onPress={() => confirmRemoveThreadMember(m)}>
-                        <Ionicons name="close" size={12} color="rgba(248,113,113,0.95)" />
-                      </Pressable>
-                    </View>
-                  ))}
+                  {members.map((m) => {
+                    const canOperate = canOperateThreadMember(m);
+                    const isSelf = isSelfThreadMember(m);
+                    return (
+                      <View key={m.id} style={styles.currentChip}>
+                        <Text style={styles.currentChipText}>{m.name}</Text>
+                        {canOperate ? (
+                          <Pressable onPress={() => confirmRemoveThreadMember(m)}>
+                            <Ionicons
+                              name={isSelf ? "exit-outline" : "close"}
+                              size={12}
+                              color="rgba(248,113,113,0.95)"
+                            />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    );
+                  })}
                 </ScrollView>
 
                 <View style={styles.memberFooter}>

@@ -5,9 +5,10 @@ import { AgentTownProvider, useAgentTown } from "../agenttown-context";
 import { useAuth } from "../auth-context";
 import {
   atCreateSession,
-  atGetBotSettings,
   createFriend as createFriendApi,
+  fetchBootstrap,
   listAgents,
+  listChatSessions,
   listChatThreads,
   listCustomSkills,
   listFriends,
@@ -21,6 +22,12 @@ import {
 
 jest.mock("../auth-context", () => ({
   useAuth: jest.fn(),
+}));
+
+jest.mock("@/src/services/task-notifications", () => ({
+  clearTaskReminderNotifications: jest.fn(),
+  ensureTaskReminderPermission: jest.fn().mockResolvedValue(true),
+  syncTaskReminderNotifications: jest.fn(),
 }));
 
 jest.mock("@/src/lib/api", () => ({
@@ -41,6 +48,7 @@ jest.mock("@/src/lib/api", () => ({
   generateRoleReplies: jest.fn(),
   installMiniApp: jest.fn(),
   listAgents: jest.fn(),
+  listChatSessions: jest.fn(),
   listChatThreads: jest.fn(),
   listCustomSkills: jest.fn(),
   listFriends: jest.fn(),
@@ -57,9 +65,8 @@ jest.mock("@/src/lib/api", () => ({
   saveBotConfig: jest.fn(),
   subscribeRealtime: jest.fn(),
   toggleAgentSkill: jest.fn(),
-  atChatCompletionsStream: jest.fn(),
   atCreateSession: jest.fn(),
-  atGetBotSettings: jest.fn(),
+  mapATMessageToConversation: jest.fn(),
   mapATSessionToThread: jest.fn(),
 }));
 
@@ -68,8 +75,8 @@ const mockedCreateFriendApi = createFriendApi as jest.Mock;
 const mockedAtCreateSession = atCreateSession as jest.Mock;
 const mockedMapATSessionToThread = mapATSessionToThread as jest.Mock;
 const mockedSubscribeRealtime = subscribeRealtime as jest.Mock;
-const mockedAtGetBotSettings = atGetBotSettings as jest.Mock;
 const mockedListChatThreads = listChatThreads as jest.Mock;
+const mockedListChatSessions = listChatSessions as jest.Mock;
 const mockedListTasks = listTasks as jest.Mock;
 const mockedListFriends = listFriends as jest.Mock;
 const mockedListAgents = listAgents as jest.Mock;
@@ -77,6 +84,7 @@ const mockedListSkillCatalog = listSkillCatalog as jest.Mock;
 const mockedListCustomSkills = listCustomSkills as jest.Mock;
 const mockedListMiniApps = listMiniApps as jest.Mock;
 const mockedListMiniAppTemplates = listMiniAppTemplates as jest.Mock;
+const mockedFetchBootstrap = fetchBootstrap as jest.Mock;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <AgentTownProvider>{children}</AgentTownProvider>;
@@ -95,12 +103,20 @@ describe("AgentTown friend regression", () => {
     });
 
     mockedSubscribeRealtime.mockImplementation(() => () => {});
-    mockedAtGetBotSettings.mockResolvedValue({
-      bot_enabled: true,
-      visibility: "private",
-      bot_prompt: "bot",
+    mockedFetchBootstrap.mockResolvedValue({
+      chatThreads: [],
+      tasks: [],
+      messages: {},
+      friends: [],
+      threadMembers: {},
+      agents: [],
+      skillCatalog: [],
+      customSkills: [],
+      miniApps: [],
+      miniAppTemplates: [],
     });
     mockedListChatThreads.mockResolvedValue([]);
+    mockedListChatSessions.mockResolvedValue([]);
     mockedListTasks.mockResolvedValue([]);
     mockedListFriends.mockResolvedValue([]);
     mockedListAgents.mockResolvedValue([]);
@@ -213,5 +229,24 @@ describe("AgentTown friend regression", () => {
 
     expect(result.current.chatThreads).toHaveLength(0);
     expect(mockedAtCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("hydrates direct chat threads from sessions list", async () => {
+    mockedListChatSessions.mockResolvedValue([
+      {
+        id: "sess_u_1",
+        title: "Direct User",
+        target_type: "user",
+        target_id: "u_1",
+        updated_at: "2026-02-27T00:00:00Z",
+      },
+    ]);
+
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+
+    await waitFor(() =>
+      expect(result.current.chatThreads.some((t) => t.id === "sess_u_1" && t.targetType === "user")).toBe(true)
+    );
   });
 });
