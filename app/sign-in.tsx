@@ -22,7 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { useAgentTown } from "@/src/state/agenttown-context";
-import { useAuth } from "@/src/state/auth-context";
+import { normalizePhone, useAuth } from "@/src/state/auth-context";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -66,6 +66,14 @@ async function fetchGoogleProfile(accessToken: string) {
   }
   const payload = (await response.json()) as GoogleProfile;
   return payload;
+}
+
+function validatePhoneForOtp(phone: string, tr: (zh: string, en: string) => string) {
+  try {
+    return normalizePhone(phone);
+  } catch {
+    throw new Error(tr("请输入有效手机号。", "Please enter a valid phone number."));
+  }
 }
 
 export default function SignInScreen() {
@@ -318,8 +326,10 @@ export default function SignInScreen() {
 
   const handleSendCode = async () => {
     try {
+      const normalizedPhone = validatePhoneForOtp(phone, tr);
+      setPhone(normalizedPhone);
       setBusyKey("phone");
-      const result = await sendPhoneCode(phone);
+      const result = await sendPhoneCode(normalizedPhone);
       setOtpExpiresAt(result.expiresAt);
       setDevOtpHint(result.devCode || null);
       Alert.alert(
@@ -336,8 +346,14 @@ export default function SignInScreen() {
 
   const handleVerifyCode = async () => {
     try {
+      const normalizedPhone = validatePhoneForOtp(phone, tr);
+      setPhone(normalizedPhone);
+      if (!otpCode.trim()) {
+        Alert.alert(tr("信息不完整", "Incomplete"), tr("请输入验证码。", "Please enter the verification code."));
+        return;
+      }
       setBusyKey("phone");
-      await verifyPhoneCode(phone, otpCode);
+      await verifyPhoneCode(normalizedPhone, otpCode);
     } catch (error) {
       const msg = error instanceof Error ? error.message : tr("验证码校验失败", "Code verification failed");
       Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
