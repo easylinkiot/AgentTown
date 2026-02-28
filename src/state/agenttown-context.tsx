@@ -23,7 +23,6 @@ import {
   installMiniApp as installMiniAppApi,
   listThreadMembers as listThreadMembersApi,
   listThreadMessages as listThreadMessagesApi,
-  listChatSessions as listChatSessionsApi,
   listChatThreads as listChatThreadsApi,
   listChatSessionMessages as listChatSessionMessagesApi,
   patchCustomSkill as patchCustomSkillApi,
@@ -467,21 +466,22 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const notificationSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshAll = useCallback(async () => {
-    const [bootstrapResult, sessionsResult, threadsResult] = await Promise.allSettled([
+    const [bootstrapResult, threadsResult] = await Promise.allSettled([
       fetchBootstrap(),
-      listChatSessionsApi({ limit: 200 }),
+      // Home does not need to call /v1/chat/sessions for now.
+      // listChatSessionsApi({ limit: 200 }),
       listChatThreadsApi(),
     ]);
     const payload = bootstrapResult.status === "fulfilled" ? bootstrapResult.value : null;
 
-    const sessionThreads =
-      sessionsResult.status === "fulfilled"
-        ? sessionsResult.value.map((session) => mapATSessionToThread(session))
-        : [];
+    // const sessionThreads =
+    //   sessionsResult.status === "fulfilled"
+    //     ? sessionsResult.value.map((session) => mapATSessionToThread(session))
+    //     : [];
     const listedThreads = threadsResult.status === "fulfilled" && Array.isArray(threadsResult.value)
       ? threadsResult.value
       : [];
-    const mergedThreadsRaw = mergeThreadsById(sessionThreads, listedThreads);
+    const mergedThreadsRaw = mergeThreadsById(listedThreads);
     const currentById = new Map(chatThreadsRef.current.map((thread) => [thread.id, thread] as const));
     const mergedThreads = mergedThreadsRaw.map((thread) => {
       const current = currentById.get(thread.id);
@@ -542,7 +542,6 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
 
     if (
       bootstrapResult.status === "rejected" &&
-      sessionsResult.status === "rejected" &&
       threadsResult.status === "rejected"
     ) {
       throw bootstrapResult.reason;
