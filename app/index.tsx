@@ -122,11 +122,18 @@ export default function HomeScreen() {
     const displayName = (user?.displayName || "").trim();
     const assistantNameEN = displayName ? `${displayName}'s Bot` : "";
     const assistantNameZH = displayName ? `${displayName}的助理` : "";
+    const isMyBotId = (value?: string) => {
+      const normalized = (value || "").trim().toLowerCase();
+      return normalized === "mybot" || normalized === "agent_mybot" || normalized.startsWith("agent_userbot_");
+    };
 
     const items = [
       ...friends
         .filter((f) => {
-          return f.kind === "bot";
+          if (f.kind !== "bot") return false;
+          if (isMyBotId(f.userId) || isMyBotId(f.id)) return false;
+          const normalizedName = (f.name || "").trim().toLowerCase();
+          return normalizedName !== "mybot";
         })
         .map((f) => ({
           id: `friend:${f.id}`,
@@ -562,14 +569,17 @@ export default function HomeScreen() {
           )}
 
           <View style={[styles.presenceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            {presence.length ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.presenceScroll}
-                contentContainerStyle={styles.presenceRow}
-              >
-                {presence.map((item) => (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.presenceScroll}
+              contentContainerStyle={styles.presenceRow}
+            >
+              <Pressable style={styles.presenceAddInline} onPress={() => setPeopleModal(true)}>
+                <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
+              </Pressable>
+              {presence.length
+                ? presence.map((item) => (
                   <Pressable
                     key={item.id}
                     style={styles.presenceItem}
@@ -593,15 +603,9 @@ export default function HomeScreen() {
                     </View>
                     <View style={styles.presenceDot} />
                   </Pressable>
-                ))}
-              </ScrollView>
-            ) : (
-              <View style={styles.presenceSpacer} />
-            )}
-
-            <Pressable style={styles.presenceAdd} onPress={() => setPeopleModal(true)}>
-              <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
-            </Pressable>
+                  ))
+                : null}
+            </ScrollView>
           </View>
         </View>
 
@@ -1065,9 +1069,6 @@ const styles = StyleSheet.create({
   presenceScroll: {
     flex: 1,
   },
-  presenceSpacer: {
-    flex: 1,
-  },
   presenceItem: {
     width: 46,
     height: 46,
@@ -1109,7 +1110,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.3,
   },
-  presenceAdd: {
+  presenceAddInline: {
     width: 46,
     height: 46,
     borderRadius: 23,
@@ -1118,7 +1119,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 10,
   },
   presenceDot: {
     position: "absolute",

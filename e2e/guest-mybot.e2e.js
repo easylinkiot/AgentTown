@@ -1,3 +1,5 @@
+/* global describe, beforeAll, afterAll, it, device, waitFor, element, by */
+
 describe("Guest login and send message", () => {
   beforeAll(async () => {
     await device.launchApp({

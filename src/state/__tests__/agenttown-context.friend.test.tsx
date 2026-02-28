@@ -231,14 +231,17 @@ describe("AgentTown friend regression", () => {
     expect(mockedAtCreateSession).not.toHaveBeenCalled();
   });
 
-  it("hydrates direct chat threads from sessions list", async () => {
-    mockedListChatSessions.mockResolvedValue([
+  it("hydrates direct chat threads from threads list", async () => {
+    mockedListChatThreads.mockResolvedValue([
       {
         id: "sess_u_1",
-        title: "Direct User",
-        target_type: "user",
-        target_id: "u_1",
-        updated_at: "2026-02-27T00:00:00Z",
+        name: "Direct User",
+        avatar: "",
+        message: "",
+        time: "2026-02-27T00:00:00Z",
+        isGroup: false,
+        targetType: "user",
+        targetId: "u_1",
       },
     ]);
 
