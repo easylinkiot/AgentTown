@@ -12,11 +12,22 @@ const REMINDER_DUE_AT_KEY = "dueAt";
 let handlerConfigured = false;
 
 function isMobile() {
+  if (process.env.NODE_ENV === "test") return false;
   return Platform.OS === "ios" || Platform.OS === "android";
 }
 
+function hasNotificationRuntime() {
+  return (
+    typeof Notifications.getPermissionsAsync === "function" &&
+    typeof Notifications.requestPermissionsAsync === "function" &&
+    typeof Notifications.getAllScheduledNotificationsAsync === "function" &&
+    typeof Notifications.scheduleNotificationAsync === "function" &&
+    typeof Notifications.cancelScheduledNotificationAsync === "function"
+  );
+}
+
 function ensureHandlerConfigured() {
-  if (!isMobile() || handlerConfigured) return;
+  if (!isMobile() || !hasNotificationRuntime() || handlerConfigured) return;
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
@@ -54,6 +65,7 @@ function reminderBody(task: TaskItem, language: AppLanguage) {
 
 async function ensureChannel() {
   if (Platform.OS !== "android") return;
+  if (typeof Notifications.setNotificationChannelAsync !== "function") return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: "Task reminders",
     importance: Notifications.AndroidImportance.HIGH,
@@ -64,26 +76,26 @@ async function ensureChannel() {
 }
 
 export async function ensureTaskReminderPermission() {
-  if (!isMobile()) return false;
+  if (!isMobile() || !hasNotificationRuntime()) return false;
   ensureHandlerConfigured();
   await ensureChannel();
 
   const current = await Notifications.getPermissionsAsync();
-  if (current.granted) return true;
+  if (current?.granted) return true;
 
   const requested = await Notifications.requestPermissionsAsync();
-  return requested.granted;
+  return Boolean(requested?.granted);
 }
 
 export async function clearTaskReminderNotifications() {
-  if (!isMobile()) return;
+  if (!isMobile() || !hasNotificationRuntime()) return;
   const pending = await Notifications.getAllScheduledNotificationsAsync();
   const targets = pending.filter((item) => item.content.data?.[REMINDER_DATA_KEY] === REMINDER_KIND);
   await Promise.all(targets.map((item) => Notifications.cancelScheduledNotificationAsync(item.identifier)));
 }
 
 export async function syncTaskReminderNotifications(tasks: TaskItem[], language: AppLanguage) {
-  if (!isMobile()) return;
+  if (!isMobile() || !hasNotificationRuntime()) return;
   ensureHandlerConfigured();
 
   const granted = await ensureTaskReminderPermission();

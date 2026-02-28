@@ -48,6 +48,14 @@ import { useAuth } from "@/src/state/auth-context";
 import { Agent, ChatThread, ConversationMessage, Friend, ThreadMember } from "@/src/types";
 
 type MemberFilter = "all" | "human" | "agent" | "role";
+type MemberCandidate = {
+  key: string;
+  type: "human" | "agent";
+  group: "humans" | "agents";
+  label: string;
+  desc: string;
+  onAdd: () => Promise<void>;
+};
 type GiftedMessage = IMessage & { raw: ConversationMessage };
 type SystemMessageRenderProps = { currentMessage?: GiftedMessage | null };
 type KeyboardTarget = "chat" | "askAI";
@@ -708,7 +716,7 @@ export default function ChatDetailScreen() {
     };
   }, [chatId, listMembers, memberModal, memberPoolNonce, memberQuery]);
 
-  const candidates = useMemo(() => {
+  const candidates = useMemo<MemberCandidate[]>(() => {
     const friendPool = memberPoolFriends.length ? memberPoolFriends : friends;
     const agentPool = memberPoolAgents.length ? memberPoolAgents : agents;
     const usedFriendIds = new Set(
@@ -736,6 +744,7 @@ export default function ChatDetailScreen() {
       .map((f) => ({
         key: `friend:${f.id}`,
         type: "human" as const,
+        group: "humans" as const,
         label: f.name,
         desc: f.role || f.company || tr("真人", "Human"),
         onAdd: async () => {
@@ -748,6 +757,7 @@ export default function ChatDetailScreen() {
       .map((a) => ({
         key: `agent:${a.id}`,
         type: "agent" as const,
+        group: "agents" as const,
         label: a.name,
         desc: a.persona || a.description || tr("智能体", "Agent"),
         onAdd: async () => {
@@ -771,6 +781,7 @@ export default function ChatDetailScreen() {
       .map((u) => ({
         key: `discover:${u.id}`,
         type: "human" as const,
+        group: "humans" as const,
         label: u.displayName || tr("用户", "User"),
         desc: [u.email, u.provider].filter(Boolean).join(" · ") || tr("用户", "User"),
         onAdd: async () => {
@@ -828,6 +839,22 @@ export default function ChatDetailScreen() {
   const selectedMemberKeys = useMemo(
     () => new Set(pendingMemberAdds.map((item) => item.key)),
     [pendingMemberAdds]
+  );
+  const groupedCandidates = useMemo(
+    () =>
+      [
+        {
+          key: "agents",
+          title: tr("AI 团队", "AI Team"),
+          items: candidates.filter((item) => item.group === "agents"),
+        },
+        {
+          key: "humans",
+          title: tr("联系人", "Contacts"),
+          items: candidates.filter((item) => item.group === "humans"),
+        },
+      ].filter((section) => section.items.length > 0),
+    [candidates, tr]
   );
 
   const requestOlder = async () => {
@@ -1054,8 +1081,11 @@ export default function ChatDetailScreen() {
       setIsStreaming(true);
 
       const assistRequest: ChatAssistRequest = { ...requestPayload };
+      const inlineInput = askAI.trim();
       if (action === "ask_anything") {
-        assistRequest.input = askAI.trim();
+        assistRequest.input = inlineInput;
+      } else if ((action === "translate" || action === "follow_up") && inlineInput) {
+        assistRequest.input = inlineInput;
       }
 
       try {
@@ -1264,6 +1294,14 @@ export default function ChatDetailScreen() {
 
   const runReplyDraft = async () => {
     await runAssistGeneration("auto_reply");
+  };
+
+  const runTranslate = async () => {
+    await runAssistGeneration("translate");
+  };
+
+  const runFollowUp = async () => {
+    await runAssistGeneration("follow_up");
   };
 
   const applySelectedCandidate = () => {
@@ -1811,6 +1849,20 @@ export default function ChatDetailScreen() {
                 >
                   <Text style={styles.aiModeBtnText}>{tr("任务", "Task")}</Text>
                 </Pressable>
+                <Pressable
+                  style={[styles.aiModeBtn, askAIAction === "translate" && styles.aiModeBtnActive]}
+                  onPress={() => setAskAIAction("translate")}
+                  disabled={isStreaming}
+                >
+                  <Text style={styles.aiModeBtnText}>{tr("翻译", "Translate")}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.aiModeBtn, askAIAction === "follow_up" && styles.aiModeBtnActive]}
+                  onPress={() => setAskAIAction("follow_up")}
+                  disabled={isStreaming}
+                >
+                  <Text style={styles.aiModeBtnText}>{tr("跟进", "Follow-up")}</Text>
+                </Pressable>
               </View>
 
               <View style={styles.aiAskRow}>
@@ -1846,12 +1898,15 @@ export default function ChatDetailScreen() {
                       onPress={() => setAskAISelectedIndex(index)}
                       disabled={isStreaming}
                     >
-                      {candidate.kind === "task" && candidate.title ? (
+                      {(candidate.kind === "task" || candidate.kind === "follow_up") && candidate.title ? (
                         <Text style={styles.aiCandidateTitle}>{candidate.title}</Text>
                       ) : null}
                       <Text style={styles.aiCandidateText}>{candidate.text}</Text>
-                      {candidate.kind === "task" && candidate.priority ? (
+                      {(candidate.kind === "task" || candidate.kind === "follow_up") && candidate.priority ? (
                         <Text style={styles.aiCandidateMeta}>{candidate.priority}</Text>
+                      ) : null}
+                      {candidate.kind === "follow_up" && candidate.description ? (
+                        <Text style={styles.aiCandidateMeta}>{candidate.description}</Text>
                       ) : null}
                     </Pressable>
                   ))
@@ -1866,6 +1921,10 @@ export default function ChatDetailScreen() {
                       void runAskAI();
                     } else if (askAIAction === "auto_reply") {
                       void runReplyDraft();
+                    } else if (askAIAction === "translate") {
+                      void runTranslate();
+                    } else if (askAIAction === "follow_up") {
+                      void runFollowUp();
                     } else {
                       void runAddToTask();
                     }
@@ -2101,34 +2160,39 @@ export default function ChatDetailScreen() {
                 {memberPoolBusy && candidates.length === 0 ? (
                   <Text style={styles.memberHint}>{tr("加载中...", "Loading...")}</Text>
                 ) : null}
-                {candidates.map((c) => (
-                  <Pressable
-                    key={c.key}
-                    style={[
-                      styles.memberItem,
-                      selectedMemberKeys.has(c.key) && styles.memberItemSelected,
-                    ]}
-                    onPress={() => {
-                      setMemberPoolError(null);
-                      setPendingMemberAdds((prev) => {
-                        const exists = prev.some((item) => item.key === c.key);
-                        if (exists) {
-                          return prev.filter((item) => item.key !== c.key);
-                        }
-                        return [...prev, { key: c.key, label: c.label, onAdd: c.onAdd }];
-                      });
-                    }}
-                  >
-                    <View style={styles.memberMain}>
-                      <Text style={styles.memberName}>{c.label}</Text>
-                      <Text style={styles.memberDesc} numberOfLines={1}>{c.desc}</Text>
-                    </View>
-                    <Ionicons
-                      name={selectedMemberKeys.has(c.key) ? "checkmark-circle" : "add-circle-outline"}
-                      size={18}
-                      color="#93c5fd"
-                    />
-                  </Pressable>
+                {groupedCandidates.map((section) => (
+                  <View key={section.key} style={styles.memberSection}>
+                    <Text style={styles.memberSectionTitle}>{section.title}</Text>
+                    {section.items.map((c) => (
+                      <Pressable
+                        key={c.key}
+                        style={[
+                          styles.memberItem,
+                          selectedMemberKeys.has(c.key) && styles.memberItemSelected,
+                        ]}
+                        onPress={() => {
+                          setMemberPoolError(null);
+                          setPendingMemberAdds((prev) => {
+                            const exists = prev.some((item) => item.key === c.key);
+                            if (exists) {
+                              return prev.filter((item) => item.key !== c.key);
+                            }
+                            return [...prev, { key: c.key, label: c.label, onAdd: c.onAdd }];
+                          });
+                        }}
+                      >
+                        <View style={styles.memberMain}>
+                          <Text style={styles.memberName}>{c.label}</Text>
+                          <Text style={styles.memberDesc} numberOfLines={1}>{c.desc}</Text>
+                        </View>
+                        <Ionicons
+                          name={selectedMemberKeys.has(c.key) ? "checkmark-circle" : "add-circle-outline"}
+                          size={18}
+                          color="#93c5fd"
+                        />
+                      </Pressable>
+                    ))}
+                  </View>
                 ))}
                 {candidates.length === 0 ? (
                   <View style={{ gap: 10 }}>
@@ -2631,10 +2695,12 @@ const styles = StyleSheet.create({
   },
   aiModeRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   aiModeBtn: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "30%",
     minHeight: 34,
     borderRadius: 12,
     borderWidth: 1,
@@ -2874,6 +2940,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     paddingVertical: 8,
+  },
+  memberSection: {
+    gap: 8,
+  },
+  memberSectionTitle: {
+    color: "rgba(148,163,184,0.95)",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
   },
   listFooterHint: {
     color: "rgba(148,163,184,0.95)",

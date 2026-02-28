@@ -9,7 +9,7 @@ const ASK_ANYTHING_STREAM_CANDIDATE_ID = "__assist_ask_anything_stream__";
 const ASSIST_DEBUG_PREFIX = "[chatAssist]";
 const AGENTTOWN_FALLBACK_PREFIX = "[agenttown-fallback]";
 
-export type ChatAssistAction = "auto_reply" | "add_task" | "ask_anything";
+export type ChatAssistAction = "auto_reply" | "add_task" | "ask_anything" | "translate" | "follow_up";
 
 export interface ChatAssistRequest {
   action: ChatAssistAction;
@@ -35,7 +35,7 @@ export interface ChatCompletionsRequest {
 
 export interface AssistCandidate {
   id?: string;
-  kind: "reply" | "task" | "text";
+  kind: "reply" | "task" | "text" | "translate" | "follow_up";
   text: string;
   title?: string;
   description?: string;
@@ -46,11 +46,20 @@ interface ChatAssistPayloadEnvelope {
   assist_candidates?: {
     reply_candidates?: unknown;
     task_candidates?: unknown;
+    translate_candidates?: unknown;
+    follow_up_candidates?: unknown;
+    followup_candidates?: unknown;
   };
   reply_candidates?: unknown;
   task_candidates?: unknown;
   reply_candidate?: unknown;
   task_candidate?: unknown;
+  translate_candidates?: unknown;
+  follow_up_candidates?: unknown;
+  followup_candidates?: unknown;
+  translate_candidate?: unknown;
+  follow_up_candidate?: unknown;
+  followup_candidate?: unknown;
   delta?: {
     text?: unknown;
   };
@@ -188,6 +197,74 @@ function normalizeTaskCandidate(candidate: unknown, index: number): AssistCandid
   };
 }
 
+function normalizeTranslateCandidate(candidate: unknown, index: number): AssistCandidate | null {
+  if (typeof candidate === "string") {
+    const text = toText(candidate);
+    if (!text) return null;
+    return {
+      id: `translate_${index}`,
+      kind: "translate",
+      text,
+    };
+  }
+  if (!candidate || typeof candidate !== "object") return null;
+  const row = candidate as {
+    id?: unknown;
+    text?: unknown;
+    translation?: unknown;
+    translated_text?: unknown;
+  };
+  const text = toText(row.text) || toText(row.translation) || toText(row.translated_text);
+  if (!text) return null;
+  const id = toText(row.id) || `translate_${index}`;
+  return {
+    id,
+    kind: "translate",
+    text,
+  };
+}
+
+function normalizeFollowUpCandidate(candidate: unknown, index: number): AssistCandidate | null {
+  if (typeof candidate === "string") {
+    const text = toText(candidate);
+    if (!text) return null;
+    return {
+      id: `follow_up_${index}`,
+      kind: "follow_up",
+      text,
+    };
+  }
+  if (!candidate || typeof candidate !== "object") return null;
+  const row = candidate as {
+    id?: unknown;
+    title?: unknown;
+    text?: unknown;
+    content?: unknown;
+    description?: unknown;
+    owner?: unknown;
+    assignee?: unknown;
+    status?: unknown;
+    priority?: unknown;
+  };
+  const title = toText(row.title);
+  const body = toText(row.content) || toText(row.text) || toText(row.description);
+  const owner = toText(row.owner) || toText(row.assignee);
+  const status = toText(row.status);
+  const priority = toText(row.priority);
+  const composed = [title, body].filter(Boolean).join("\n");
+  if (!composed) return null;
+  const id = toText(row.id) || `follow_up_${index}`;
+  const meta = [owner, status].filter(Boolean).join(" · ");
+  return {
+    id,
+    kind: "follow_up",
+    text: composed,
+    title: title || undefined,
+    description: meta || undefined,
+    priority: priority || undefined,
+  };
+}
+
 function normalizeCandidatesFromArray(raw: unknown, kind: "reply" | "task") {
   if (!Array.isArray(raw)) return [] as AssistCandidate[];
   if (kind === "reply") {
@@ -288,13 +365,31 @@ export function reduceAssistCandidatesFromEvent(
 
   const replyListRaw = candidatesNode?.reply_candidates ?? envelope.reply_candidates;
   const taskListRaw = candidatesNode?.task_candidates ?? envelope.task_candidates;
+  const translateListRaw = candidatesNode?.translate_candidates ?? envelope.translate_candidates;
+  const followUpListRaw =
+    candidatesNode?.follow_up_candidates ??
+    candidatesNode?.followup_candidates ??
+    envelope.follow_up_candidates ??
+    envelope.followup_candidates;
   const replyList = normalizeCandidatesFromArray(replyListRaw, "reply");
   const taskList = normalizeCandidatesFromArray(taskListRaw, "task");
+  const translateList = Array.isArray(translateListRaw)
+    ? translateListRaw
+        .map((item, index) => normalizeTranslateCandidate(item, index))
+        .filter((item): item is AssistCandidate => Boolean(item))
+    : [];
+  const followUpList = Array.isArray(followUpListRaw)
+    ? followUpListRaw
+        .map((item, index) => normalizeFollowUpCandidate(item, index))
+        .filter((item): item is AssistCandidate => Boolean(item))
+    : [];
   const hasReplyList = Array.isArray(replyListRaw);
   const hasTaskList = Array.isArray(taskListRaw);
+  const hasTranslateList = Array.isArray(translateListRaw);
+  const hasFollowUpList = Array.isArray(followUpListRaw);
 
-  if (hasReplyList || hasTaskList) {
-    return [...replyList, ...taskList];
+  if (hasReplyList || hasTaskList || hasTranslateList || hasFollowUpList) {
+    return [...replyList, ...taskList, ...translateList, ...followUpList];
   }
 
   const singleReply = normalizeReplyCandidate(envelope.reply_candidate, previous.length);
@@ -305,6 +400,19 @@ export function reduceAssistCandidatesFromEvent(
   const singleTask = normalizeTaskCandidate(envelope.task_candidate, previous.length);
   if (singleTask) {
     return mergeAssistCandidates(previous, [singleTask]);
+  }
+
+  const singleTranslate = normalizeTranslateCandidate(envelope.translate_candidate, previous.length);
+  if (singleTranslate) {
+    return mergeAssistCandidates(previous, [singleTranslate]);
+  }
+
+  const singleFollowUp = normalizeFollowUpCandidate(
+    envelope.follow_up_candidate ?? envelope.followup_candidate,
+    previous.length
+  );
+  if (singleFollowUp) {
+    return mergeAssistCandidates(previous, [singleFollowUp]);
   }
 
   const hasDeltaText = typeof envelope.delta?.text === "string";

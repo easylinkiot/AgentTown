@@ -143,6 +143,14 @@ export interface ATSession {
   updated_at?: string;
 }
 
+export interface ATBotSettings {
+  bot_enabled?: boolean;
+  visibility?: "private" | "group" | "public" | string;
+  bot_prompt?: string;
+  bot_name?: string;
+  bot_avatar?: string;
+}
+
 export interface ATCreateSessionInput {
   target_type: "user" | "group" | "agent" | "user_bot";
   target_id: string;
@@ -573,6 +581,37 @@ export async function saveBotConfig(payload: BotConfig) {
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export async function atGetBotSettings(): Promise<ATBotSettings> {
+  const config = await apiFetch<BotConfig>("/v1/bot-config");
+  return {
+    bot_enabled: true,
+    visibility: "private",
+    bot_prompt: config.systemInstruction || "",
+    bot_name: config.name || "",
+    bot_avatar: config.avatar || "",
+  };
+}
+
+export async function atUpdateBotSettings(
+  payload: Partial<ATBotSettings>
+): Promise<ATBotSettings> {
+  const current = await apiFetch<BotConfig>("/v1/bot-config");
+  const next: BotConfig = {
+    ...current,
+    name: payload.bot_name ?? current.name,
+    avatar: payload.bot_avatar ?? current.avatar,
+    systemInstruction: payload.bot_prompt ?? current.systemInstruction,
+  };
+  const saved = await saveBotConfig(next);
+  return {
+    bot_enabled: payload.bot_enabled ?? true,
+    visibility: payload.visibility ?? "private",
+    bot_prompt: saved.systemInstruction || "",
+    bot_name: saved.name || "",
+    bot_avatar: saved.avatar || "",
+  };
 }
 
 export async function installBotSkill(skillId: string) {
