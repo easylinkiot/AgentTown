@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -87,6 +88,18 @@ type MediaPickerAsset = {
   thumbUri: string;
   duration?: number;
   filename?: string;
+  width?: number;
+  height?: number;
+  fileSize?: number;
+  capturedAt?: number;
+};
+type CameraCapturedPayload = {
+  uri: string;
+  type: "image";
+  width?: number;
+  height?: number;
+  fileSize?: number;
+  capturedAt?: number;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -437,6 +450,8 @@ export default function ChatDetailScreen() {
   const [mediaAssets, setMediaAssets] = useState<MediaPickerAsset[]>([]);
   const [selectedMediaIds, setSelectedMediaIds] = useState<Set<string>>(new Set());
   const mediaLoadSeqRef = useRef(0);
+  const hasRequestedCameraPermissionRef = useRef(false);
+  const cameraCaptureInFlightRef = useRef(false);
   const mediaSheetBottomInset = Math.max(insets.bottom, 12);
   const mediaSheetHeight = useMemo(() => {
     const maxHeight = Math.max(360, windowHeight - insets.top - 56);
@@ -453,6 +468,18 @@ export default function ChatDetailScreen() {
     () => mediaAssets.filter((asset) => selectedMediaIds.has(asset.id)),
     [mediaAssets, selectedMediaIds]
   );
+
+  const emitCameraCaptured = useCallback((asset: MediaPickerAsset) => {
+    const payload: CameraCapturedPayload = {
+      uri: asset.uri,
+      type: "image",
+      width: asset.width,
+      height: asset.height,
+      fileSize: asset.fileSize,
+      capturedAt: asset.capturedAt,
+    };
+    console.log("[chat-camera] onCaptured", payload);
+  }, []);
 
   const animateKeyboardValue = useCallback((value: Animated.Value, toValue: number, duration: number) => {
     Animated.timing(value, {
@@ -711,6 +738,9 @@ export default function ChatDetailScreen() {
               thumbUri,
               duration: isVideo ? Math.max(0, Math.round(asset.duration || 0)) : undefined,
               filename: asset.filename,
+              width: asset.width || undefined,
+              height: asset.height || undefined,
+              capturedAt: asset.creationTime || undefined,
             };
           })
         );
@@ -945,8 +975,80 @@ export default function ChatDetailScreen() {
     user?.id,
   ]);
 
+  const ensureCameraPermission = useCallback(async () => {
+    let permission = await ImagePicker.getCameraPermissionsAsync();
+    if (permission.granted) return true;
+
+    if (hasRequestedCameraPermissionRef.current) {
+      Alert.alert(
+        tr("需要相机权限", "Camera permission required"),
+        tr("请在系统设置中允许相机访问后再试。", "Enable camera access in system settings and try again.")
+      );
+      return false;
+    }
+
+    hasRequestedCameraPermissionRef.current = true;
+    permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (permission.granted) return true;
+
+    Alert.alert(
+      tr("需要相机权限", "Camera permission required"),
+      tr("未获得相机权限，暂时无法拍照。", "Camera access was not granted, unable to take photos right now.")
+    );
+    return false;
+  }, [tr]);
+
+  const openCameraCapture = useCallback(async () => {
+    if (cameraCaptureInFlightRef.current) return;
+
+    cameraCaptureInFlightRef.current = true;
+    try {
+      const granted = await ensureCameraPermission();
+      if (!granted) return;
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+
+      const captured = result.assets[0];
+      const previewAsset: MediaPickerAsset = {
+        id: captured.assetId || `camera_${Date.now()}`,
+        type: "image",
+        uri: captured.uri,
+        thumbUri: captured.uri,
+        filename: captured.fileName || undefined,
+        width: captured.width || undefined,
+        height: captured.height || undefined,
+        fileSize: captured.fileSize || undefined,
+        capturedAt: Date.now(),
+      };
+      emitCameraCaptured(previewAsset);
+    } catch (err) {
+      Alert.alert(tr("拍照失败", "Camera failed"), formatApiError(err));
+    } finally {
+      cameraCaptureInFlightRef.current = false;
+    }
+  }, [emitCameraCaptured, ensureCameraPermission, tr]);
+
+  const openCameraFlow = useCallback(() => {
+    pendingOpenPanelAfterKeyboardHideRef.current = false;
+    pendingKeyboardFromPanelRef.current = false;
+    activeKeyboardTargetRef.current = null;
+    void openCameraCapture();
+  }, [openCameraCapture]);
+
   const handlePlusPanelItemPress = useCallback(
     (key: PlusPanelItem["key"]) => {
+      if (key === "camera") {
+        openCameraFlow();
+        return;
+      }
       if (key !== "image") {
         Alert.alert(
           tr("敬请期待", "Coming soon"),
@@ -965,7 +1067,7 @@ export default function ChatDetailScreen() {
         },
       });
     },
-    [chatId, openMediaSheet, router, tr]
+    [chatId, openCameraFlow, openMediaSheet, router, tr]
   );
 
   const handleTogglePlusPanel = useCallback(() => {
