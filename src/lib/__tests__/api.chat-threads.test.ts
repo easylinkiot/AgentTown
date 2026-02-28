@@ -30,7 +30,7 @@ describe("chat thread api", () => {
     process.env.EXPO_PUBLIC_API_BASE_URL = originalBaseUrl;
   });
 
-  it("removes groupCommanderUserId from create thread request body", async () => {
+  it("removes unsupported group fields from create thread request body", async () => {
     fetchMock.mockResolvedValue(mockResponse({ id: "thread_1", name: "Team Group" }));
 
     const payload: ChatThread = {
@@ -42,6 +42,7 @@ describe("chat thread api", () => {
       isGroup: true,
       groupType: "toc",
       groupSubCategory: "ops",
+      groupNpcName: "Ops NPC",
       groupCommanderUserId: "user_1",
     };
 
@@ -51,6 +52,7 @@ describe("chat thread api", () => {
     expect(url).toBe("https://api.example.com/v1/chat/threads");
     expect(init.method).toBe("POST");
     const body = JSON.parse((init.body as string) || "{}") as Record<string, unknown>;
+    expect(body.groupNpcName).toBeUndefined();
     expect(body.groupCommanderUserId).toBeUndefined();
     expect(body.groupType).toBe("toc");
     expect(body.groupSubCategory).toBe("ops");

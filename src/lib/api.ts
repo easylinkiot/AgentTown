@@ -663,6 +663,7 @@ export async function listChatThreads() {
 
 export async function createChatThread(payload: ChatThread) {
   const requestPayload: Record<string, unknown> = { ...payload };
+  delete requestPayload.groupNpcName;
   delete requestPayload.groupCommanderUserId;
   return apiFetch<ChatThread>("/v1/chat/threads", {
     method: "POST",
