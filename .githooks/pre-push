@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[pre-push] Running AGENTS checks: typecheck + lint + test:ci + build:web"
+npm run verify:push
+
