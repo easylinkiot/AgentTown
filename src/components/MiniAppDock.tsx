@@ -45,9 +45,9 @@ const QUICK_ACTIONS: DockAction[] = [
     icon: "newspaper-outline",
     color: "#3b82f6",
     promptZh:
-      "生成一个新闻早报 Mini App：每2小时采集 Reddit、TechCrunch、GitHub Trending 的 AI 热点，并生成摘要卡片。",
+      "生成一个新闻早报 Mini App：每2小时采集 Reddit、TechCrunch、GitHub Trending 的 AI 热点。海报包含头条主卡（热度分）、4条快讯、主题标签、关键洞察和今日行动建议。",
     promptEn:
-      "Build a news mini app that collects AI headlines from Reddit, TechCrunch and GitHub Trending every 2 hours and outputs summary cards.",
+      "Build a news mini app that collects AI headlines from Reddit, TechCrunch and GitHub Trending every 2 hours. Poster should include one hero headline card with heat score, 4 quick briefs, topic tags, key insight, and one action hint.",
   },
   {
     id: "price",
@@ -56,9 +56,9 @@ const QUICK_ACTIONS: DockAction[] = [
     icon: "pricetag-outline",
     color: "#f97316",
     promptZh:
-      "生成一个比价 Mini App：追踪我收藏的商品，出现历史低价时提醒并给出购买建议。",
+      "生成一个比价 Mini App：追踪我收藏的商品，出现历史低价时提醒。海报展示商品现价/原价、折扣百分比、趋势箭头、门店信息和购买建议。",
     promptEn:
-      "Build a price tracker mini app that watches saved products and alerts on new all-time lows with buying advice.",
+      "Build a price tracker mini app that watches saved products and alerts on new all-time lows. Poster should show current vs original price, discount percentage, trend arrow, retailer, and buy/hold advice.",
   },
   {
     id: "words",
@@ -67,9 +67,9 @@ const QUICK_ACTIONS: DockAction[] = [
     icon: "book-outline",
     color: "#8b5cf6",
     promptZh:
-      "生成一个英语背单词 Mini App：每天随机生成高阶词，提供美式发音、同义/反义词与例句，并支持翻面记忆。",
+      "生成一个英语背单词 Mini App：每天随机生成高阶词，提供美式发音、同义/反义词、例句、记忆口诀和小测题，并支持翻面记忆海报。",
     promptEn:
-      "Build a daily vocabulary mini app: word of the day with pronunciation, synonyms/antonyms, examples, and flip-to-reveal learning.",
+      "Build a daily vocabulary mini app: word of the day with pronunciation, synonyms/antonyms, example sentence, memory tip, and quiz line in a flip-to-reveal poster layout.",
   },
   {
     id: "tasks",
@@ -78,9 +78,9 @@ const QUICK_ACTIONS: DockAction[] = [
     icon: "checkmark-done-outline",
     color: "#22c55e",
     promptZh:
-      "生成一个待办象限 Mini App：把我的任务按紧急/重要排序，并给出下一步执行建议。",
+      "生成一个待办象限 Mini App：把任务按紧急/重要排序。海报包含4个核心指标卡、今日重点、风险提示和下一步执行建议。",
     promptEn:
-      "Build an Eisenhower-matrix mini app that ranks tasks by urgency/importance and recommends next actions.",
+      "Build an Eisenhower-matrix mini app that ranks tasks by urgency/importance. Poster should include 4 KPI cards, today's focus, risk alerts, and next-step recommendations.",
   },
 ];
 
@@ -93,9 +93,9 @@ const EXAMPLES: DockExample[] = [
     enDesc: "Collect last-24h AI headlines at 8 AM and generate summary cards.",
     icon: "newspaper-outline",
     promptZh:
-      "生成一个阅读早报 Mini App：每天早上 8 点，采集 Reddit、TechCrunch 和机器之心过去 24 小时 AI 热点并生成摘要。",
+      "生成一个阅读早报 Mini App：每天早上 8 点采集过去 24 小时 AI 热点。请输出头条主卡、4条快讯、热度评分、主题标签和一句洞察。",
     promptEn:
-      "Build a morning brief mini app: every day at 8 AM, collect last-24h AI headlines from Reddit, TechCrunch and major outlets, then generate summary cards.",
+      "Build a morning brief mini app: every day at 8 AM collect last-24h AI headlines and render a poster with hero story, 4 briefs, heat scores, tags, and one insight.",
   },
   {
     id: "chat-digest",
@@ -105,9 +105,9 @@ const EXAMPLES: DockExample[] = [
     enDesc: "Summarize last 2 hours of group chat and extract action items.",
     icon: "chatbox-ellipses-outline",
     promptZh:
-      "生成一个聊天决策摘要 Mini App，自动汇总群聊中过去 2 小时讨论，提取结论和待办。",
+      "生成一个聊天决策摘要 Mini App：自动汇总群聊过去 2 小时讨论，输出结论、待办、负责人和风险项，使用海报式卡片布局。",
     promptEn:
-      "Build a chat decision digest mini app that summarizes the last 2 hours of a group thread and extracts decisions, owners, and tasks.",
+      "Build a chat decision digest mini app that summarizes the last 2 hours of a group thread into poster cards: decisions, owners, action items, and risk flags.",
   },
   {
     id: "follow-up",
@@ -117,9 +117,9 @@ const EXAMPLES: DockExample[] = [
     enDesc: "Find important threads with no reply after 3+ days and propose follow-ups.",
     icon: "time-outline",
     promptZh:
-      "生成一个未回复随访 Mini App，自动识别超过 3 天未回复的重要对话并给出跟进建议。",
+      "生成一个未回复随访 Mini App：识别超过 3 天未回复的重要对话，输出优先级、建议话术和最佳跟进时间窗口，采用海报卡片展示。",
     promptEn:
-      "Build a follow-up radar mini app that finds important conversations with no reply after 3+ days and drafts follow-up options.",
+      "Build a follow-up radar mini app that finds important conversations with no reply after 3+ days and renders poster cards with priority, suggested reply, and best follow-up window.",
   },
   {
     id: "words",
@@ -128,9 +128,9 @@ const EXAMPLES: DockExample[] = [
     zhDesc: "每日生成高阶词，美式发音、释义和例句，支持翻面学习。",
     enDesc: "Daily advanced word with pronunciation, definition, examples, and flip learning.",
     icon: "book-outline",
-    promptZh: "生成一个每日单词打卡 Mini App，支持发音、释义、例句与翻面记忆。",
+    promptZh: "生成一个每日单词打卡 Mini App：支持发音、释义、例句、同义反义词、记忆口诀和翻面小测题。",
     promptEn:
-      "Build a word-of-the-day mini app with pronunciation, definition, examples, and flip-to-reveal learning.",
+      "Build a word-of-the-day mini app with pronunciation, definition, example sentence, synonyms/antonyms, memory tip, and flip-to-reveal quiz.",
   },
 ];
 

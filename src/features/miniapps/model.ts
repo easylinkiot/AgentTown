@@ -9,6 +9,8 @@ export type NewsFeedItem = {
   time: string;
   summary: string;
   tag?: string;
+  heat: number;
+  insight: string;
 };
 
 export type FlashcardData = {
@@ -18,6 +20,9 @@ export type FlashcardData = {
   synonyms: string[];
   antonyms: string[];
   example: string;
+  memoryTip: string;
+  collocations: string[];
+  quiz: string;
 };
 
 export type PriceTrackerItem = {
@@ -27,6 +32,8 @@ export type PriceTrackerItem = {
   originalPrice: number;
   trend: "up" | "down" | "stable";
   retailer: string;
+  discountPct: number;
+  note: string;
 };
 
 export type DashboardPanel = {
@@ -34,6 +41,7 @@ export type DashboardPanel = {
   label: string;
   value: number;
   delta: string;
+  trend: "up" | "down" | "stable";
 };
 
 export type GenericBlock = {
@@ -108,6 +116,8 @@ function parseNews(value: unknown): NewsFeedItem[] {
         time: asString(obj.time, "Now"),
         summary: asString(obj.summary, ""),
         tag: asString(obj.tag, ""),
+        heat: Math.max(0, Math.min(100, Math.round(asNumber(obj.heat, 72)))),
+        insight: asString(obj.insight, ""),
       };
     })
     .filter((item) => !!item.title);
@@ -122,6 +132,9 @@ function parseFlashcard(value: unknown): FlashcardData {
     synonyms: asStringList(obj.synonyms),
     antonyms: asStringList(obj.antonyms),
     example: asString(obj.example, ""),
+    memoryTip: asString(obj.memoryTip, ""),
+    collocations: asStringList(obj.collocations),
+    quiz: asString(obj.quiz, ""),
   };
 }
 
@@ -142,6 +155,8 @@ function parsePrice(value: unknown): PriceTrackerItem[] {
         originalPrice: asNumber(obj.originalPrice, 0),
         trend,
         retailer: asString(obj.retailer, "Store"),
+        discountPct: Math.max(0, Math.round(asNumber(obj.discountPct, 0))),
+        note: asString(obj.note, ""),
       };
     })
     .filter((item) => !!item.product);
@@ -152,11 +167,17 @@ function parsePanels(value: unknown): DashboardPanel[] {
   return value
     .map((item, index) => {
       const obj = asRecord(item);
+      const trendRaw = asString(obj.trend, "stable").toLowerCase();
+      const trend: "up" | "down" | "stable" =
+        trendRaw === "up" || trendRaw === "down" || trendRaw === "stable"
+          ? trendRaw
+          : "stable";
       return {
         id: asString(obj.id, `panel_${index}`),
         label: asString(obj.label, "Metric"),
         value: asNumber(obj.value, 0),
         delta: asString(obj.delta, "0"),
+        trend,
       };
     })
     .filter((item) => !!item.label);
