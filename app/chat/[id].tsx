@@ -1,22 +1,28 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as MediaLibrary from "expo-media-library";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
   Easing,
+  FlatList,
   GestureResponderEvent,
   Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import {
@@ -74,6 +80,14 @@ type PlusPanelItem = {
   zh: string;
   en: string;
 };
+type MediaPickerAsset = {
+  id: string;
+  type: "image" | "video";
+  uri: string;
+  thumbUri: string;
+  duration?: number;
+  filename?: string;
+};
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -85,6 +99,10 @@ const KEYBOARD_CLEARANCE_IOS = 25;
 const PLUS_PANEL_BASE_HEIGHT = 300;
 const PLUS_PANEL_ANIM_DURATION = 220;
 const PLUS_PANEL_INPUT_GAP = 20;
+const MEDIA_SHEET_ANIM_DURATION = 220;
+const MEDIA_SHEET_DRAG_CLOSE_DISTANCE = 120;
+const MEDIA_GRID_MIN_ITEM_SIZE = 80;
+const MEDIA_GRID_GAP = 8;
 const PLUS_PANEL_ITEMS: PlusPanelItem[] = [
   { key: "image", icon: "image-outline", zh: "图片", en: "Image" },
   { key: "video", icon: "videocam-outline", zh: "视频", en: "Video" },
@@ -92,6 +110,13 @@ const PLUS_PANEL_ITEMS: PlusPanelItem[] = [
   { key: "voice", icon: "mic-outline", zh: "语音", en: "Voice" },
   { key: "contact", icon: "person-circle-outline", zh: "个人名片", en: "Contact Card" },
 ];
+
+function formatMediaDuration(totalSeconds?: number) {
+  if (!totalSeconds || totalSeconds <= 0) return "00:00";
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 function mentionMemberIDs(text: string, members: ThreadMember[]) {
   const safe = text.trim();
@@ -249,6 +274,7 @@ function inferAvatarTagFromMember(member: ThreadMember): "NPC" | "Bot" | null {
 export default function ChatDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
   const isDraggingRef = useRef(false);
   const bubbleHeightsRef = useRef<Record<string, number>>({});
@@ -400,6 +426,33 @@ export default function ChatDetailScreen() {
   );
   const plusPanelTranslateY = useRef(new Animated.Value(plusPanelHeight + 20)).current;
   const plusPanelOpacity = useRef(new Animated.Value(0)).current;
+  const isMediaSheetVisibleRef = useRef(false);
+  const mediaSheetTranslateY = useRef(new Animated.Value(windowHeight)).current;
+  const mediaSheetDragOffset = useRef(new Animated.Value(0)).current;
+  const mediaSheetBackdropOpacity = useRef(new Animated.Value(0)).current;
+  const [isMediaSheetVisible, setIsMediaSheetVisible] = useState(false);
+  const [mediaSending, setMediaSending] = useState(false);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [mediaAssets, setMediaAssets] = useState<MediaPickerAsset[]>([]);
+  const [selectedMediaIds, setSelectedMediaIds] = useState<Set<string>>(new Set());
+  const mediaLoadSeqRef = useRef(0);
+  const mediaSheetBottomInset = Math.max(insets.bottom, 12);
+  const mediaSheetHeight = useMemo(() => {
+    const maxHeight = Math.max(360, windowHeight - insets.top - 56);
+    return Math.min(maxHeight, Math.max(360, Math.round(windowHeight * 0.72)));
+  }, [insets.top, windowHeight]);
+  const mediaGridColumns = windowWidth >= 420 ? 4 : 3;
+  const mediaItemSize = useMemo(() => {
+    const horizontalPadding = 16 * 2;
+    const totalGap = MEDIA_GRID_GAP * (mediaGridColumns - 1);
+    const available = Math.max(0, windowWidth - horizontalPadding - totalGap);
+    return Math.max(MEDIA_GRID_MIN_ITEM_SIZE, Math.floor(available / mediaGridColumns));
+  }, [mediaGridColumns, windowWidth]);
+  const selectedAssets = useMemo(
+    () => mediaAssets.filter((asset) => selectedMediaIds.has(asset.id)),
+    [mediaAssets, selectedMediaIds]
+  );
 
   const animateKeyboardValue = useCallback((value: Animated.Value, toValue: number, duration: number) => {
     Animated.timing(value, {
@@ -606,6 +659,315 @@ export default function ChatDetailScreen() {
     [animateKeyboardValue, animatePlusPanel, keyboardPadding]
   );
 
+  const loadMediaAssetsFromLibrary = useCallback(
+    async (requestSeq: number) => {
+      setMediaLoading(true);
+      setMediaError(null);
+      try {
+        let permission = await MediaLibrary.getPermissionsAsync();
+        if (!permission.granted) {
+          permission = await MediaLibrary.requestPermissionsAsync();
+        }
+        if (!permission.granted) {
+          if (requestSeq === mediaLoadSeqRef.current) {
+            setMediaAssets([]);
+            setMediaError(tr("请允许访问系统相册后再试。", "Please grant media-library access and try again."));
+          }
+          return;
+        }
+
+        const page = await MediaLibrary.getAssetsAsync({
+          first: 120,
+          mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+          sortBy: [MediaLibrary.SortBy.creationTime],
+        });
+
+        if (requestSeq !== mediaLoadSeqRef.current) return;
+        const mapped: MediaPickerAsset[] = await Promise.all(
+          page.assets.map(async (asset) => {
+            const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
+            let sourceUri = asset.uri;
+            let thumbUri = asset.uri;
+            if (isVideo) {
+              try {
+                const info = await MediaLibrary.getAssetInfoAsync(asset.id);
+                sourceUri = (info.localUri || info.uri || asset.uri).trim() || asset.uri;
+                const thumbnail = await VideoThumbnails.getThumbnailAsync(sourceUri, {
+                  time: 0,
+                });
+                if (thumbnail.uri) {
+                  thumbUri = thumbnail.uri;
+                } else {
+                  thumbUri = sourceUri;
+                }
+              } catch {
+                thumbUri = sourceUri;
+              }
+            }
+            return {
+              id: asset.id,
+              type: isVideo ? "video" : "image",
+              uri: sourceUri,
+              thumbUri,
+              duration: isVideo ? Math.max(0, Math.round(asset.duration || 0)) : undefined,
+              filename: asset.filename,
+            };
+          })
+        );
+        if (requestSeq !== mediaLoadSeqRef.current) return;
+        setMediaAssets(mapped);
+        if (mapped.length === 0) {
+          setMediaError(tr("相册暂无可选媒体。", "No media found in your library."));
+        }
+      } catch (err) {
+        if (requestSeq !== mediaLoadSeqRef.current) return;
+        setMediaAssets([]);
+        setMediaError(formatApiError(err));
+      } finally {
+        if (requestSeq === mediaLoadSeqRef.current) {
+          setMediaLoading(false);
+        }
+      }
+    },
+    [tr]
+  );
+
+  const animateMediaSheet = useCallback(
+    (visible: boolean, duration: number) => {
+      if (visible) {
+        isMediaSheetVisibleRef.current = true;
+        setIsMediaSheetVisible(true);
+      } else {
+        isMediaSheetVisibleRef.current = false;
+      }
+      Animated.parallel([
+        Animated.timing(mediaSheetTranslateY, {
+          toValue: visible ? 0 : mediaSheetHeight + 24,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(mediaSheetBackdropOpacity, {
+          toValue: visible ? 1 : 0,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!visible && finished) {
+          setIsMediaSheetVisible(false);
+        }
+      });
+    },
+    [mediaSheetBackdropOpacity, mediaSheetHeight, mediaSheetTranslateY]
+  );
+
+  const closeMediaSheet = useCallback(
+    (options?: { clearSelection?: boolean; duration?: number }) => {
+      const shouldClear = options?.clearSelection ?? true;
+      const duration = options?.duration ?? MEDIA_SHEET_ANIM_DURATION;
+      mediaLoadSeqRef.current += 1;
+      if (!isMediaSheetVisibleRef.current && !isMediaSheetVisible) {
+        if (shouldClear) {
+          setSelectedMediaIds(new Set());
+          setMediaAssets([]);
+          setMediaError(null);
+        }
+        return;
+      }
+      mediaSheetDragOffset.setValue(0);
+      animateMediaSheet(false, duration);
+      if (shouldClear) {
+        setSelectedMediaIds(new Set());
+        setMediaAssets([]);
+        setMediaError(null);
+      }
+      setMediaLoading(false);
+    },
+    [animateMediaSheet, isMediaSheetVisible, mediaSheetDragOffset]
+  );
+
+  const openMediaSheet = useCallback(() => {
+    const requestSeq = mediaLoadSeqRef.current + 1;
+    mediaLoadSeqRef.current = requestSeq;
+    pendingOpenPanelAfterKeyboardHideRef.current = false;
+    pendingKeyboardFromPanelRef.current = false;
+    activeKeyboardTargetRef.current = null;
+    hidePlusPanel({ duration: PLUS_PANEL_ANIM_DURATION });
+    animateKeyboardValue(keyboardPadding, 0, PLUS_PANEL_ANIM_DURATION);
+    setSelectedMediaIds(new Set());
+    setMediaAssets([]);
+    setMediaError(null);
+    mediaSheetDragOffset.setValue(0);
+    mediaSheetTranslateY.setValue(mediaSheetHeight + 24);
+    mediaSheetBackdropOpacity.setValue(0);
+    animateMediaSheet(true, MEDIA_SHEET_ANIM_DURATION);
+    void loadMediaAssetsFromLibrary(requestSeq);
+  }, [
+    animateKeyboardValue,
+    animateMediaSheet,
+    hidePlusPanel,
+    keyboardPadding,
+    mediaSheetBackdropOpacity,
+    mediaSheetDragOffset,
+    mediaSheetHeight,
+    mediaSheetTranslateY,
+    loadMediaAssetsFromLibrary,
+  ]);
+
+  useEffect(() => {
+    if (isMediaSheetVisible) return;
+    mediaSheetTranslateY.setValue(mediaSheetHeight + 24);
+    mediaSheetDragOffset.setValue(0);
+  }, [isMediaSheetVisible, mediaSheetDragOffset, mediaSheetHeight, mediaSheetTranslateY]);
+
+  const mediaSheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dy) > Math.abs(gesture.dx) && gesture.dy > 4,
+        onPanResponderMove: (_event, gesture) => {
+          mediaSheetDragOffset.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          const shouldClose = gesture.dy > MEDIA_SHEET_DRAG_CLOSE_DISTANCE || gesture.vy > 1.2;
+          if (shouldClose) {
+            closeMediaSheet();
+            return;
+          }
+          Animated.spring(mediaSheetDragOffset, {
+            toValue: 0,
+            useNativeDriver: true,
+            stiffness: 260,
+            damping: 24,
+            mass: 0.8,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(mediaSheetDragOffset, {
+            toValue: 0,
+            useNativeDriver: true,
+            stiffness: 260,
+            damping: 24,
+            mass: 0.8,
+          }).start();
+        },
+      }),
+    [closeMediaSheet, mediaSheetDragOffset]
+  );
+
+  const toggleMediaSelection = useCallback((assetId: string) => {
+    setSelectedMediaIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) {
+        next.delete(assetId);
+      } else {
+        next.add(assetId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSendSelectedMedia = useCallback(async () => {
+    if (!chatId || selectedAssets.length === 0 || mediaSending) return;
+    setMediaSending(true);
+
+    const localEntries = selectedAssets.map((asset, index) => {
+      const localId = `local_media_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`;
+      const label = asset.type === "video" ? tr("[视频]", "[Video]") : tr("[图片]", "[Image]");
+      const localMessage: ConversationMessage = {
+        id: localId,
+        threadId: chatId,
+        senderId: user?.id,
+        senderName: user?.displayName || tr("我", "Me"),
+        senderAvatar: user?.avatar || botConfig.avatar,
+        senderType: "human",
+        content: label,
+        type: "image",
+        imageUri: asset.uri,
+        imageName: asset.filename || `${asset.type}_${index + 1}`,
+        isMe: true,
+        time: tr("刚刚", "Now"),
+      };
+      return { localId, asset, localMessage };
+    });
+
+    setPendingMessages((prev) =>
+      GiftedChat.append(
+        prev,
+        localEntries.map((entry) => toGiftedMessage(entry.localMessage, currentUserId, Date.now()))
+      )
+    );
+
+    let failedCount = 0;
+    for (const entry of localEntries) {
+      const content = entry.asset.type === "video" ? tr("[视频]", "[Video]") : tr("[图片]", "[Image]");
+      const result = await sendMessage(chatId, {
+        content,
+        type: "image",
+        imageUri: entry.asset.uri,
+        imageName: entry.asset.filename || entry.asset.id,
+        senderId: user?.id,
+        senderName: user?.displayName || tr("我", "Me"),
+        senderAvatar: user?.avatar || botConfig.avatar,
+        senderType: "human",
+        isMe: true,
+        requestAI: false,
+        systemInstruction: botConfig.systemInstruction,
+      });
+      if (!result) {
+        failedCount += 1;
+        setPendingMessages((prev) => prev.filter((message) => message._id !== entry.localId));
+      }
+    }
+
+    setMediaSending(false);
+    if (failedCount > 0) {
+      Alert.alert(
+        tr("发送失败", "Send failed"),
+        tr("部分媒体发送失败，请重试。", "Some media failed to send. Please retry.")
+      );
+      return;
+    }
+    closeMediaSheet({ clearSelection: true });
+  }, [
+    botConfig.avatar,
+    botConfig.systemInstruction,
+    chatId,
+    closeMediaSheet,
+    currentUserId,
+    mediaSending,
+    selectedAssets,
+    sendMessage,
+    tr,
+    user?.avatar,
+    user?.displayName,
+    user?.id,
+  ]);
+
+  const handlePlusPanelItemPress = useCallback(
+    (key: PlusPanelItem["key"]) => {
+      if (key !== "image") {
+        Alert.alert(
+          tr("敬请期待", "Coming soon"),
+          tr("该功能将在后续版本开放。", "This feature will be enabled in a future update.")
+        );
+        return;
+      }
+      if (!chatId) {
+        openMediaSheet();
+        return;
+      }
+      router.push({
+        pathname: "/chat/media-picker",
+        params: {
+          chatId,
+        },
+      });
+    },
+    [chatId, openMediaSheet, router, tr]
+  );
+
   const handleTogglePlusPanel = useCallback(() => {
     const fromKeyboardPress = plusPressedFromKeyboardRef.current;
     plusPressedFromKeyboardRef.current = false;
@@ -644,6 +1006,9 @@ export default function ChatDetailScreen() {
 
   const handleChatInputFocus = useCallback(() => {
     pendingOpenPanelAfterKeyboardHideRef.current = false;
+    if (isMediaSheetVisibleRef.current) {
+      closeMediaSheet();
+    }
     if (isPlusPanelVisibleRef.current) {
       pendingKeyboardFromPanelRef.current = true;
       hidePlusPanel({
@@ -652,7 +1017,7 @@ export default function ChatDetailScreen() {
       });
     }
     setKeyboardTarget("chat");
-  }, [hidePlusPanel, setKeyboardTarget]);
+  }, [closeMediaSheet, hidePlusPanel, setKeyboardTarget]);
 
   const handleChatInputBlur = useCallback(() => {
     if (plusButtonPressingRef.current && (keyboardVisibleRef.current || lastKeyboardHeightRef.current > 0)) {
@@ -712,7 +1077,8 @@ export default function ChatDetailScreen() {
     setLoadingOlder(false);
     setPendingMessages([]);
     setHasUserScrolled(false);
-  }, [chatId]);
+    closeMediaSheet({ clearSelection: true, duration: 0 });
+  }, [chatId, closeMediaSheet]);
 
   const abortMyBotStream = useCallback(() => {
     myBotStreamAbortRef.current?.abort();
@@ -1784,6 +2150,39 @@ export default function ChatDetailScreen() {
       : tr("生成", "Generate");
   const canAbortMyBotSend = myBotStreaming && isMyBotChatThreadId(chatId);
   const sendDisabled = canAbortMyBotSend ? false : submitting || !input.trim();
+  const mediaSendDisabled = mediaSending || selectedAssets.length === 0;
+  const renderMediaAssetItem = useCallback(
+    ({ item }: { item: MediaPickerAsset }) => {
+      const selected = selectedMediaIds.has(item.id);
+      return (
+        <Pressable
+          style={({ pressed }) => [
+            styles.mediaAssetItem,
+            {
+              width: mediaItemSize,
+              height: mediaItemSize,
+            },
+            selected && styles.mediaAssetItemSelected,
+            pressed && styles.mediaAssetItemPressed,
+          ]}
+          onPress={() => toggleMediaSelection(item.id)}
+        >
+          <Image source={{ uri: item.thumbUri }} style={styles.mediaAssetThumb} />
+          <View style={[styles.mediaAssetCheck, selected && styles.mediaAssetCheckSelected]}>
+            {selected ? <Ionicons name="checkmark" size={12} color="#f8fafc" /> : null}
+          </View>
+          {item.type === "video" ? (
+            <View style={styles.mediaAssetVideoBadge}>
+              <Ionicons name="videocam" size={10} color="rgba(241,245,249,0.96)" />
+              <Text style={styles.mediaAssetVideoDuration}>{formatMediaDuration(item.duration)}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      );
+    },
+    [mediaItemSize, selectedMediaIds, toggleMediaSelection]
+  );
+
   const renderToolbarActions = useCallback(() => {
     const iconColor = "rgba(226,232,240,0.85)";
     return (
@@ -2046,7 +2445,7 @@ export default function ChatDetailScreen() {
                 <Pressable
                   key={item.key}
                   style={({ pressed }) => [styles.plusPanelItem, pressed && styles.plusPanelItemPressed]}
-                  onPress={() => null}
+                  onPress={() => handlePlusPanelItemPress(item.key)}
                 >
                   <View style={styles.plusPanelIcon}>
                     <Ionicons name={item.icon} size={22} color="rgba(219,234,254,0.95)" />
@@ -2057,6 +2456,99 @@ export default function ChatDetailScreen() {
             </View>
           </Animated.View>
         ) : null}
+
+        <Modal
+          visible={isMediaSheetVisible}
+          transparent
+          animationType="none"
+          statusBarTranslucent
+          onRequestClose={() => closeMediaSheet()}
+        >
+          <View style={styles.mediaSheetModalRoot}>
+            <AnimatedPressable
+              style={[styles.mediaSheetBackdrop, { opacity: mediaSheetBackdropOpacity }]}
+              onPress={() => closeMediaSheet()}
+            />
+            <Animated.View
+              style={[
+                styles.mediaSheetContainer,
+                {
+                  height: mediaSheetHeight,
+                  paddingBottom: mediaSheetBottomInset,
+                  transform: [{ translateY: Animated.add(mediaSheetTranslateY, mediaSheetDragOffset) }],
+                },
+              ]}
+            >
+              <View style={styles.mediaSheetHandle} {...mediaSheetPanResponder.panHandlers} />
+              <View style={styles.mediaSheetHeader}>
+                <Text style={styles.mediaSheetTitle}>{tr("选择媒体", "Select Media")}</Text>
+                <Pressable style={styles.mediaSheetCloseBtn} onPress={() => closeMediaSheet()}>
+                  <Ionicons name="close" size={16} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+              </View>
+
+              <View style={styles.mediaSheetBody}>
+                {mediaLoading ? (
+                  <View style={styles.mediaSheetState}>
+                    <ActivityIndicator size="small" color="rgba(191,219,254,0.95)" />
+                    <Text style={styles.mediaSheetHint}>{tr("正在读取系统相册...", "Loading media library...")}</Text>
+                  </View>
+                ) : mediaError ? (
+                  <View style={styles.mediaSheetState}>
+                    <Text style={styles.mediaSheetError}>{mediaError}</Text>
+                    <Pressable
+                      style={styles.mediaSheetRetryBtn}
+                      onPress={() => {
+                        const requestSeq = mediaLoadSeqRef.current + 1;
+                        mediaLoadSeqRef.current = requestSeq;
+                        void loadMediaAssetsFromLibrary(requestSeq);
+                      }}
+                    >
+                      <Text style={styles.mediaSheetRetryText}>{tr("重试", "Retry")}</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <FlatList
+                    key={`media-grid-${mediaGridColumns}`}
+                    data={mediaAssets}
+                    renderItem={renderMediaAssetItem}
+                    keyExtractor={(item) => item.id}
+                    numColumns={mediaGridColumns}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.mediaGridContent}
+                    columnWrapperStyle={mediaGridColumns > 1 ? styles.mediaGridRow : undefined}
+                    ListEmptyComponent={
+                      <View style={styles.mediaSheetState}>
+                        <Text style={styles.mediaSheetHint}>{tr("暂无可选媒体", "No media available")}</Text>
+                      </View>
+                    }
+                  />
+                )}
+              </View>
+
+              <View style={styles.mediaSheetFooter}>
+                <Text style={styles.mediaSheetSelection}>
+                  {selectedAssets.length > 0
+                    ? tr(`已选 ${selectedAssets.length} 项`, `${selectedAssets.length} selected`)
+                    : tr("请选择要发送的媒体", "Select media to send")}
+                </Text>
+                <Pressable
+                  style={[styles.mediaSheetSendBtn, mediaSendDisabled && styles.mediaSheetSendBtnDisabled]}
+                  disabled={mediaSendDisabled}
+                  onPress={() => {
+                    void handleSendSelectedMedia();
+                  }}
+                >
+                  {mediaSending ? (
+                    <ActivityIndicator size="small" color="#0b1220" />
+                  ) : (
+                    <Text style={styles.mediaSheetSendText}>{tr("发送", "Send")}</Text>
+                  )}
+                </Pressable>
+              </View>
+            </Animated.View>
+          </View>
+        </Modal>
 
         {/* Ask AI Modal 组件 */}
         <Modal visible={actionModal} transparent animationType="fade" onRequestClose={closeActionModal}>
@@ -2933,6 +3425,185 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     textAlign: "center",
+  },
+  mediaSheetModalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  mediaSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  mediaSheetContainer: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderBottomWidth: 0,
+    backgroundColor: "rgba(15,23,42,0.98)",
+    overflow: "hidden",
+  },
+  mediaSheetHandle: {
+    width: 38,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(148,163,184,0.72)",
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  mediaSheetHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  mediaSheetTitle: {
+    color: "rgba(241,245,249,0.98)",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  mediaSheetCloseBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaSheetBody: {
+    flex: 1,
+  },
+  mediaGridContent: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 16,
+  },
+  mediaGridRow: {
+    gap: MEDIA_GRID_GAP,
+    marginBottom: MEDIA_GRID_GAP,
+  },
+  mediaAssetItem: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    overflow: "hidden",
+    position: "relative",
+  },
+  mediaAssetItemSelected: {
+    borderColor: "rgba(96,165,250,0.95)",
+  },
+  mediaAssetItemPressed: {
+    opacity: 0.9,
+  },
+  mediaAssetThumb: {
+    width: "100%",
+    height: "100%",
+  },
+  mediaAssetCheck: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: "rgba(241,245,249,0.92)",
+    backgroundColor: "rgba(15,23,42,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaAssetCheckSelected: {
+    borderColor: "rgba(59,130,246,1)",
+    backgroundColor: "rgba(37,99,235,0.96)",
+  },
+  mediaAssetVideoBadge: {
+    position: "absolute",
+    right: 6,
+    bottom: 6,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    backgroundColor: "rgba(2,6,23,0.78)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  mediaAssetVideoDuration: {
+    color: "rgba(241,245,249,0.96)",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  mediaSheetState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+  },
+  mediaSheetHint: {
+    color: "rgba(148,163,184,0.94)",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  mediaSheetError: {
+    color: "rgba(248,113,113,0.98)",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  mediaSheetRetryBtn: {
+    minHeight: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.62)",
+    backgroundColor: "rgba(30,64,175,0.28)",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaSheetRetryText: {
+    color: "rgba(219,234,254,0.98)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  mediaSheetFooter: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.10)",
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  mediaSheetSelection: {
+    flex: 1,
+    color: "rgba(148,163,184,0.94)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  mediaSheetSendBtn: {
+    minWidth: 84,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#e2e8f0",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  mediaSheetSendBtnDisabled: {
+    opacity: 0.45,
+  },
+  mediaSheetSendText: {
+    color: "#0b1220",
+    fontSize: 13,
+    fontWeight: "900",
   },
   inputIcon: {
     width: 40,
