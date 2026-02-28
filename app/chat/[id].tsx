@@ -142,6 +142,21 @@ function normalizeDisplayedContent(content: string, senderName?: string) {
   return text;
 }
 
+function extractSessionIdFromSSEPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return "";
+  const row = payload as { session_id?: unknown; sessionId?: unknown };
+  const snake = typeof row.session_id === "string" ? row.session_id.trim() : "";
+  if (snake) return snake;
+  const camel = typeof row.sessionId === "string" ? row.sessionId.trim() : "";
+  return camel;
+}
+
+function isMyBotChatThreadId(threadId: string) {
+  const id = (threadId || "").trim().toLowerCase();
+  if (!id) return false;
+  return id === "mybot" || id === "agent_mybot";
+}
+
 function resolveGroupOwnerId(thread: ChatThread) {
   const alias = thread as ChatThread & {
     group_commander_user_id?: string;
@@ -459,6 +474,9 @@ export default function ChatDetailScreen() {
   const streamInitRef = useRef(false);
   const streamTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const streamedIdsRef = useRef<Set<string>>(new Set());
+  const myBotSessionIdRef = useRef("");
+  const myBotStreamAbortRef = useRef<AbortController | null>(null);
+  const [myBotStreaming, setMyBotStreaming] = useState(false);
 
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
 
@@ -501,6 +519,12 @@ export default function ChatDetailScreen() {
     setHasUserScrolled(false);
   }, [chatId]);
 
+  const abortMyBotStream = useCallback(() => {
+    myBotStreamAbortRef.current?.abort();
+    myBotStreamAbortRef.current = null;
+    setMyBotStreaming(false);
+  }, []);
+
   const stopAllStreams = useCallback(() => {
     Object.values(streamTimersRef.current).forEach((timer) => clearTimeout(timer));
     streamTimersRef.current = {};
@@ -510,8 +534,10 @@ export default function ChatDetailScreen() {
   useEffect(() => {
     streamInitRef.current = false;
     streamedIdsRef.current = new Set();
+    myBotSessionIdRef.current = "";
+    abortMyBotStream();
     stopAllStreams();
-  }, [chatId, stopAllStreams]);
+  }, [abortMyBotStream, chatId, stopAllStreams]);
 
   useEffect(() => {
     if (devStreamEnabled) return;
@@ -519,6 +545,12 @@ export default function ChatDetailScreen() {
     streamedIdsRef.current = new Set();
     stopAllStreams();
   }, [devStreamEnabled, stopAllStreams]);
+
+  useEffect(() => {
+    return () => {
+      abortMyBotStream();
+    };
+  }, [abortMyBotStream]);
 
   useEffect(() => {
     if (!devStreamEnabled || streamInitRef.current || loading) return;
@@ -862,11 +894,101 @@ export default function ChatDetailScreen() {
     setInput("");
 
     let ok = false;
+    let botLocalId = "";
     try {
       if (thread.isGroup) {
         const ids = mentionMemberIDs(content, members);
         await generateRoleReplies(chatId, content, ids.length ? ids : undefined);
         ok = true;
+      } else if (isMyBotChatThreadId(chatId)) {
+        botLocalId = `local_bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const botMessage: ConversationMessage = {
+          id: botLocalId,
+          threadId: chatId,
+          senderId: chatId === "mybot" ? "agent_mybot" : chatId,
+          senderName: thread.name || botConfig.name || "MyBot",
+          senderAvatar: thread.avatar || botConfig.avatar,
+          senderType: "agent",
+          content: "",
+          type: "text",
+          isMe: false,
+          time: tr("刚刚", "Now"),
+        };
+        setPendingMessages((prev) => GiftedChat.append(prev, [toGiftedMessage(botMessage, currentUserId, Date.now())]));
+
+        const controller = new AbortController();
+        myBotStreamAbortRef.current = controller;
+        setMyBotStreaming(true);
+        let latestText = "";
+        try {
+          const completionsRequest: ChatCompletionsRequest = {
+            stream: true,
+            input: content,
+            prompt: "",
+            session_id: myBotSessionIdRef.current,
+            target_type: "self",
+            target_id: "root",
+            bot_owner_user_id: "",
+            skill_ids: [],
+          };
+
+          await runChatCompletions(
+            completionsRequest,
+            {
+              onText: (text) => {
+                if (controller.signal.aborted) return;
+                latestText = text;
+                setStreamingById((prev) => {
+                  if (prev[botLocalId] === text) return prev;
+                  return { ...prev, [botLocalId]: text };
+                });
+              },
+              onEvent: (eventName, payload) => {
+                if (eventName !== "message_start" && eventName !== "trace") return;
+                const nextSessionId = extractSessionIdFromSSEPayload(payload);
+                if (nextSessionId) {
+                  myBotSessionIdRef.current = nextSessionId;
+                }
+              },
+            },
+            controller.signal
+          );
+        } finally {
+          myBotStreamAbortRef.current = null;
+          setMyBotStreaming(false);
+        }
+
+        const finalText = latestText.trim();
+        if (finalText) {
+          setPendingMessages((prev) =>
+            prev.map((msg) => {
+              if (msg._id !== botLocalId) return msg;
+              return {
+                ...msg,
+                text: finalText,
+                raw: {
+                  ...msg.raw,
+                  content: finalText,
+                },
+              };
+            })
+          );
+          ok = true;
+        } else if (controller.signal.aborted) {
+          ok = true;
+          setPendingMessages((prev) => prev.filter((msg) => msg._id !== botLocalId));
+        } else {
+          setFailedDraft(content);
+          setPendingMessages((prev) => prev.filter((msg) => msg._id !== botLocalId));
+        }
+
+        setStreamingById((prev) => {
+          if (!(botLocalId in prev)) return prev;
+          const next = { ...prev };
+          delete next[botLocalId];
+          return next;
+        });
+
       } else {
         const result = await sendMessage(chatId, {
           content,
@@ -876,7 +998,7 @@ export default function ChatDetailScreen() {
           senderAvatar: botConfig.avatar,
           senderType: "human",
           isMe: true,
-          requestAI: chatId === "mybot",
+          requestAI: false,
           systemInstruction: botConfig.systemInstruction,
         });
         if (!result) {
@@ -885,7 +1007,18 @@ export default function ChatDetailScreen() {
           ok = true;
         }
       }
-    } catch (err) {
+    } catch {
+      if (botLocalId) {
+        setStreamingById((prev) => {
+          if (!(botLocalId in prev)) return prev;
+          const next = { ...prev };
+          delete next[botLocalId];
+          return next;
+        });
+        setPendingMessages((prev) => prev.filter((msg) => msg._id !== botLocalId));
+        myBotStreamAbortRef.current = null;
+        setMyBotStreaming(false);
+      }
       setFailedDraft(content);
     } finally {
       setSubmitting(false);
@@ -1305,7 +1438,7 @@ export default function ChatDetailScreen() {
       const actorID = currentUserId;
       const meFinal = isCurrentUserMessage(raw, actorID);
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
-      const streamText = devStreamEnabled ? streamingById[raw.id] : undefined;
+      const streamText = streamingById[raw.id];
       const displayText = normalizeDisplayedContent((streamText ?? raw.content) || "", raw.senderName);
       const ownAvatar = (user?.avatar || botConfig.avatar || "").trim();
       const avatarTag = meFinal ? null : inferAvatarTagFromSender(raw);
@@ -1430,7 +1563,6 @@ export default function ChatDetailScreen() {
     [
       botConfig.avatar,
       currentUserId,
-      devStreamEnabled,
       handleLongPress,
       handleMessagePress,
       highlightMessageId,
@@ -1455,6 +1587,8 @@ export default function ChatDetailScreen() {
     : askAICandidates.length > 0
       ? tr("重新生成", "Regenerate")
       : tr("生成", "Generate");
+  const canAbortMyBotSend = myBotStreaming && isMyBotChatThreadId(chatId);
+  const sendDisabled = canAbortMyBotSend ? false : submitting || !input.trim();
 
   return (
     <KeyframeBackground>
@@ -1631,11 +1765,17 @@ export default function ChatDetailScreen() {
             </Pressable>
             <Pressable
               testID="chat-send-button"
-              style={[styles.sendBtn, (submitting || !input.trim()) && styles.sendBtnDisabled]}
-              onPress={() => void handleSend()}
-              disabled={submitting || !input.trim()}
+              style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
+              onPress={() => {
+                if (canAbortMyBotSend) {
+                  abortMyBotStream();
+                  return;
+                }
+                void handleSend();
+              }}
+              disabled={sendDisabled}
             >
-              <Ionicons name="arrow-up" size={18} color="#0b1220" />
+              <Ionicons name={canAbortMyBotSend ? "stop" : "arrow-up"} size={18} color="#0b1220" />
             </Pressable>
           </View>
         </ContainerView>
