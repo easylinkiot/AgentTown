@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
+import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import {
   AUTH_ERROR_OTP_EXPIRED,
@@ -342,9 +343,28 @@ export default function SignInScreen() {
       });
     } catch (error) {
       const knownCode = (error as { code?: string })?.code;
-      if (knownCode !== "ERR_REQUEST_CANCELED") {
-        Alert.alert(tr("Apple 登录失败", "Apple Sign-In Failed"), tr("请稍后重试。", "Please try again later."));
-      }
+      const rawMessage = error instanceof Error ? error.message : "";
+      if (knownCode === "ERR_REQUEST_CANCELED") return;
+
+      const isUnsupportedEnvironment =
+        knownCode === "ERR_INVALID_OPERATION" || knownCode === "ERR_REQUEST_NOT_HANDLED";
+      const isNativeAuthFailed =
+        knownCode === "ERR_REQUEST_FAILED" ||
+        /authorization attempt failed/i.test(rawMessage) ||
+        /unknown reason/i.test(rawMessage);
+      const message = isUnsupportedEnvironment
+        ? tr(
+            "当前环境暂不支持 Apple 登录，请在 iOS 原生构建中并确保设备已登录 Apple ID 后重试。",
+            "Apple Sign-In is not supported in this environment. Use a native iOS build and sign in to an Apple ID, then try again."
+          )
+        : isNativeAuthFailed
+          ? tr(
+              "Apple 授权失败。请确认设备已登录 Apple ID，并在系统设置中允许本 App 使用 Apple 登录后重试。",
+              "Apple authorization failed. Make sure the device is signed in to Apple ID and Apple Sign-In is allowed for this app, then try again."
+            )
+        : formatApiError(error) || tr("请稍后重试。", "Please try again later.");
+
+      Alert.alert(tr("Apple 登录失败", "Apple Sign-In Failed"), message);
     } finally {
       setBusyKey(null);
     }

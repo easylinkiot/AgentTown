@@ -94,6 +94,21 @@ export function defaultDisplayNameForEmail(email: string) {
   return displayNameFromEmail(email.trim()) || "Member";
 }
 
+export function defaultDisplayNameForApple(input: {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+}) {
+  const fromName = input.name?.trim();
+  if (fromName) return fromName;
+
+  const fromEmail = displayNameFromEmail(input.email);
+  if (fromEmail) return fromEmail;
+
+  const suffix = input.id.trim().slice(-6);
+  return suffix ? `Apple User ${suffix}` : "Apple User";
+}
+
 function mapBackendUser(input: {
   id: string;
   provider: string;
@@ -273,12 +288,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithApple = useCallback<AuthContextValue["signInWithApple"]>(
     async (input) => {
-      const normalizedName = input.name?.trim() || displayNameFromEmail(input.email) || undefined;
+      const normalizedName = defaultDisplayNameForApple(input);
       const session = await authProvider({
         provider: "apple",
         providerUserId: input.id,
         idToken: input.identityToken || undefined,
-        email: input.email || undefined,
+        email: input.email?.trim() || undefined,
         displayName: normalizedName,
       });
       await applySession({ token: session.token, user: mapBackendUser(session.user) });

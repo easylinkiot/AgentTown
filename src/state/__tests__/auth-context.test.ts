@@ -2,6 +2,7 @@ import mockAsyncStorage from "@react-native-async-storage/async-storage/jest/asy
 
 import {
   AUTH_ERROR_PHONE_INVALID,
+  defaultDisplayNameForApple,
   defaultDisplayNameForEmail,
   displayNameFromEmail,
   normalizePhone,
@@ -28,5 +29,31 @@ describe("auth-context helpers", () => {
     expect(defaultDisplayNameForEmail("  lucy@example.com ")).toBe("lucy");
     expect(defaultDisplayNameForEmail("")).toBe("Member");
     expect(defaultDisplayNameForEmail("@example.com")).toBe("Member");
+  });
+
+  it("derives Apple display name from name, email, then provider id suffix", () => {
+    expect(
+      defaultDisplayNameForApple({
+        id: "000000000123456",
+        name: "  Alice  ",
+        email: "alice@example.com",
+      })
+    ).toBe("Alice");
+
+    expect(
+      defaultDisplayNameForApple({
+        id: "000000000123456",
+        name: " ",
+        email: "bob@example.com",
+      })
+    ).toBe("bob");
+
+    expect(
+      defaultDisplayNameForApple({
+        id: "000000000123456",
+        name: null,
+        email: null,
+      })
+    ).toBe("Apple User 123456");
   });
 });
