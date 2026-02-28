@@ -19,7 +19,16 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { GiftedChat, IMessage, MessageProps, SystemMessageProps } from "react-native-gifted-chat";
+import {
+  Composer,
+  type ComposerProps,
+  GiftedChat,
+  IMessage,
+  InputToolbar,
+  type InputToolbarProps,
+  MessageProps,
+  SystemMessageProps,
+} from "react-native-gifted-chat";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
@@ -36,12 +45,12 @@ import {
   type DiscoverUser,
 } from "@/src/lib/api";
 import {
+  runChatAssist,
+  runChatCompletions,
   type AssistCandidate,
   type ChatAssistAction,
-  type ChatCompletionsRequest,
   type ChatAssistRequest,
-  runChatCompletions,
-  runChatAssist,
+  type ChatCompletionsRequest,
 } from "@/src/services/chatAssist";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -59,6 +68,12 @@ type MemberCandidate = {
 type GiftedMessage = IMessage & { raw: ConversationMessage };
 type SystemMessageRenderProps = { currentMessage?: GiftedMessage | null };
 type KeyboardTarget = "chat" | "askAI";
+type PlusPanelItem = {
+  key: "image" | "video" | "camera" | "voice" | "contact";
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  zh: string;
+  en: string;
+};
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -67,6 +82,16 @@ const DEV_STREAM_CHUNK_SIZE = 1;
 const DEV_STREAM_INTERVAL_MS = 50;
 const KEYBOARD_CLEARANCE = 25;
 const KEYBOARD_CLEARANCE_IOS = 25;
+const PLUS_PANEL_BASE_HEIGHT = 300;
+const PLUS_PANEL_ANIM_DURATION = 220;
+const PLUS_PANEL_INPUT_GAP = 20;
+const PLUS_PANEL_ITEMS: PlusPanelItem[] = [
+  { key: "image", icon: "image-outline", zh: "图片", en: "Image" },
+  { key: "video", icon: "videocam-outline", zh: "视频", en: "Video" },
+  { key: "camera", icon: "camera-outline", zh: "相机", en: "Camera" },
+  { key: "voice", icon: "mic-outline", zh: "语音", en: "Voice" },
+  { key: "contact", icon: "person-circle-outline", zh: "个人名片", en: "Contact Card" },
+];
 
 function mentionMemberIDs(text: string, members: ThreadMember[]) {
   const safe = text.trim();
@@ -353,11 +378,28 @@ export default function ChatDetailScreen() {
 
   const keyboardPadding = useRef(new Animated.Value(0)).current;
   const aiKeyboardShift = useRef(new Animated.Value(0)).current;
-  const inputRowRef = useRef<View>(null);
   const aiCardRef = useRef<View>(null);
   const activeKeyboardTargetRef = useRef<KeyboardTarget | null>(null);
   const lastKeyboardHeightRef = useRef(0);
   const lastKeyboardDurationRef = useRef(0);
+  const keyboardVisibleRef = useRef(false);
+  const plusButtonPressingRef = useRef(false);
+  const plusPressedFromKeyboardRef = useRef(false);
+  const isPlusPanelVisibleRef = useRef(false);
+  const pendingOpenPanelAfterKeyboardHideRef = useRef(false);
+  const pendingKeyboardFromPanelRef = useRef(false);
+  const [isPanelVisible, setIsPanelVisible] = useState(false);
+  const plusPanelBottomInset = Math.max(insets.bottom, 10);
+  const plusPanelHeight = useMemo(
+    () => PLUS_PANEL_BASE_HEIGHT + plusPanelBottomInset,
+    [plusPanelBottomInset]
+  );
+  const plusPanelLiftOffset = useMemo(
+    () => Math.max(0, plusPanelHeight - insets.bottom + PLUS_PANEL_INPUT_GAP),
+    [insets.bottom, plusPanelHeight]
+  );
+  const plusPanelTranslateY = useRef(new Animated.Value(plusPanelHeight + 20)).current;
+  const plusPanelOpacity = useRef(new Animated.Value(0)).current;
 
   const animateKeyboardValue = useCallback((value: Animated.Value, toValue: number, duration: number) => {
     Animated.timing(value, {
@@ -424,6 +466,41 @@ export default function ChatDetailScreen() {
     [aiKeyboardShift, animateKeyboardValue, insets.bottom, keyboardPadding, resetKeyboardOffsets]
   );
 
+  const animatePlusPanel = useCallback(
+    (visible: boolean, duration: number) => {
+      if (visible) {
+        isPlusPanelVisibleRef.current = true;
+        setIsPanelVisible(true);
+      } else {
+        isPlusPanelVisibleRef.current = false;
+      }
+      Animated.parallel([
+        Animated.timing(plusPanelTranslateY, {
+          toValue: visible ? 0 : plusPanelHeight + 20,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(plusPanelOpacity, {
+          toValue: visible ? 1 : 0,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!visible && finished) {
+          setIsPanelVisible(false);
+        }
+      });
+    },
+    [plusPanelHeight, plusPanelOpacity, plusPanelTranslateY]
+  );
+
+  useEffect(() => {
+    if (isPanelVisible) return;
+    plusPanelTranslateY.setValue(plusPanelHeight + 20);
+  }, [isPanelVisible, plusPanelHeight, plusPanelTranslateY]);
+
   useEffect(() => {
     const isIOS = Platform.OS === "ios";
     const handleFrame = (event?: { endCoordinates?: { height?: number }; duration?: number }) => {
@@ -431,12 +508,32 @@ export default function ChatDetailScreen() {
       const duration = event?.duration ?? (isIOS ? 250 : 200);
       lastKeyboardHeightRef.current = height;
       lastKeyboardDurationRef.current = duration;
+      keyboardVisibleRef.current = height > 0;
+      if (height > 0 && isPlusPanelVisibleRef.current) {
+        animatePlusPanel(false, duration);
+      }
       applyKeyboardAvoidance(height, duration);
     };
     const handleHide = (event?: { duration?: number }) => {
       const duration = event?.duration ?? (isIOS ? 200 : 180);
       lastKeyboardHeightRef.current = 0;
       lastKeyboardDurationRef.current = duration;
+      keyboardVisibleRef.current = false;
+      if (pendingOpenPanelAfterKeyboardHideRef.current) {
+        pendingOpenPanelAfterKeyboardHideRef.current = false;
+        pendingKeyboardFromPanelRef.current = false;
+        animateKeyboardValue(keyboardPadding, plusPanelLiftOffset, duration);
+        animatePlusPanel(true, duration);
+        return;
+      }
+      if (pendingKeyboardFromPanelRef.current) {
+        pendingKeyboardFromPanelRef.current = false;
+      }
+      if (isPlusPanelVisibleRef.current) {
+        animateKeyboardValue(keyboardPadding, plusPanelLiftOffset, duration);
+        animateKeyboardValue(aiKeyboardShift, 0, duration);
+        return;
+      }
       resetKeyboardOffsets(duration);
     };
     const showEvent = isIOS ? "keyboardWillShow" : "keyboardDidShow";
@@ -453,12 +550,28 @@ export default function ChatDetailScreen() {
       didHideSub.remove();
       changeSub?.remove();
     };
-  }, [applyKeyboardAvoidance, resetKeyboardOffsets]);
+  }, [
+    aiKeyboardShift,
+    animateKeyboardValue,
+    animatePlusPanel,
+    applyKeyboardAvoidance,
+    keyboardPadding,
+    plusPanelLiftOffset,
+    resetKeyboardOffsets,
+  ]);
 
   const setKeyboardTarget = useCallback(
     (target: KeyboardTarget | null) => {
       activeKeyboardTargetRef.current = target;
       if (!target) {
+        if (
+          isPlusPanelVisibleRef.current ||
+          pendingOpenPanelAfterKeyboardHideRef.current ||
+          pendingKeyboardFromPanelRef.current
+        ) {
+          animateKeyboardValue(aiKeyboardShift, 0, lastKeyboardDurationRef.current || 120);
+          return;
+        }
         resetKeyboardOffsets(lastKeyboardDurationRef.current || 120);
         return;
       }
@@ -466,8 +579,90 @@ export default function ChatDetailScreen() {
         applyKeyboardAvoidance(lastKeyboardHeightRef.current, lastKeyboardDurationRef.current || 120);
       }
     },
-    [applyKeyboardAvoidance, resetKeyboardOffsets]
+    [aiKeyboardShift, animateKeyboardValue, applyKeyboardAvoidance, resetKeyboardOffsets]
   );
+
+  const showPlusPanel = useCallback(
+    (duration: number = PLUS_PANEL_ANIM_DURATION) => {
+      pendingOpenPanelAfterKeyboardHideRef.current = false;
+      pendingKeyboardFromPanelRef.current = false;
+      activeKeyboardTargetRef.current = null;
+      animateKeyboardValue(aiKeyboardShift, 0, duration);
+      animateKeyboardValue(keyboardPadding, plusPanelLiftOffset, duration);
+      animatePlusPanel(true, duration);
+    },
+    [aiKeyboardShift, animateKeyboardValue, animatePlusPanel, keyboardPadding, plusPanelLiftOffset]
+  );
+
+  const hidePlusPanel = useCallback(
+    (options?: { duration?: number; keepBottomOffset?: boolean }) => {
+      const duration = options?.duration ?? PLUS_PANEL_ANIM_DURATION;
+      pendingOpenPanelAfterKeyboardHideRef.current = false;
+      animatePlusPanel(false, duration);
+      if (!options?.keepBottomOffset) {
+        animateKeyboardValue(keyboardPadding, 0, duration);
+      }
+    },
+    [animateKeyboardValue, animatePlusPanel, keyboardPadding]
+  );
+
+  const handleTogglePlusPanel = useCallback(() => {
+    const fromKeyboardPress = plusPressedFromKeyboardRef.current;
+    plusPressedFromKeyboardRef.current = false;
+
+    if (fromKeyboardPress) {
+      pendingKeyboardFromPanelRef.current = false;
+      pendingOpenPanelAfterKeyboardHideRef.current = true;
+      setKeyboardTarget(null);
+      if (keyboardVisibleRef.current || lastKeyboardHeightRef.current > 0) {
+        Keyboard.dismiss();
+        return;
+      }
+      if (!isPlusPanelVisibleRef.current) {
+        showPlusPanel();
+      }
+      return;
+    }
+
+    if (isPlusPanelVisibleRef.current) {
+      hidePlusPanel();
+      return;
+    }
+
+    const keyboardIsOpen = keyboardVisibleRef.current || lastKeyboardHeightRef.current > 0;
+    pendingKeyboardFromPanelRef.current = false;
+    if (keyboardIsOpen) {
+      pendingOpenPanelAfterKeyboardHideRef.current = true;
+    }
+    setKeyboardTarget(null);
+    if (keyboardIsOpen) {
+      Keyboard.dismiss();
+      return;
+    }
+    showPlusPanel();
+  }, [hidePlusPanel, setKeyboardTarget, showPlusPanel]);
+
+  const handleChatInputFocus = useCallback(() => {
+    pendingOpenPanelAfterKeyboardHideRef.current = false;
+    if (isPlusPanelVisibleRef.current) {
+      pendingKeyboardFromPanelRef.current = true;
+      hidePlusPanel({
+        duration: PLUS_PANEL_ANIM_DURATION,
+        keepBottomOffset: true,
+      });
+    }
+    setKeyboardTarget("chat");
+  }, [hidePlusPanel, setKeyboardTarget]);
+
+  const handleChatInputBlur = useCallback(() => {
+    if (plusButtonPressingRef.current && (keyboardVisibleRef.current || lastKeyboardHeightRef.current > 0)) {
+      pendingOpenPanelAfterKeyboardHideRef.current = true;
+      pendingKeyboardFromPanelRef.current = false;
+      activeKeyboardTargetRef.current = null;
+    }
+    pendingKeyboardFromPanelRef.current = false;
+    setKeyboardTarget(null);
+  }, [setKeyboardTarget]);
 
   const [devStreamEnabled, setDevStreamEnabled] = useState(__DEV__);
   const [streamingById, setStreamingById] = useState<Record<string, string>>({});
@@ -1589,6 +1784,91 @@ export default function ChatDetailScreen() {
       : tr("生成", "Generate");
   const canAbortMyBotSend = myBotStreaming && isMyBotChatThreadId(chatId);
   const sendDisabled = canAbortMyBotSend ? false : submitting || !input.trim();
+  const renderToolbarActions = useCallback(() => {
+    const iconColor = "rgba(226,232,240,0.85)";
+    return (
+      <View style={styles.toolbarActionGroup}>
+        <Pressable
+          style={styles.inputIcon}
+          id="chat-plus-panel"
+          onPressIn={() => {
+            plusButtonPressingRef.current = true;
+            const keyboardIsOpen = keyboardVisibleRef.current || lastKeyboardHeightRef.current > 0;
+            plusPressedFromKeyboardRef.current = keyboardIsOpen;
+            if (keyboardIsOpen) {
+              pendingOpenPanelAfterKeyboardHideRef.current = true;
+              pendingKeyboardFromPanelRef.current = false;
+              activeKeyboardTargetRef.current = null;
+            }
+          }}
+          onPressOut={() => {
+            plusButtonPressingRef.current = false;
+          }}
+          onPress={handleTogglePlusPanel}
+        >
+          <Ionicons name="add" size={18} color={iconColor} />
+        </Pressable>
+      </View>
+    );
+  }, [handleTogglePlusPanel]);
+
+  const renderToolbarComposer = useCallback(
+    (props: ComposerProps) => (
+      <View style={styles.inputBox}>
+        <Composer
+          {...props}
+          textInputStyle={styles.input}
+          placeholderTextColor="rgba(148,163,184,0.9)"
+          textInputProps={{
+            ...(props?.textInputProps || {}),
+            testID: "chat-message-input",
+            onFocus: (event) => {
+              props?.textInputProps?.onFocus?.(event);
+              handleChatInputFocus();
+            },
+            onBlur: (event) => {
+              props?.textInputProps?.onBlur?.(event);
+              handleChatInputBlur();
+            },
+          }}
+        />
+      </View>
+    ),
+    [handleChatInputBlur, handleChatInputFocus]
+  );
+
+  const renderToolbarSend = useCallback(() => {
+    return (
+      <Pressable
+        testID="chat-send-button"
+        style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
+        onPress={() => {
+          if (canAbortMyBotSend) {
+            abortMyBotStream();
+            return;
+          }
+          void handleSend();
+        }}
+        disabled={sendDisabled}
+      >
+        <Ionicons name={canAbortMyBotSend ? "stop" : "arrow-up"} size={18} color="#0b1220" />
+      </Pressable>
+    );
+  }, [abortMyBotStream, canAbortMyBotSend, handleSend, sendDisabled]);
+
+  const renderChatInputToolbar = useCallback(
+    (props: InputToolbarProps<IMessage>) => (
+      <InputToolbar
+        {...props}
+        containerStyle={styles.toolbarContainer}
+        primaryStyle={styles.toolbarPrimary}
+        renderActions={renderToolbarActions}
+        renderComposer={renderToolbarComposer}
+        renderSend={renderToolbarSend}
+      />
+    ),
+    [renderToolbarActions, renderToolbarComposer, renderToolbarSend]
+  );
 
   return (
     <KeyframeBackground>
@@ -1705,8 +1985,15 @@ export default function ChatDetailScreen() {
               <GiftedChat
                 messages={giftedMessages}
                 user={{ _id: giftedUserId, name: user?.displayName || tr("我", "Me") }}
-                renderInputToolbar={() => null}
-                minInputToolbarHeight={0}
+                text={input}
+                onInputTextChanged={setInput}
+                placeholder={
+                  thread.isGroup
+                    ? tr("Message (@name to mention)", "Message (@name to mention)")
+                    : tr("Message", "Message")
+                }
+                renderInputToolbar={renderChatInputToolbar}
+                minInputToolbarHeight={56}
                 isKeyboardInternallyHandled={false}
                 renderMessage={renderMessage}
                 renderSystemMessage={renderSystemMessage}
@@ -1738,48 +2025,38 @@ export default function ChatDetailScreen() {
               />
             )}
           </View>
-
-          <View style={styles.inputRow} ref={inputRowRef}>
-            {/* <Pressable style={styles.inputIcon} onPress={() => null}>
-              <Ionicons name="add" size={18} color="rgba(226,232,240,0.85)" />
-            </Pressable> */}
-            <View style={styles.inputBox}>
-              <TextInput
-                testID="chat-message-input"
-                value={input}
-                onChangeText={setInput}
-                onFocus={() => setKeyboardTarget("chat")}
-                onBlur={() => setKeyboardTarget(null)}
-                placeholder={
-                  thread.isGroup
-                    ? tr("Message (@name to mention)", "Message (@name to mention)")
-                    : tr("Message", "Message")
-                }
-                placeholderTextColor="rgba(148,163,184,0.9)"
-                style={styles.input}
-                multiline
-              />
-            </View>
-            <Pressable style={styles.inputIcon} onPress={() => null}>
-              <Ionicons name="mic-outline" size={18} color="rgba(226,232,240,0.78)" />
-            </Pressable>
-            <Pressable
-              testID="chat-send-button"
-              style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
-              onPress={() => {
-                if (canAbortMyBotSend) {
-                  abortMyBotStream();
-                  return;
-                }
-                void handleSend();
-              }}
-              disabled={sendDisabled}
-            >
-              <Ionicons name={canAbortMyBotSend ? "stop" : "arrow-up"} size={18} color="#0b1220" />
-            </Pressable>
-          </View>
         </ContainerView>
         </KeyboardAvoidingView>
+
+        {isPanelVisible ? (
+          <Animated.View
+            pointerEvents={isPanelVisible ? "auto" : "none"}
+            style={[
+              styles.plusPanel,
+              {
+                height: plusPanelHeight,
+                paddingBottom: Math.max(insets.bottom, 12),
+                opacity: plusPanelOpacity,
+                transform: [{ translateY: plusPanelTranslateY }],
+              },
+            ]}
+          >
+            <View style={styles.plusPanelGrid}>
+              {PLUS_PANEL_ITEMS.map((item) => (
+                <Pressable
+                  key={item.key}
+                  style={({ pressed }) => [styles.plusPanelItem, pressed && styles.plusPanelItemPressed]}
+                  onPress={() => null}
+                >
+                  <View style={styles.plusPanelIcon}>
+                    <Ionicons name={item.icon} size={22} color="rgba(219,234,254,0.95)" />
+                  </View>
+                  <Text style={styles.plusPanelLabel}>{tr(item.zh, item.en)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </Animated.View>
+        ) : null}
 
         {/* Ask AI Modal 组件 */}
         <Modal visible={actionModal} transparent animationType="fade" onRequestClose={closeActionModal}>
@@ -2597,11 +2874,65 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
-  inputRow: {
-    flexDirection: "row",
+  toolbarContainer: {
+    borderTopWidth: 0,
+    backgroundColor: "transparent",
+    paddingHorizontal: 0,
+  },
+  toolbarPrimary: {
+    alignItems: "stretch",
     gap: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingTop: 0,
+  },
+  toolbarActionGroup: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
+  plusPanel: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 16,
+    paddingHorizontal: 14,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(15,23,42,0.96)",
+  },
+  plusPanelGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 14,
+  },
+  plusPanelItem: {
+    width: "22%",
+    minWidth: 68,
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  plusPanelItemPressed: {
+    backgroundColor: "rgba(148,163,184,0.2)",
+  },
+  plusPanelIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.4)",
+    backgroundColor: "rgba(30,64,175,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  plusPanelLabel: {
+    color: "rgba(226,232,240,0.95)",
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center",
   },
   inputIcon: {
     width: 40,
@@ -2615,6 +2946,8 @@ const styles = StyleSheet.create({
   },
   inputBox: {
     flex: 1,
+    minHeight: 44,
+    justifyContent: "center",
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
@@ -2624,7 +2957,11 @@ const styles = StyleSheet.create({
   input: {
     color: "#e2e8f0",
     fontSize: 17,
-    paddingVertical: 10,
+    lineHeight: 22,
+    paddingTop: 9,
+    paddingBottom: 9,
+    includeFontPadding: false,
+    textAlignVertical: "center",
     maxHeight: 120,
   },
   sendBtn: {
