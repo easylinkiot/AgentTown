@@ -78,4 +78,44 @@ describe("buildMiniAppViewModel", () => {
     expect(vm.genericBlocks).toHaveLength(2);
     expect(vm.genericBlocks[0]?.kind).toBe("title");
   });
+
+  it("parses richer poster fields for typed miniapps", () => {
+    const app = baseApp({
+      category: "price_tracker",
+      preview: {
+        uiType: "price_tracker",
+        content: {
+          items: [
+            {
+              id: "p2",
+              product: "Keyboard",
+              price: 79,
+              originalPrice: 119,
+              trend: "down",
+              retailer: "Amazon",
+              discountPct: 34,
+              note: "Weekend deal",
+            },
+          ],
+        },
+        lastRun: {
+          outputData: {
+            card: {
+              word: "Resilient",
+              pronunciation: "/rɪˈzɪliənt/",
+              definition: "Able to recover quickly.",
+              memoryTip: "Think 're-silient' = bounce back.",
+              collocations: ["resilient system"],
+            },
+          },
+        },
+      },
+    });
+
+    const vm = buildMiniAppViewModel(app);
+    expect(vm.priceItems[0]?.discountPct).toBe(34);
+    expect(vm.priceItems[0]?.note).toBe("Weekend deal");
+    expect(vm.flashcard.memoryTip).toBe("Think 're-silient' = bounce back.");
+    expect(vm.flashcard.collocations[0]).toBe("resilient system");
+  });
 });
