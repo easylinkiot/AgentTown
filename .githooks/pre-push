@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[pre-push] Running AGENTS checks: typecheck + lint + test:ci + build:web"
-npm run verify:push
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$HOOK_DIR/.." && pwd)"
+ENV_FILE="$HOOK_DIR/.codex.env"
 
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+fi
+
+if [[ -z "${CODEX_BIN:-}" ]]; then
+  if command -v codex >/dev/null 2>&1; then
+    CODEX_BIN="$(command -v codex)"
+  else
+    echo "[pre-push] codex not found. Run: npm run hooks:install" >&2
+    exit 1
+  fi
+fi
+
+echo "[pre-push] Running AGENTS checks via codex exec"
+cd "$PROJECT_DIR"
+"$CODEX_BIN" exec --dangerously-bypass-approvals-and-sandbox --color never \
+  "请先读取 ./AGENTS.md。仅执行推送前校验：npm run typecheck && npm run lint && npm run test:ci && npm run build:web。禁止修改任何文件；任一步失败就失败退出。"
