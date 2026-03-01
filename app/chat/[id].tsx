@@ -62,6 +62,7 @@ import {
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
 import { Agent, ChatThread, ConversationMessage, Friend, ThreadMember } from "@/src/types";
+import { isE2ETestMode } from "@/src/utils/e2e";
 
 type MemberFilter = "all" | "human" | "agent" | "role";
 type MemberCandidate = {
@@ -285,6 +286,7 @@ function inferAvatarTagFromMember(member: ThreadMember): "NPC" | "Bot" | null {
 }
 
 export default function ChatDetailScreen() {
+  const isE2E = isE2ETestMode();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -1003,6 +1005,21 @@ export default function ChatDetailScreen() {
 
     cameraCaptureInFlightRef.current = true;
     try {
+      if (isE2E) {
+        const previewAsset: MediaPickerAsset = {
+          id: `camera_e2e_${Date.now()}`,
+          type: "image",
+          uri: "e2e://camera-capture",
+          thumbUri: "e2e://camera-capture",
+          filename: "camera_e2e.jpg",
+          width: 1179,
+          height: 2556,
+          capturedAt: Date.now(),
+        };
+        emitCameraCaptured(previewAsset);
+        return;
+      }
+
       const granted = await ensureCameraPermission();
       if (!granted) return;
 
@@ -1034,7 +1051,7 @@ export default function ChatDetailScreen() {
     } finally {
       cameraCaptureInFlightRef.current = false;
     }
-  }, [emitCameraCaptured, ensureCameraPermission, tr]);
+  }, [emitCameraCaptured, ensureCameraPermission, isE2E, tr]);
 
   const openCameraFlow = useCallback(() => {
     pendingOpenPanelAfterKeyboardHideRef.current = false;
@@ -2292,6 +2309,7 @@ export default function ChatDetailScreen() {
         <Pressable
           style={styles.inputIcon}
           id="chat-plus-panel"
+          testID="chat-plus-button"
           onPressIn={() => {
             plusButtonPressingRef.current = true;
             const keyboardIsOpen = keyboardVisibleRef.current || lastKeyboardHeightRef.current > 0;
@@ -2382,7 +2400,7 @@ export default function ChatDetailScreen() {
         >
         <ContainerView style={containerStyle}>
           <View style={styles.headerRow}>
-            <Pressable style={styles.backBtn} onPress={() => router.back()}>
+            <Pressable testID="chat-back-button" style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
             </Pressable>
             <Pressable
@@ -2474,14 +2492,6 @@ export default function ChatDetailScreen() {
           <View style={styles.chatBody}>
             {loading ? (
               <LoadingSkeleton kind="messages" />
-            ) : giftedMessages.length === 0 ? (
-              <Pressable style={styles.emptyCenter} onPress={Keyboard.dismiss}>
-                <EmptyState
-                  title={tr("暂无消息", "No messages yet")}
-                  hint={tr("从底部输入开始对话", "Start typing below")}
-                  icon="chatbox-ellipses-outline"
-                />
-              </Pressable>
             ) : (
               <GiftedChat
                 messages={giftedMessages}
@@ -2521,6 +2531,15 @@ export default function ChatDetailScreen() {
                     ) : hasMore && hasUserScrolled ? (
                       <Text style={styles.listFooterHint}>{tr("上滑加载更早消息", "Scroll up to load older")}</Text>
                     ) : null,
+                    ListEmptyComponent: (
+                      <Pressable style={styles.emptyCenter} onPress={Keyboard.dismiss}>
+                        <EmptyState
+                          title={tr("暂无消息", "No messages yet")}
+                          hint={tr("从底部输入开始对话", "Start typing below")}
+                          icon="chatbox-ellipses-outline"
+                        />
+                      </Pressable>
+                    ),
                   } as any
                 }
               />
@@ -2531,6 +2550,7 @@ export default function ChatDetailScreen() {
 
         {isPanelVisible ? (
           <Animated.View
+            testID="chat-plus-panel-container"
             pointerEvents={isPanelVisible ? "auto" : "none"}
             style={[
               styles.plusPanel,
@@ -2546,6 +2566,7 @@ export default function ChatDetailScreen() {
               {PLUS_PANEL_ITEMS.map((item) => (
                 <Pressable
                   key={item.key}
+                  testID={`chat-plus-item-${item.key}`}
                   style={({ pressed }) => [styles.plusPanelItem, pressed && styles.plusPanelItemPressed]}
                   onPress={() => handlePlusPanelItemPress(item.key)}
                 >
@@ -2566,12 +2587,13 @@ export default function ChatDetailScreen() {
           statusBarTranslucent
           onRequestClose={() => closeMediaSheet()}
         >
-          <View style={styles.mediaSheetModalRoot}>
+          <View testID="chat-media-sheet-root" style={styles.mediaSheetModalRoot}>
             <AnimatedPressable
               style={[styles.mediaSheetBackdrop, { opacity: mediaSheetBackdropOpacity }]}
               onPress={() => closeMediaSheet()}
             />
             <Animated.View
+              testID="chat-media-sheet"
               style={[
                 styles.mediaSheetContainer,
                 {
@@ -2583,8 +2605,10 @@ export default function ChatDetailScreen() {
             >
               <View style={styles.mediaSheetHandle} {...mediaSheetPanResponder.panHandlers} />
               <View style={styles.mediaSheetHeader}>
-                <Text style={styles.mediaSheetTitle}>{tr("选择媒体", "Select Media")}</Text>
-                <Pressable style={styles.mediaSheetCloseBtn} onPress={() => closeMediaSheet()}>
+                <Text testID="chat-media-sheet-title" style={styles.mediaSheetTitle}>
+                  {tr("选择媒体", "Select Media")}
+                </Text>
+                <Pressable testID="chat-media-sheet-close" style={styles.mediaSheetCloseBtn} onPress={() => closeMediaSheet()}>
                   <Ionicons name="close" size={16} color="rgba(226,232,240,0.92)" />
                 </Pressable>
               </View>
@@ -2629,12 +2653,13 @@ export default function ChatDetailScreen() {
               </View>
 
               <View style={styles.mediaSheetFooter}>
-                <Text style={styles.mediaSheetSelection}>
+                <Text testID="chat-media-sheet-selection" style={styles.mediaSheetSelection}>
                   {selectedAssets.length > 0
                     ? tr(`已选 ${selectedAssets.length} 项`, `${selectedAssets.length} selected`)
                     : tr("请选择要发送的媒体", "Select media to send")}
                 </Text>
                 <Pressable
+                  testID="chat-media-sheet-send"
                   style={[styles.mediaSheetSendBtn, mediaSendDisabled && styles.mediaSheetSendBtnDisabled]}
                   disabled={mediaSendDisabled}
                   onPress={() => {
