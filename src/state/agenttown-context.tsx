@@ -1299,63 +1299,61 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         }
       },
       createFriend: async (input) => {
-        try {
-          const created = await createFriendApi(input);
-          if (created.mode === "friend" && created.friend) {
-            const nextFriend = created.friend as Friend;
-            setFriends((prev) => upsertById(prev, nextFriend, true));
+        const created = await createFriendApi(input);
+        if (created.mode === "friend" && created.friend) {
+          const nextFriend = created.friend as Friend;
+          setFriends((prev) => upsertById(prev, nextFriend, true));
 
-            const threadId = (nextFriend.threadId || "").trim();
-            if (threadId) {
-              setChatThreads((prev) => {
-                if (prev.some((thread) => thread.id === threadId)) return prev;
-                const directThread: ChatThread = {
-                  id: threadId,
-                  name: nextFriend.name || "Direct chat",
-                  avatar: nextFriend.avatar || "",
-                  message: "",
-                  time: "Now",
-                  isGroup: false,
-                  targetType: "user",
-                  targetId: nextFriend.userId || "",
-                };
-                return upsertById(prev, directThread, true);
-              });
-              return nextFriend;
-            }
-
-            if (nextFriend.userId) {
-              try {
-                const createdSession = await atCreateSession({
-                  target_type: "user",
-                  target_id: nextFriend.userId,
-                  title: nextFriend.name || undefined,
-                });
-                const mappedThread = mapATSessionToThread(createdSession);
-                if (mappedThread?.id) {
-                  setChatThreads((prev) => upsertById(prev, mappedThread, true));
-                  setFriends((prev) =>
-                    prev.map((friend) =>
-                      friend.id === nextFriend.id
-                        ? {
-                            ...friend,
-                            threadId: mappedThread.id,
-                          }
-                        : friend
-                    )
-                  );
-                }
-              } catch {
-                // Keep friend added even when direct thread creation fails.
-              }
-            }
-
+          const threadId = (nextFriend.threadId || "").trim();
+          if (threadId) {
+            setChatThreads((prev) => {
+              if (prev.some((thread) => thread.id === threadId)) return prev;
+              const directThread: ChatThread = {
+                id: threadId,
+                name: nextFriend.name || "Direct chat",
+                avatar: nextFriend.avatar || "",
+                message: "",
+                time: "Now",
+                isGroup: false,
+                targetType: "user",
+                targetId: nextFriend.userId || "",
+              };
+              return upsertById(prev, directThread, true);
+            });
             return nextFriend;
           }
-          return null;
-        } catch {
-          return null;
+
+          if (nextFriend.userId) {
+            try {
+              const createdSession = await atCreateSession({
+                target_type: "user",
+                target_id: nextFriend.userId,
+                title: nextFriend.name || undefined,
+              });
+              const mappedThread = mapATSessionToThread(createdSession);
+              if (mappedThread?.id) {
+                setChatThreads((prev) => upsertById(prev, mappedThread, true));
+                setFriends((prev) =>
+                  prev.map((friend) =>
+                    friend.id === nextFriend.id
+                      ? {
+                          ...friend,
+                          threadId: mappedThread.id,
+                        }
+                      : friend
+                  )
+                );
+              }
+            } catch {
+              // Keep friend added even when direct thread creation fails.
+            }
+          }
+
+          return nextFriend;
         }
+
+        // mode === "request": request created successfully, wait for the other side to accept.
+        return null;
       },
       removeFriend: async (friendId) => {
         if (!friendId) return;
