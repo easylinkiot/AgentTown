@@ -655,13 +655,14 @@ export default function HomeScreen() {
                 <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
               </Pressable>
               {presence.length
-                ? presence.map((item) => {
+                ? presence.map((item, index) => {
                   const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
                   const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
                   const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
                   return (
                     <Pressable
                       key={item.id}
+                      testID={`home-presence-item-${index}`}
                       style={styles.presenceItem}
                       onPress={() =>
                         openEntityConfig({
@@ -681,6 +682,7 @@ export default function HomeScreen() {
                           </View>
                         )}
                         <View
+                          testID={`home-presence-role-badge-${index}-${item.role}`}
                           style={[
                             styles.presenceRoleBadge,
                             item.role === "npc"
@@ -698,7 +700,7 @@ export default function HomeScreen() {
                         </View>
                         <View style={styles.presenceDot} />
                       </View>
-                      <Text style={styles.presenceName} numberOfLines={1}>
+                      <Text testID={`home-presence-name-${index}`} style={styles.presenceName} numberOfLines={1}>
                         {displayName}
                       </Text>
                     </Pressable>
