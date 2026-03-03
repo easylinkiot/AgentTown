@@ -66,6 +66,47 @@ function isAppleRelay(email?: string | null) {
   return value.endsWith("@privaterelay.appleid.com");
 }
 
+function decodeBase64UrlText(input: string) {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const paddingRemainder = normalized.length % 4;
+  let padded = normalized;
+  if (paddingRemainder === 2) padded += "==";
+  else if (paddingRemainder === 3) padded += "=";
+  else if (paddingRemainder === 1) return "";
+
+  try {
+    if (typeof atob === "function") {
+      return atob(padded);
+    }
+  } catch {
+    return "";
+  }
+
+  const maybeBuffer = (globalThis as { Buffer?: { from: (source: string, encoding?: string) => { toString: (encoding?: string) => string } } })
+    .Buffer;
+  if (!maybeBuffer?.from) return "";
+  try {
+    return maybeBuffer.from(padded, "base64").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function appleSubjectFromIdentityToken(identityToken?: string | null) {
+  const token = identityToken?.trim() || "";
+  if (!token) return "";
+  const parts = token.split(".");
+  if (parts.length < 2) return "";
+  const payloadText = decodeBase64UrlText(parts[1]);
+  if (!payloadText) return "";
+  try {
+    const payload = JSON.parse(payloadText) as { sub?: unknown };
+    return typeof payload.sub === "string" ? payload.sub.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 async function fetchGoogleProfile(accessToken: string) {
   const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -336,9 +377,14 @@ export default function SignInScreen() {
         .filter(Boolean)
         .join(" ")
         .trim();
+      const providerUserId =
+        credential.user?.trim() || appleSubjectFromIdentityToken(credential.identityToken);
+      if (!providerUserId) {
+        throw new Error("APPLE_PROVIDER_USER_ID_MISSING");
+      }
 
       await signInWithApple({
-        id: credential.user,
+        id: providerUserId,
         name: fullName || null,
         email: credential.email,
         identityToken: credential.identityToken || null,
@@ -354,6 +400,7 @@ export default function SignInScreen() {
         knownCode === "ERR_REQUEST_FAILED" ||
         /authorization attempt failed/i.test(rawMessage) ||
         /unknown reason/i.test(rawMessage);
+      const isMissingProviderUserID = rawMessage === "APPLE_PROVIDER_USER_ID_MISSING";
       const message = isUnsupportedEnvironment
         ? tr(
             "当前环境暂不支持 Apple 登录，请在 iOS 原生构建中并确保设备已登录 Apple ID 后重试。",
@@ -363,6 +410,11 @@ export default function SignInScreen() {
           ? tr(
               "Apple 授权失败。请确认设备已登录 Apple ID，并在系统设置中允许本 App 使用 Apple 登录后重试。",
               "Apple authorization failed. Make sure the device is signed in to Apple ID and Apple Sign-In is allowed for this app, then try again."
+            )
+        : isMissingProviderUserID
+          ? tr(
+              "无法获取 Apple 用户标识。请在系统设置中关闭并重新开启本 App 的“使用 Apple 登录”后重试。",
+              "Could not read Apple account identifier. Disable and re-enable Sign in with Apple for this app in Settings, then try again."
             )
         : formatApiError(error) || tr("请稍后重试。", "Please try again later.");
 
