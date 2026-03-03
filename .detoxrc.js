@@ -2,7 +2,7 @@
 module.exports = {
   session: {
     autoStart: true,
-    server: "ws://127.0.0.1:8099",
+    server: process.env.DETOX_SERVER || "ws://127.0.0.1:8099",
   },
   testRunner: {
     args: {
@@ -36,6 +36,18 @@ module.exports = {
         type: "iPhone 17",
       },
     },
+    simulatorA: {
+      type: "ios.simulator",
+      device: {
+        type: "iPhone 17",
+      },
+    },
+    simulatorB: {
+      type: "ios.simulator",
+      device: {
+        type: "iPhone 17 Pro",
+      },
+    },
     androidAttached: {
       type: "android.attached",
       device: {
@@ -46,6 +58,14 @@ module.exports = {
   configurations: {
     "ios.sim.release": {
       device: "simulator",
+      app: "ios.release",
+    },
+    "ios.sim.release.a": {
+      device: "simulatorA",
+      app: "ios.release",
+    },
+    "ios.sim.release.b": {
+      device: "simulatorB",
       app: "ios.release",
     },
     "android.attached.release": {

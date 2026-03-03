@@ -23,6 +23,7 @@ import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
 import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
+import { isE2ETestMode } from "@/src/utils/e2e";
 import {
   AUTH_ERROR_OTP_EXPIRED,
   AUTH_ERROR_OTP_INVALID,
@@ -104,6 +105,7 @@ function localizeAuthErrorMessage(
 }
 
 export default function SignInScreen() {
+  const isE2E = isE2ETestMode();
   const router = useRouter();
   const params = useLocalSearchParams<{ email?: string }>();
   const { language, updateLanguage } = useAgentTown();
@@ -507,6 +509,8 @@ export default function SignInScreen() {
             placeholder={tr("电子邮件", "Email")}
             keyboardType="email-address"
             autoCapitalize="none"
+            autoComplete={isE2E ? "off" : "email"}
+            textContentType={isE2E ? "none" : "username"}
           />
           <TextInput
             testID="auth-password-input"
@@ -516,6 +520,8 @@ export default function SignInScreen() {
             placeholder={tr("密码", "Password")}
             secureTextEntry
             autoCapitalize="none"
+            autoComplete={isE2E ? "off" : "password"}
+            textContentType={isE2E ? "oneTimeCode" : "password"}
           />
           <View style={styles.auxActionRow}>
             <Pressable
