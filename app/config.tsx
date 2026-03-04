@@ -10,6 +10,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +22,7 @@ import { AVATAR_PRESETS } from "@/src/constants/avatars";
 import { MARKET_DATA } from "@/src/constants/marketplace";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
+import { createFriendQR } from "@/src/lib/api";
 import { generateGeminiJson } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -159,6 +161,9 @@ export default function ConfigScreen() {
   const [profileName, setProfileName] = useState(user?.displayName || "");
   const [profileEmail, setProfileEmail] = useState(user?.email || "");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [myQrToken, setMyQrToken] = useState("");
+  const [myQrExpiresAt, setMyQrExpiresAt] = useState("");
+  const [generatingMyQr, setGeneratingMyQr] = useState(false);
 
   const profileAvatar = user?.avatar || botConfig.avatar;
   const profileProvider = user?.provider || "unknown";
@@ -311,6 +316,43 @@ export default function ConfigScreen() {
     }
   };
 
+  const handleGenerateMyQr = async () => {
+    if (generatingMyQr) return;
+    setGeneratingMyQr(true);
+    try {
+      const result = await createFriendQR();
+      setMyQrToken(result.token || "");
+      setMyQrExpiresAt(result.expiresAt || "");
+      Alert.alert(tr("二维码已生成", "QR generated"), tr("可复制或分享给好友添加你。", "You can copy or share it with friends."));
+    } catch (err) {
+      Alert.alert(
+        tr("生成失败", "Generation failed"),
+        err instanceof Error ? err.message : tr("请稍后重试", "Please try again later")
+      );
+    } finally {
+      setGeneratingMyQr(false);
+    }
+  };
+
+  const handleShareMyQr = async () => {
+    if (!myQrToken) {
+      Alert.alert(tr("请先生成二维码", "Generate QR first"), tr("先点击“我的二维码”生成分享内容。", "Tap My QR first."));
+      return;
+    }
+    const content = `${tr("AgentTown 好友二维码内容", "AgentTown friend QR payload")}:\n${myQrToken}\n${tr(
+      "有效期",
+      "Expires"
+    )}: ${myQrExpiresAt || "-"}`;
+    try {
+      await Share.share({ message: content });
+    } catch (err) {
+      Alert.alert(
+        tr("分享失败", "Share failed"),
+        err instanceof Error ? err.message : tr("请稍后重试", "Please try again later")
+      );
+    }
+  };
+
   const uploadKnowledge = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -459,6 +501,44 @@ export default function ConfigScreen() {
               )}
               <Text style={styles.neoProfileSaveBtnText}>{tr("保存资料", "Save Profile")}</Text>
             </Pressable>
+            <View style={styles.friendQrActionsRow}>
+              <Pressable
+                style={[styles.friendQrBtn, styles.friendQrBtnPrimary]}
+                onPress={handleGenerateMyQr}
+                disabled={generatingMyQr}
+              >
+                {generatingMyQr ? (
+                  <ActivityIndicator size="small" color="#0b1220" />
+                ) : (
+                  <Ionicons name="qr-code-outline" size={15} color="#0b1220" />
+                )}
+                <Text style={[styles.friendQrBtnText, styles.friendQrBtnTextPrimary]}>
+                  {tr("我的二维码", "My QR")}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.friendQrBtn, !myQrToken && styles.friendQrBtnDisabled]}
+                onPress={handleShareMyQr}
+                disabled={!myQrToken}
+              >
+                <Ionicons name="share-social-outline" size={15} color="#dbeafe" />
+                <Text style={styles.friendQrBtnText}>{tr("分享", "Share")}</Text>
+              </Pressable>
+            </View>
+            {myQrToken ? (
+              <View style={[styles.friendQrTokenCard, isNeo && styles.friendQrTokenCardNeo]}>
+                <Text style={[styles.friendQrTokenTitle, isNeo && styles.friendQrTokenTitleNeo]}>
+                  {tr("好友二维码内容", "Friend QR payload")}
+                </Text>
+                <Text selectable style={[styles.friendQrTokenValue, isNeo && styles.friendQrTokenValueNeo]}>
+                  {myQrToken}
+                </Text>
+                <Text style={[styles.friendQrTokenHint, isNeo && styles.friendQrTokenHintNeo]}>
+                  {tr("有效期至：", "Expires at: ")}
+                  {myQrExpiresAt || "-"}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.neoIdentityCard}>
@@ -792,6 +872,42 @@ export default function ConfigScreen() {
               </>
             )}
           </Pressable>
+          <View style={styles.friendQrActionsRow}>
+            <Pressable
+              style={[styles.friendQrBtn, styles.friendQrBtnPrimary]}
+              onPress={handleGenerateMyQr}
+              disabled={generatingMyQr}
+            >
+              {generatingMyQr ? (
+                <ActivityIndicator size="small" color="#0b1220" />
+              ) : (
+                <Ionicons name="qr-code-outline" size={15} color="#0b1220" />
+              )}
+              <Text style={[styles.friendQrBtnText, styles.friendQrBtnTextPrimary]}>
+                {tr("我的二维码", "My QR")}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.friendQrBtn, !myQrToken && styles.friendQrBtnDisabled]}
+              onPress={handleShareMyQr}
+              disabled={!myQrToken}
+            >
+              <Ionicons name="share-social-outline" size={15} color="#dbeafe" />
+              <Text style={styles.friendQrBtnText}>{tr("分享", "Share")}</Text>
+            </Pressable>
+          </View>
+          {myQrToken ? (
+            <View style={styles.friendQrTokenCard}>
+              <Text style={styles.friendQrTokenTitle}>{tr("好友二维码内容", "Friend QR payload")}</Text>
+              <Text selectable style={styles.friendQrTokenValue}>
+                {myQrToken}
+              </Text>
+              <Text style={styles.friendQrTokenHint}>
+                {tr("有效期至：", "Expires at: ")}
+                {myQrExpiresAt || "-"}
+              </Text>
+            </View>
+          ) : null}
           <Pressable style={styles.signOutBtn} onPress={handleSignOut}>
             <Ionicons name="log-out-outline" size={16} color="#b91c1c" />
             <Text style={styles.signOutBtnText}>{tr("退出登录", "Sign Out")}</Text>
@@ -1491,6 +1607,76 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 13,
     fontWeight: "700",
+  },
+  friendQrActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  friendQrBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.45)",
+    backgroundColor: "rgba(30,58,138,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  friendQrBtnPrimary: {
+    borderColor: "rgba(191,219,254,0.72)",
+    backgroundColor: "rgba(226,232,240,0.95)",
+  },
+  friendQrBtnDisabled: {
+    opacity: 0.55,
+  },
+  friendQrBtnText: {
+    color: "#dbeafe",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  friendQrBtnTextPrimary: {
+    color: "#0b1220",
+  },
+  friendQrTokenCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.3)",
+    backgroundColor: "rgba(30,64,175,0.14)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  friendQrTokenCardNeo: {
+    borderColor: "rgba(96,165,250,0.42)",
+    backgroundColor: "rgba(30,58,138,0.32)",
+  },
+  friendQrTokenTitle: {
+    color: "#1d4ed8",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  friendQrTokenTitleNeo: {
+    color: "#bfdbfe",
+  },
+  friendQrTokenValue: {
+    color: "#0f172a",
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "700",
+  },
+  friendQrTokenValueNeo: {
+    color: "#e2e8f0",
+  },
+  friendQrTokenHint: {
+    color: "#334155",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  friendQrTokenHintNeo: {
+    color: "rgba(191,219,254,0.9)",
   },
   signOutBtn: {
     minHeight: 40,
