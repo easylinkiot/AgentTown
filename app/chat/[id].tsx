@@ -36,6 +36,7 @@ import {
   MessageProps,
   SystemMessageProps,
 } from "react-native-gifted-chat";
+import Svg, { Path, Rect } from "react-native-svg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -54,6 +55,10 @@ import {
   type DiscoverUser,
 } from "@/src/lib/api";
 import {
+  assistCandidateSelectionKey,
+  buildTaskItemFromCandidate,
+} from "@/src/features/chat/ask-ai-helpers";
+import {
   runChatAssist,
   runChatCompletions,
   type AssistCandidate,
@@ -68,7 +73,6 @@ import {
   ChatThread,
   ConversationMessage,
   Friend,
-  TaskItem,
   ThreadDisplayLanguage,
   ThreadMember,
 } from "@/src/types";
@@ -113,6 +117,10 @@ type CameraCapturedPayload = {
   fileSize?: number;
   capturedAt?: number;
 };
+type TaskNavIconProps = {
+  color?: string;
+  size?: number;
+};
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -142,6 +150,17 @@ const THREAD_LANGUAGE_OPTIONS: { key: ThreadDisplayLanguage; label: string }[] =
   { key: "de", label: "De" },
 ];
 const GROUP_REPLY_MODE_STORAGE_PREFIX = "agenttown.group.reply.mode";
+
+function TaskNavIcon({ color = "rgba(226,232,240,0.92)", size = 16 }: TaskNavIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke={color} strokeWidth={1.8} />
+      <Path d="M8 9.5H16" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Path d="M8 13.5H12.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Path d="M15.2 15.6L16.8 17.2L19.8 14.2" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
 
 function isGroupReplyMode(value: unknown): value is GroupReplyMode {
   return value === "all" || value === "mention";
@@ -263,30 +282,6 @@ function extractSessionIdFromSSEPayload(payload: unknown) {
   if (snake) return snake;
   const camel = typeof row.sessionId === "string" ? row.sessionId.trim() : "";
   return camel;
-}
-
-function assistCandidateSelectionKey(candidate: AssistCandidate, index: number) {
-  const id = (candidate.id || "").trim();
-  return `${id || "candidate"}_${index}`;
-}
-
-function normalizeTaskPriority(priority?: string): TaskItem["priority"] {
-  const raw = (priority || "").trim().toLowerCase();
-  if (!raw) return "Medium";
-  if (raw.includes("high") || raw.includes("urgent") || raw.includes("p0") || raw.includes("p1")) return "High";
-  if (raw.includes("low") || raw.includes("p3") || raw.includes("p4")) return "Low";
-  return "Medium";
-}
-
-function buildTaskTitleFromCandidate(candidate: AssistCandidate, index: number) {
-  const title = (candidate.title || "").trim();
-  if (title) return title;
-  const firstLine = (candidate.text || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-  if (firstLine) return firstLine.slice(0, 120);
-  return `Task ${index + 1}`;
 }
 
 function isMyBotChatThreadId(threadId: string) {
@@ -2309,15 +2304,13 @@ export default function ChatDetailScreen() {
     setAskAIError(null);
     try {
       const requests = selectedTaskCandidates.map(({ candidate, index }) => {
-        const payload: TaskItem = {
-          title: buildTaskTitleFromCandidate(candidate, index),
+        const payload = buildTaskItemFromCandidate(candidate, index, {
           assignee,
-          priority: normalizeTaskPriority(candidate.priority),
-          status: "Pending",
-          owner: assignee,
+          targetType: (thread.targetType || "").trim() || (thread.isGroup ? "group" : "user"),
+          targetId: (thread.targetId || "").trim() || chatId || "root",
           sourceThreadId: chatId || undefined,
           sourceMessageId,
-        };
+        });
         return createTaskApi(payload);
       });
 
@@ -2359,6 +2352,9 @@ export default function ChatDetailScreen() {
     isTaskCandidateMode,
     refreshAll,
     selectedTaskCandidates,
+    thread.isGroup,
+    thread.targetId,
+    thread.targetType,
     tr,
     user?.displayName,
     user?.email,
@@ -2924,6 +2920,36 @@ export default function ChatDetailScreen() {
                   <Ionicons name="person-add-outline" size={16} color="rgba(226,232,240,0.92)" />
                 </Pressable>
               ) : null}
+              <Pressable
+                testID="chat-task-nav-button"
+                style={styles.headerIcon}
+                onPress={() => {
+                  const routeTargetType = ((thread.targetType || "").trim() || (thread.isGroup ? "group" : "user")).toLowerCase();
+                  const routeFriendUserId = (linkedFriend?.userId || "").trim();
+                  const routeRawTargetId = (thread.targetId || "").trim();
+                  const routeTargetId =
+                    routeTargetType === "user"
+                      ? routeFriendUserId || routeRawTargetId
+                      : routeRawTargetId || chatId;
+                  const routeChatUserId =
+                    routeTargetType === "user"
+                      ? routeFriendUserId
+                      : "";
+                  return router.push({
+                    pathname: "/chat/tasks",
+                    params: {
+                      threadId: chatId,
+                      threadName: thread.name || "",
+                      sourceSessionId: chatId,
+                      targetType: routeTargetType,
+                      targetId: routeTargetId,
+                      chatUserId: routeChatUserId,
+                    },
+                  } as never);
+                }}
+              >
+                <TaskNavIcon />
+              </Pressable>
               <Pressable style={styles.headerIcon} onPress={() => setThreadMenuModal(true)}>
                 <Ionicons name="ellipsis-horizontal" size={16} color="rgba(226,232,240,0.92)" />
               </Pressable>

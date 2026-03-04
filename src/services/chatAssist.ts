@@ -118,7 +118,7 @@ const CHAT_ASSIST_CUSTOM_EVENTS: ChatAssistSSEEventName[] = [
   "output_text.done",
 ];
 
-function getApiBaseUrl() {
+export function getApiBaseUrl() {
   const raw = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL;
   const trimmed = raw.replace(/\/+$/, "");
   if (Platform.OS !== "android") return trimmed;

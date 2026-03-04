@@ -75,6 +75,14 @@ export interface CreateTaskFromMessageInput {
   dueAt?: string;
 }
 
+export interface CreateTaskInput extends TaskItem {
+  description?: string;
+  target_type?: string;
+  target_id?: string;
+  targetType?: string;
+  targetId?: string;
+}
+
 export interface ThreadDisplayLanguagePreferenceResponse {
   thread_id: string;
   language: ThreadDisplayLanguage;
@@ -637,7 +645,7 @@ export async function listTasks() {
   return apiFetch<TaskItem[]>("/v1/tasks");
 }
 
-export async function createTask(payload: TaskItem) {
+export async function createTask(payload: CreateTaskInput) {
   return apiFetch<TaskItem>("/v1/tasks", {
     method: "POST",
     body: JSON.stringify(payload),

@@ -51,6 +51,7 @@ function RootStack() {
       <Stack.Screen name="forgot-password" options={{ animation: "fade" }} />
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="chat/tasks" />
       <Stack.Screen
         name="chat/media-picker"
         options={{
