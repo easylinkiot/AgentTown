@@ -27,14 +27,12 @@ import {
   acceptFriendRequest,
   ApiError,
   atCreateSession,
-  createFriendQR,
   discoverUsers,
   formatApiError,
   listFriendRequests,
   mapATSessionToThread,
   rejectFriendRequest,
   scanFriendQR,
-  type DiscoverUser,
 } from "@/src/lib/api";
 import { isMyBotThreadId, useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -111,18 +109,12 @@ export default function HomeScreen() {
   const [uiError, setUiError] = useState<string | null>(null);
 
   const [friendQuery, setFriendQuery] = useState("");
-  const [friendCandidates, setFriendCandidates] = useState<DiscoverUser[]>([]);
-  const [loadingCandidates, setLoadingCandidates] = useState(false);
-  const [addingUserId, setAddingUserId] = useState<string | null>(null);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
-  const [pendingInviteByUserId, setPendingInviteByUserId] = useState<Record<string, true>>({});
-  const [qrToken, setQrToken] = useState("");
-  const [qrExpiresAt, setQrExpiresAt] = useState("");
   const [scanToken, setScanToken] = useState("");
-  const [loadingQRCreate, setLoadingQRCreate] = useState(false);
-  const [loadingQRScan, setLoadingQRScan] = useState(false);
+  const [friendActionBusy, setFriendActionBusy] = useState(false);
+  const [friendActionStatus, setFriendActionStatus] = useState<string | null>(null);
 
   const [groupName, setGroupName] = useState("");
   const [groupAvatar, setGroupAvatar] = useState("");
@@ -252,51 +244,12 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!friendModal) return;
     let cancelled = false;
-
-    const run = async () => {
-      setLoadingCandidates(true);
-      try {
-        const list = await discoverUsers(friendQuery.trim());
-        if (!cancelled) {
-          setFriendCandidates(Array.isArray(list) ? list : []);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setFriendCandidates([]);
-          setUiError(formatApiError(err));
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingCandidates(false);
-        }
-      }
-    };
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [friendModal, friendQuery]);
-
-  useEffect(() => {
-    if (!friendModal) return;
-    let cancelled = false;
     const run = async () => {
       setLoadingRequests(true);
       try {
         const list = await listFriendRequests();
         if (!cancelled) {
           const actorUserID = (user?.id || "").trim();
-          const outgoingPending: Record<string, true> = {};
-          if (Array.isArray(list)) {
-            for (const req of list) {
-              if ((req.status || "").trim() !== "pending") continue;
-              if ((req.fromUserId || "").trim() !== actorUserID) continue;
-              const toUserID = (req.toUserId || "").trim();
-              if (!toUserID) continue;
-              outgoingPending[toUserID] = true;
-            }
-          }
           const incoming = Array.isArray(list)
             ? list.filter(
                 (req) =>
@@ -305,12 +258,10 @@ export default function HomeScreen() {
               )
             : [];
           setFriendRequests(incoming);
-          setPendingInviteByUserId((prev) => ({ ...prev, ...outgoingPending }));
         }
       } catch (err) {
         if (!cancelled) {
           setFriendRequests([]);
-          setPendingInviteByUserId({});
           setUiError(formatApiError(err));
         }
       } finally {
@@ -327,7 +278,10 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (!friendModal) {
-      setPendingInviteByUserId({});
+      setFriendQuery("");
+      setScanToken("");
+      setFriendActionStatus(null);
+      setFriendActionBusy(false);
     }
   }, [friendModal]);
 
@@ -441,62 +395,77 @@ export default function HomeScreen() {
     [friends, openEntityConfig]
   );
 
-  const handleCreateFriend = async (candidate: DiscoverUser) => {
-    const candidateID = (candidate?.id || "").trim();
-    if (!candidateID || addingUserId) return;
-    if (pendingInviteByUserId[candidateID]) return;
+  const handleAddFriendByAccount = async () => {
+    const query = friendQuery.trim();
+    if (!query || friendActionBusy) return;
     setUiError(null);
-    setAddingUserId(candidateID);
+    setFriendActionBusy(true);
+    setFriendActionStatus(null);
 
     try {
+      const list = await discoverUsers(query);
+      const actorUserID = (user?.id || "").trim();
+      const linkedFriendUserIDs = new Set(
+        friends
+          .map((item) => (item.userId || "").trim())
+          .filter((item) => item.length > 0)
+      );
+      const matches = (Array.isArray(list) ? list : []).filter((candidate) => {
+        const candidateID = (candidate.id || "").trim();
+        if (!candidateID) return false;
+        if (candidateID === actorUserID) return false;
+        if (linkedFriendUserIDs.has(candidateID)) return false;
+        return true;
+      });
+      if (matches.length === 0) {
+        setFriendActionStatus(
+          tr(
+            "未找到可添加的用户，请输入更准确的邮箱或请好友分享二维码。",
+            "No matching user found. Enter a precise email or ask your friend for a QR payload."
+          )
+        );
+        return;
+      }
+      if (matches.length > 1) {
+        setFriendActionStatus(
+          tr(
+            "匹配到多个用户，请输入更完整的邮箱，或直接使用好友二维码。",
+            "Multiple users matched. Enter a more precise email, or use your friend's QR payload."
+          )
+        );
+        return;
+      }
+
+      const candidate = matches[0];
+      const candidateID = (candidate?.id || "").trim();
+      if (!candidateID) return;
       const created = await createFriend({
         userId: candidateID,
         name: candidate.displayName,
         kind: "human",
       });
-      if (created) {
-        setPendingInviteByUserId((prev) => {
-          if (!(candidateID in prev)) return prev;
-          const next = { ...prev };
-          delete next[candidateID];
-          return next;
-        });
-        setFriendQuery("");
-        const list = await discoverUsers("");
-        setFriendCandidates(Array.isArray(list) ? list : []);
-      } else {
-        setPendingInviteByUserId((prev) => ({
-          ...prev,
-          [candidateID]: true,
-        }));
-        Alert.alert(
-          tr("邀请已发送", "Invite sent"),
-          tr(
-            "已发送好友邀请，等待对方接受后会出现在好友列表。",
-            "Friend request sent. It will appear in your friends list after they accept."
-          )
-        );
-      }
+      await refreshAll();
+      setFriendQuery("");
+      setFriendActionStatus(
+        created
+          ? tr("添加成功，已进入好友列表。", "Friend added successfully.")
+          : tr("邀请已发送，等待对方接受。", "Invite sent. Waiting for acceptance.")
+      );
     } catch (err) {
       const pendingCode = err instanceof ApiError ? (err.code || "").toLowerCase() : "";
       const pendingMsg = err instanceof ApiError ? (err.message || "").toLowerCase() : "";
       if (pendingCode.includes("request_pending") || pendingMsg.includes("already pending")) {
-        setPendingInviteByUserId((prev) => ({
-          ...prev,
-          [candidateID]: true,
-        }));
-        Alert.alert(
-          tr("邀请已发送", "Invite sent"),
+        setFriendActionStatus(
           tr(
-            "该好友邀请已在等待处理中，需对方接受后才会出现在好友列表。",
-            "This friend request is already pending. It will appear after the other user accepts."
+            "邀请已发送，等待对方接受后会出现在好友列表。",
+            "Invite already pending. It will appear after acceptance."
           )
         );
       } else {
         setUiError(formatApiError(err));
       }
     } finally {
-      setAddingUserId(null);
+      setFriendActionBusy(false);
     }
   };
 
@@ -529,37 +498,50 @@ export default function HomeScreen() {
     }
   };
 
-  const handleCreateMyQR = async () => {
-    if (loadingQRCreate) return;
+  const handleScanByToken = async () => {
+    const token = scanToken.trim();
+    if (!token || friendActionBusy) return;
     setUiError(null);
-    setLoadingQRCreate(true);
+    setFriendActionBusy(true);
+    setFriendActionStatus(null);
     try {
-      const result = await createFriendQR();
-      setQrToken(result.token || "");
-      setQrExpiresAt(result.expiresAt || "");
+      const created = await scanFriendQR({ token });
+      await refreshAll();
+      setScanToken("");
+      setFriendActionStatus(
+        created?.mode === "friend"
+          ? tr("二维码添加成功，已进入好友列表。", "Friend added from QR successfully.")
+          : tr("二维码已提交，等待对方接受。", "QR invite sent. Waiting for acceptance.")
+      );
     } catch (err) {
-      setUiError(formatApiError(err));
+      const pendingCode = err instanceof ApiError ? (err.code || "").toLowerCase() : "";
+      const pendingMsg = err instanceof ApiError ? (err.message || "").toLowerCase() : "";
+      if (pendingCode.includes("request_pending") || pendingMsg.includes("already pending")) {
+        setFriendActionStatus(
+          tr(
+            "邀请已发送，等待对方接受后会出现在好友列表。",
+            "Invite already pending. It will appear after acceptance."
+          )
+        );
+      } else {
+        setUiError(formatApiError(err));
+      }
     } finally {
-      setLoadingQRCreate(false);
+      setFriendActionBusy(false);
     }
   };
 
-  const handleScanByToken = async () => {
-    const token = scanToken.trim();
-    if (!token || loadingQRScan) return;
-    setUiError(null);
-    setLoadingQRScan(true);
-    try {
-      await scanFriendQR({ token });
-      setScanToken("");
-      const list = await discoverUsers(friendQuery.trim());
-      setFriendCandidates(Array.isArray(list) ? list : []);
-    } catch (err) {
-      setUiError(formatApiError(err));
-    } finally {
-      setLoadingQRScan(false);
+  const handleConfirmFriendAction = async () => {
+    if (friendActionBusy) return;
+    if (scanToken.trim()) {
+      await handleScanByToken();
+      return;
     }
+    await handleAddFriendByAccount();
   };
+
+  const canConfirmFriendAction =
+    (friendQuery.trim().length > 0 || scanToken.trim().length > 0) && !friendActionBusy;
 
   const handleCreateGroup = async () => {
     const safeName = groupName.trim();
@@ -833,36 +815,16 @@ export default function HomeScreen() {
               <TextInput
                 value={friendQuery}
                 onChangeText={setFriendQuery}
-                placeholder={tr("搜索系统账户（名字或邮箱）", "Search account by name or email")}
+                placeholder={tr("输入好友邮箱或账号标识", "Enter your friend's email or account")}
                 placeholderTextColor="rgba(148,163,184,0.9)"
                 style={styles.input}
               />
-
-              <View style={styles.qrActions}>
-                <Pressable
-                  style={styles.qrActionBtn}
-                  disabled={loadingQRCreate}
-                  onPress={handleCreateMyQR}
-                >
-                  <Ionicons name="qr-code-outline" size={14} color="#bfdbfe" />
-                  <Text style={styles.qrActionText}>
-                    {loadingQRCreate ? tr("生成中...", "Generating...") : tr("我的二维码", "My QR")}
-                  </Text>
-                </Pressable>
-              </View>
-
-              {qrToken ? (
-                <View style={styles.qrTokenCard}>
-                  <Text style={styles.qrTokenTitle}>{tr("扫码内容", "QR payload")}</Text>
-                  <Text selectable style={styles.qrTokenValue}>
-                    {qrToken}
-                  </Text>
-                  <Text style={styles.qrTokenHint}>
-                    {tr("有效期至：", "Expires at: ")}
-                    {qrExpiresAt || "-"}
-                  </Text>
-                </View>
-              ) : null}
+              <Text style={styles.friendHelpText}>
+                {tr(
+                  "可直接输入好友账号，或粘贴好友分享的二维码内容。",
+                  "Enter your friend's account, or paste a QR payload shared by your friend."
+                )}
+              </Text>
 
               <View style={styles.qrScanRow}>
                 <TextInput
@@ -872,18 +834,14 @@ export default function HomeScreen() {
                   placeholderTextColor="rgba(148,163,184,0.9)"
                   style={[styles.input, styles.qrScanInput]}
                 />
-                <Pressable
-                  style={styles.qrScanBtn}
-                  disabled={!scanToken.trim() || loadingQRScan}
-                  onPress={handleScanByToken}
-                >
-                  <Text style={styles.qrScanBtnText}>
-                    {loadingQRScan ? tr("提交中...", "Sending...") : tr("扫一扫", "Scan")}
-                  </Text>
-                </Pressable>
               </View>
 
               <View style={styles.candidateList}>
+                {friendActionStatus ? (
+                  <View style={styles.friendStatusCard}>
+                    <Text style={styles.friendStatusText}>{friendActionStatus}</Text>
+                  </View>
+                ) : null}
                 {loadingRequests ? (
                   <View style={styles.candidateLoading}>
                     <ActivityIndicator color="#93c5fd" />
@@ -943,62 +901,9 @@ export default function HomeScreen() {
                       </View>
                     ))}
                   </View>
-                ) : null}
-
-                {loadingCandidates ? (
-                  <View style={styles.candidateLoading}>
-                    <ActivityIndicator color="#93c5fd" />
-                  </View>
-                ) : friendCandidates.length ? (
-                  <ScrollView showsVerticalScrollIndicator={false}>
-                    {friendCandidates.map((candidate) => {
-                      const candidateID = (candidate.id || "").trim();
-                      if (!candidateID) return null;
-                      const isPendingInvite = Boolean(pendingInviteByUserId[candidateID]);
-                      return (
-                        <Pressable
-                          key={candidateID}
-                          style={styles.candidateItem}
-                          disabled={Boolean(addingUserId) || isPendingInvite}
-                          onPress={() => handleCreateFriend(candidate)}
-                        >
-                          <Pressable
-                            onPress={(e) => {
-                              e.stopPropagation?.();
-                              openEntityConfig({
-                                entityType: "human",
-                                entityId: candidateID,
-                                name: candidate.displayName,
-                                avatar: candidate.avatar,
-                              });
-                            }}
-                          >
-                            <Image source={{ uri: candidate.avatar }} style={styles.candidateAvatar} />
-                          </Pressable>
-                          <View style={styles.candidateBody}>
-                            <Text numberOfLines={1} style={styles.candidateName}>
-                              {candidate.displayName}
-                            </Text>
-                            <Text numberOfLines={1} style={styles.candidateMeta}>
-                              {isPendingInvite
-                                ? tr("邀请已发送，等待对方接受", "Invite sent, waiting for acceptance")
-                                : candidate.email || candidate.provider}
-                            </Text>
-                          </View>
-                          <Text style={[styles.candidateAction, isPendingInvite && styles.candidateActionPending]}>
-                            {addingUserId === candidateID
-                              ? tr("添加中...", "Adding...")
-                              : isPendingInvite
-                                ? tr("待接受", "Pending")
-                                : tr("添加", "Add")}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
                 ) : (
                   <Text style={styles.candidateEmpty}>
-                    {tr("没有可添加的系统账户。请先让对方注册登录。", "No discoverable accounts. Ask your friend to sign up first.")}
+                    {tr("暂无新的好友邀请。", "No incoming friend invites.")}
                   </Text>
                 )}
               </View>
@@ -1006,6 +911,15 @@ export default function HomeScreen() {
               <View style={styles.formFooter}>
                 <Pressable style={styles.formGhost} onPress={() => setFriendModal(false)}>
                   <Text style={styles.formGhostText}>{tr("取消", "Cancel")}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.formCta, !canConfirmFriendAction && styles.formCtaDisabled]}
+                  disabled={!canConfirmFriendAction}
+                  onPress={handleConfirmFriendAction}
+                >
+                  <Text style={styles.formCtaText}>
+                    {friendActionBusy ? tr("处理中...", "Working...") : tr("确认添加", "Confirm")}
+                  </Text>
                 </Pressable>
               </View>
             </Pressable>
@@ -1403,6 +1317,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 13,
   },
+  friendHelpText: {
+    color: "rgba(148,163,184,0.92)",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    paddingHorizontal: 4,
+  },
   candidateList: {
     minHeight: 180,
     maxHeight: 320,
@@ -1412,51 +1333,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.03)",
     padding: 8,
   },
-  qrActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  qrActionBtn: {
-    minHeight: 36,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.35)",
-    backgroundColor: "rgba(30,64,175,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 12,
-  },
-  qrActionText: {
-    color: "#dbeafe",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  qrTokenCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.25)",
-    backgroundColor: "rgba(15,23,42,0.5)",
-    padding: 10,
-    gap: 6,
-  },
-  qrTokenTitle: {
-    color: "rgba(191,219,254,0.95)",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  qrTokenValue: {
-    color: "rgba(226,232,240,0.92)",
-    fontSize: 11,
-    fontWeight: "700",
-    lineHeight: 16,
-  },
-  qrTokenHint: {
-    color: "rgba(148,163,184,0.9)",
-    fontSize: 10,
-    fontWeight: "700",
-  },
   qrScanRow: {
     flexDirection: "row",
     gap: 8,
@@ -1465,37 +1341,25 @@ const styles = StyleSheet.create({
   qrScanInput: {
     flex: 1,
   },
-  qrScanBtn: {
-    minHeight: 40,
-    borderRadius: 12,
+  friendStatusCard: {
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.35)",
-    backgroundColor: "rgba(30,64,175,0.22)",
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: "rgba(96,165,250,0.3)",
+    backgroundColor: "rgba(30,64,175,0.2)",
     paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
   },
-  qrScanBtnText: {
-    color: "#dbeafe",
+  friendStatusText: {
+    color: "rgba(219,234,254,0.96)",
     fontSize: 12,
-    fontWeight: "900",
+    fontWeight: "700",
+    lineHeight: 17,
   },
   candidateLoading: {
     minHeight: 120,
     alignItems: "center",
     justifyContent: "center",
-  },
-  candidateItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.05)",
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    marginBottom: 8,
   },
   candidateAvatar: {
     width: 34,
@@ -1516,14 +1380,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     marginTop: 2,
-  },
-  candidateAction: {
-    color: "#bfdbfe",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  candidateActionPending: {
-    color: "rgba(148,163,184,0.95)",
   },
   candidateEmpty: {
     color: "rgba(148,163,184,0.92)",
