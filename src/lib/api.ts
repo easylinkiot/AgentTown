@@ -46,6 +46,8 @@ export interface AuthPasswordResetCompleteResponse {
 export interface SendThreadMessageInput {
   content: string;
   type?: string;
+  voiceDuration?: string;
+  replyContext?: string;
   imageUri?: string;
   imageName?: string;
   senderId?: string;
@@ -62,6 +64,21 @@ export interface SendThreadMessageOutput {
   userMessage: ConversationMessage;
   aiMessage?: ConversationMessage;
   messages: ConversationMessage[];
+}
+
+export interface UploadV2FileInput {
+  uri: string;
+  name?: string;
+  mimeType?: string;
+}
+
+export interface UploadV2FileOutput {
+  id?: string;
+  url?: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  raw: unknown;
 }
 
 export interface CreateTaskFromMessageInput {
@@ -416,6 +433,11 @@ function coerceString(value: unknown) {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
 
 function coerceNumber(value: unknown) {
@@ -1012,13 +1034,217 @@ export async function listThreadMessages(
 }
 
 export async function sendThreadMessage(threadId: string, payload: SendThreadMessageInput) {
+  const requestBody: {
+    content: string;
+    type?: string;
+    voiceDuration?: string;
+    replyContext?: string;
+    imageUri?: string;
+    imageName?: string;
+  } = {
+    content: payload.content,
+  };
+  if (payload.type?.trim()) requestBody.type = payload.type;
+  if (payload.voiceDuration?.trim()) requestBody.voiceDuration = payload.voiceDuration;
+  if (payload.replyContext?.trim()) requestBody.replyContext = payload.replyContext;
+  if (payload.imageUri?.trim()) requestBody.imageUri = payload.imageUri;
+  if (payload.imageName?.trim()) requestBody.imageName = payload.imageName;
+
   return apiFetch<SendThreadMessageOutput>(
     `/v1/chat/threads/${encodeURIComponent(threadId)}/messages`,
     {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestBody),
     }
   );
+}
+
+export async function uploadFileV2(input: UploadV2FileInput): Promise<UploadV2FileOutput> {
+  const uri = (input.uri || "").trim();
+  if (!uri) {
+    throw new Error("File uri is required.");
+  }
+
+  const filename = (input.name || "").trim() || `upload_${Date.now()}`;
+  const mimeType = (input.mimeType || "").trim() || "application/octet-stream";
+  const path = "/v2/files/upload";
+  const base = getApiBaseUrl();
+
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+  const parseUploadPayload = (payload: unknown): UploadV2FileOutput => {
+    const root = asRecord(payload) || {};
+    const nestedCandidates = [
+      asRecord(root.data),
+      asRecord(root.file),
+      asRecord(root.result),
+      asRecord(root.payload),
+      asRecord(root.document),
+    ].filter((item): item is Record<string, unknown> => Boolean(item));
+    const parseKeys = (obj: Record<string, unknown>) => ({
+      id:
+        coerceString(obj.id) ||
+        coerceString(obj.file_id) ||
+        coerceString(obj.fileId) ||
+        coerceString(obj.object_key) ||
+        coerceString(obj.objectKey),
+      url:
+        coerceString(obj.url) ||
+        coerceString(obj.file_url) ||
+        coerceString(obj.fileUrl) ||
+        coerceString(obj.download_url) ||
+        coerceString(obj.downloadUrl) ||
+        coerceString(obj.cdn_url) ||
+        coerceString(obj.cdnUrl) ||
+        coerceString(obj.signed_url) ||
+        coerceString(obj.signedUrl) ||
+        coerceString(obj.public_url) ||
+        coerceString(obj.publicUrl) ||
+        coerceString(obj.path) ||
+        coerceString(obj.uri),
+      name:
+        coerceString(obj.name) ||
+        coerceString(obj.filename) ||
+        coerceString(obj.file_name) ||
+        coerceString(obj.fileName) ||
+        coerceString(obj.original_name) ||
+        coerceString(obj.originalName),
+      mimeType:
+        coerceString(obj.mime_type) ||
+        coerceString(obj.mimeType) ||
+        coerceString(obj.content_type) ||
+        coerceString(obj.contentType),
+      size: coerceNumber(obj.size) || coerceNumber(obj.file_size) || coerceNumber(obj.fileSize),
+    });
+    const resolved = nestedCandidates
+      .map(parseKeys)
+      .find((candidate) => candidate.id || candidate.url || candidate.name) || parseKeys(root);
+    return {
+      id: resolved.id,
+      url: resolved.url,
+      name: resolved.name || filename,
+      mimeType: resolved.mimeType || mimeType,
+      size: resolved.size,
+      raw: payload,
+    };
+  };
+
+  const fieldNames = ["file", "files", "upload"] as const;
+  let lastError: unknown = null;
+  for (const fieldName of fieldNames) {
+    const form = new FormData();
+    form.append(fieldName, {
+      uri,
+      name: filename,
+      type: mimeType,
+    } as any);
+    form.append("filename", filename);
+
+    const response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers,
+      body: form,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      const parsed = parseApiErrorBody(text);
+      const bodyError = parsed?.error;
+      const code = coerceString(bodyError?.code) || coerceString(parsed?.code);
+      const canonicalMessage =
+        coerceString(bodyError?.message) ||
+        coerceString(parsed?.message) ||
+        sanitizeRawErrorText(text) ||
+        `API request failed (${fieldName})`;
+      const requestId =
+        coerceString(bodyError?.requestId) ||
+        coerceString(parsed?.requestId) ||
+        coerceString(response.headers.get("x-request-id")) ||
+        coerceString(response.headers.get("x-correlation-id"));
+      const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+      const details = bodyError?.details ?? parsed?.details;
+
+      lastError = new ApiError({
+        status: response.status,
+        method: "POST",
+        path,
+        baseUrl: base,
+        code,
+        details,
+        requestId,
+        retryAfterSeconds,
+        message: canonicalMessage,
+      });
+      continue;
+    }
+
+    const rawText = response.status === 204 ? "" : await response.text();
+    let payload: unknown = {};
+    if (rawText) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch {
+        payload = { url: rawText };
+      }
+    }
+    return parseUploadPayload(payload);
+  }
+
+  if (lastError instanceof ApiError && /file is required/i.test(lastError.message) && Platform.OS !== "web") {
+    try {
+      const legacyFs = await import("expo-file-system/legacy");
+      const uploadType = (legacyFs as any).FileSystemUploadType?.MULTIPART;
+      const legacyResponse = await (legacyFs as any).uploadAsync(`${base}${path}`, uri, {
+        httpMethod: "POST",
+        uploadType,
+        fieldName: "file",
+        mimeType,
+        headers,
+      });
+
+      if (!legacyResponse || typeof legacyResponse.status !== "number") {
+        throw new Error("Legacy upload returned invalid response.");
+      }
+      if (legacyResponse.status < 200 || legacyResponse.status >= 300) {
+        const text = `${legacyResponse.body || ""}`;
+        const parsed = parseApiErrorBody(text);
+        const bodyError = parsed?.error;
+        const code = coerceString(bodyError?.code) || coerceString(parsed?.code);
+        const canonicalMessage =
+          coerceString(bodyError?.message) ||
+          coerceString(parsed?.message) ||
+          sanitizeRawErrorText(text) ||
+          "API request failed (legacy upload)";
+        throw new ApiError({
+          status: legacyResponse.status,
+          method: "POST",
+          path,
+          baseUrl: base,
+          code,
+          details: bodyError?.details ?? parsed?.details,
+          message: canonicalMessage,
+        });
+      }
+
+      let payload: unknown = {};
+      const bodyText = `${legacyResponse.body || ""}`.trim();
+      if (bodyText) {
+        try {
+          payload = JSON.parse(bodyText);
+        } catch {
+          payload = { url: bodyText };
+        }
+      }
+      return parseUploadPayload(payload);
+    } catch (legacyErr) {
+      lastError = legacyErr;
+    }
+  }
+
+  if (lastError) throw lastError;
+  throw new Error("File upload failed.");
 }
 
 export async function generateRoleReplies(threadId: string, payload: RoleRepliesInput) {

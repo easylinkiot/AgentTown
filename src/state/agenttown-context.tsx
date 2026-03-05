@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
+import * as LegacyFileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 
@@ -223,9 +224,9 @@ async function ensureCacheDir() {
   const dir = cacheDir();
   if (!dir) return null;
   try {
-    const info = await FileSystem.getInfoAsync(dir);
+    const info = await LegacyFileSystem.getInfoAsync(dir);
     if (!info.exists) {
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      await LegacyFileSystem.makeDirectoryAsync(dir, { intermediates: true });
     }
   } catch {
     // ignore
@@ -243,9 +244,9 @@ async function readThreadCache(userId: string, threadId: string): Promise<Conver
   try {
     const path = cachePath(userId, threadId);
     if (!path) return null;
-    const info = await FileSystem.getInfoAsync(path);
+    const info = await LegacyFileSystem.getInfoAsync(path);
     if (!info.exists) return null;
-    const raw = await FileSystem.readAsStringAsync(path);
+    const raw = await LegacyFileSystem.readAsStringAsync(path);
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return null;
     return parsed as ConversationMessage[];
@@ -260,7 +261,7 @@ async function writeThreadCache(userId: string, threadId: string, messages: Conv
     const path = cachePath(userId, threadId);
     if (!dir || !path) return;
     const next = messages.length > MESSAGE_CACHE_LIMIT ? messages.slice(-MESSAGE_CACHE_LIMIT) : messages;
-    await FileSystem.writeAsStringAsync(path, JSON.stringify(next));
+    await LegacyFileSystem.writeAsStringAsync(path, JSON.stringify(next));
   } catch {
     // ignore
   }

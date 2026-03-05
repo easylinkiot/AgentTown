@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { DrawerActions, useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -36,10 +38,8 @@ import {
   MessageProps,
   SystemMessageProps,
 } from "react-native-gifted-chat";
-import Svg, { Path, Rect } from "react-native-svg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { DrawerActions, useNavigation } from "@react-navigation/native";
+import Svg, { Path, Rect } from "react-native-svg";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
@@ -48,29 +48,30 @@ import {
   getCachedAgentSessions,
   preloadAgentSessions,
 } from "@/src/features/chat/agent-sessions-cache";
+import {
+  assistCandidateSelectionKey,
+  buildTaskItemFromCandidate,
+} from "@/src/features/chat/ask-ai-helpers";
 import { tx } from "@/src/i18n/translate";
 import {
   agentChat as agentChatApi,
   aiText,
   createTask as createTaskApi,
+  type DiscoverUser,
   discoverUsers as discoverUsersApi,
   formatApiError,
   listAgents as listAgentsApi,
   listFriends as listFriendsApi,
+  uploadFileV2,
   type V2ChatSession,
-  type DiscoverUser,
 } from "@/src/lib/api";
 import {
-  assistCandidateSelectionKey,
-  buildTaskItemFromCandidate,
-} from "@/src/features/chat/ask-ai-helpers";
-import {
-  runChatAssist,
-  runChatCompletions,
   type AssistCandidate,
   type ChatAssistAction,
   type ChatAssistRequest,
   type ChatCompletionsRequest,
+  runChatAssist,
+  runChatCompletions,
 } from "@/src/services/chatAssist";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -111,14 +112,6 @@ type MediaPickerAsset = {
   thumbUri: string;
   duration?: number;
   filename?: string;
-  width?: number;
-  height?: number;
-  fileSize?: number;
-  capturedAt?: number;
-};
-type CameraCapturedPayload = {
-  uri: string;
-  type: "image";
   width?: number;
   height?: number;
   fileSize?: number;
@@ -189,6 +182,31 @@ function formatMediaDuration(totalSeconds?: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function inferMediaMimeType(asset: MediaPickerAsset) {
+  const lowerName = (asset.filename || "").trim().toLowerCase();
+  const ext = lowerName.includes(".") ? lowerName.split(".").pop() || "" : "";
+  if (asset.type === "video") {
+    if (ext === "mov") return "video/quicktime";
+    if (ext === "webm") return "video/webm";
+    if (ext === "mkv") return "video/x-matroska";
+    return "video/mp4";
+  }
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "heic" || ext === "heif") return "image/heic";
+  if (ext === "gif") return "image/gif";
+  return "image/jpeg";
+}
+
+function inferUploadFilename(asset: MediaPickerAsset, index: number) {
+  const safe = (asset.filename || "").trim();
+  if (safe) return safe;
+  const fromUri = decodeURIComponent((asset.uri || "").split("/").pop() || "").split("?")[0].trim();
+  if (fromUri && fromUri.includes(".")) return fromUri;
+  const suffix = asset.type === "video" ? "mp4" : "jpg";
+  return `${asset.type}_${Date.now()}_${index + 1}.${suffix}`;
 }
 
 function mentionMemberIDs(text: string, members: ThreadMember[]) {
@@ -621,7 +639,9 @@ export default function ChatDetailScreen() {
   const [selectedMediaIds, setSelectedMediaIds] = useState<Set<string>>(new Set());
   const mediaLoadSeqRef = useRef(0);
   const hasRequestedCameraPermissionRef = useRef(false);
+  const hasRequestedLibraryPermissionRef = useRef(false);
   const cameraCaptureInFlightRef = useRef(false);
+  const imagePickInFlightRef = useRef(false);
   const mediaSheetBottomInset = Math.max(insets.bottom, 12);
   const mediaSheetHeight = useMemo(() => {
     const maxHeight = Math.max(360, windowHeight - insets.top - 56);
@@ -638,18 +658,41 @@ export default function ChatDetailScreen() {
     () => mediaAssets.filter((asset) => selectedMediaIds.has(asset.id)),
     [mediaAssets, selectedMediaIds]
   );
-
-  const emitCameraCaptured = useCallback((asset: MediaPickerAsset) => {
-    const payload: CameraCapturedPayload = {
-      uri: asset.uri,
-      type: "image",
-      width: asset.width,
-      height: asset.height,
-      fileSize: asset.fileSize,
-      capturedAt: asset.capturedAt,
-    };
-    console.log("[chat-camera] onCaptured", payload);
-  }, []);
+  const e2eImageUri = useMemo(
+    () => Image.resolveAssetSource(require("../../assets/images/icon.png")).uri,
+    []
+  );
+  const e2eAltImageUri = useMemo(
+    () => Image.resolveAssetSource(require("../../assets/images/splash-icon.png")).uri,
+    []
+  );
+  const e2eSheetAssets = useMemo<MediaPickerAsset[]>(
+    () => [
+      {
+        id: "e2e-image-1",
+        type: "image",
+        uri: e2eImageUri,
+        thumbUri: e2eImageUri,
+        filename: "icon.png",
+      },
+      {
+        id: "e2e-video-1",
+        type: "video",
+        uri: "e2e://video-1.mp4",
+        thumbUri: e2eAltImageUri,
+        duration: 61,
+        filename: "demo.mp4",
+      },
+      {
+        id: "e2e-image-2",
+        type: "image",
+        uri: e2eAltImageUri,
+        thumbUri: e2eAltImageUri,
+        filename: "splash-icon.png",
+      },
+    ],
+    [e2eAltImageUri, e2eImageUri]
+  );
 
   const animateKeyboardValue = useCallback((value: Animated.Value, toValue: number, duration: number) => {
     Animated.timing(value, {
@@ -861,6 +904,12 @@ export default function ChatDetailScreen() {
       setMediaLoading(true);
       setMediaError(null);
       try {
+        if (isE2E) {
+          if (requestSeq !== mediaLoadSeqRef.current) return;
+          setMediaAssets(e2eSheetAssets);
+          return;
+        }
+
         let permission = await MediaLibrary.getPermissionsAsync();
         if (!permission.granted) {
           permission = await MediaLibrary.requestPermissionsAsync();
@@ -929,7 +978,7 @@ export default function ChatDetailScreen() {
         }
       }
     },
-    [tr]
+    [e2eSheetAssets, isE2E, tr]
   );
 
   const animateMediaSheet = useCallback(
@@ -1068,13 +1117,16 @@ export default function ChatDetailScreen() {
     });
   }, []);
 
-  const handleSendSelectedMedia = useCallback(async () => {
-    if (!chatId || selectedAssets.length === 0 || mediaSending) return;
+  const sendMediaWithUpload = useCallback(async (assets: MediaPickerAsset[]) => {
+    if (!chatId || assets.length === 0 || mediaSending) {
+      return { failedCount: 0, lastError: "" };
+    }
     setMediaSending(true);
 
-    const localEntries = selectedAssets.map((asset, index) => {
+    const localEntries = assets.map((asset, index) => {
       const localId = `local_media_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`;
-      const label = asset.type === "video" ? tr("[视频]", "[Video]") : tr("[图片]", "[Image]");
+      const inferredName = inferUploadFilename(asset, index);
+      const isVideo = asset.type === "video";
       const localMessage: ConversationMessage = {
         id: localId,
         threadId: chatId,
@@ -1082,10 +1134,10 @@ export default function ChatDetailScreen() {
         senderName: user?.displayName || tr("我", "Me"),
         senderAvatar: user?.avatar || botConfig.avatar,
         senderType: "human",
-        content: label,
-        type: "image",
-        imageUri: asset.uri,
-        imageName: asset.filename || `${asset.type}_${index + 1}`,
+        content: isVideo ? inferredName : tr("[图片]", "[Image]"),
+        type: isVideo ? "text" : "image",
+        imageUri: isVideo ? undefined : asset.uri,
+        imageName: isVideo ? undefined : inferredName,
         isMe: true,
         time: tr("刚刚", "Now"),
       };
@@ -1098,51 +1150,112 @@ export default function ChatDetailScreen() {
         localEntries.map((entry) => toGiftedMessage(entry.localMessage, currentUserId, Date.now()))
       )
     );
+    setUploadingMediaByMessageId((prev) => {
+      const next = { ...prev };
+      for (const entry of localEntries) {
+        next[entry.localId] = true;
+      }
+      return next;
+    });
 
     let failedCount = 0;
-    for (const entry of localEntries) {
-      const content = entry.asset.type === "video" ? tr("[视频]", "[Video]") : tr("[图片]", "[Image]");
-      const result = await sendMessage(chatId, {
-        content,
-        type: "image",
-        imageUri: entry.asset.uri,
-        imageName: entry.asset.filename || entry.asset.id,
-        senderId: user?.id,
-        senderName: user?.displayName || tr("我", "Me"),
-        senderAvatar: user?.avatar || botConfig.avatar,
-        senderType: "human",
-        isMe: true,
-        requestAI: false,
-        systemInstruction: botConfig.systemInstruction,
-      });
-      if (!result) {
+    let lastError = "";
+    for (let index = 0; index < localEntries.length; index += 1) {
+      const entry = localEntries[index];
+      try {
+        const uploadResult = entry.asset.uri.startsWith("e2e://")
+          ? {
+              id: entry.asset.id,
+              name: entry.asset.filename || inferUploadFilename(entry.asset, index),
+              url: entry.asset.uri,
+            }
+          : await uploadFileV2({
+              uri: entry.asset.uri,
+              name: inferUploadFilename(entry.asset, index),
+              mimeType: inferMediaMimeType(entry.asset),
+            });
+        setUploadingMediaByMessageId((prev) => {
+          if (!(entry.localId in prev)) return prev;
+          const next = { ...prev };
+          delete next[entry.localId];
+          return next;
+        });
+
+        const uploadedUri = `${uploadResult.url || ""}`.trim();
+        if (!uploadedUri) {
+          failedCount += 1;
+          lastError = tr("上传成功但未返回文件 URL。", "Upload succeeded but no file URL was returned.");
+          setPendingMessages((prev) => prev.filter((message) => message._id !== entry.localId));
+          continue;
+        }
+
+        const uploadedName = (uploadResult.name || inferUploadFilename(entry.asset, index) || entry.asset.id).trim();
+        const isVideo = entry.asset.type === "video";
+        const result = await sendMessage(chatId, {
+          content: isVideo ? uploadedName : tr("[图片]", "[Image]"),
+          type: isVideo ? "text" : "image",
+          imageUri: isVideo ? undefined : uploadedUri,
+          imageName: isVideo ? undefined : uploadedName,
+          senderId: user?.id,
+          senderName: user?.displayName || tr("我", "Me"),
+          senderAvatar: user?.avatar || botConfig.avatar,
+          senderType: "human",
+          isMe: true,
+          requestAI: false,
+          systemInstruction: botConfig.systemInstruction,
+        });
+        if (!result) {
+          failedCount += 1;
+          lastError = tr("上传成功但消息发送失败。", "Upload succeeded but message send failed.");
+          setPendingMessages((prev) => prev.filter((message) => message._id !== entry.localId));
+        }
+      } catch (err) {
         failedCount += 1;
+        lastError = formatApiError(err);
         setPendingMessages((prev) => prev.filter((message) => message._id !== entry.localId));
+        setUploadingMediaByMessageId((prev) => {
+          if (!(entry.localId in prev)) return prev;
+          const next = { ...prev };
+          delete next[entry.localId];
+          return next;
+        });
       }
     }
 
     setMediaSending(false);
-    if (failedCount > 0) {
-      Alert.alert(
-        tr("发送失败", "Send failed"),
-        tr("部分媒体发送失败，请重试。", "Some media failed to send. Please retry.")
-      );
-      return;
-    }
-    closeMediaSheet({ clearSelection: true });
+    return { failedCount, lastError };
   }, [
     botConfig.avatar,
     botConfig.systemInstruction,
     chatId,
-    closeMediaSheet,
     currentUserId,
+    formatApiError,
     mediaSending,
-    selectedAssets,
     sendMessage,
     tr,
     user?.avatar,
     user?.displayName,
     user?.id,
+  ]);
+
+  const handleSendSelectedMedia = useCallback(async () => {
+    if (!chatId || selectedAssets.length === 0 || mediaSending) return;
+    const result = await sendMediaWithUpload(selectedAssets);
+    if (result.failedCount > 0) {
+      Alert.alert(
+        tr("发送失败", "Send failed"),
+        result.lastError || tr("部分媒体发送失败，请重试。", "Some media failed to send. Please retry.")
+      );
+      return;
+    }
+    closeMediaSheet({ clearSelection: true });
+  }, [
+    chatId,
+    closeMediaSheet,
+    mediaSending,
+    selectedAssets,
+    sendMediaWithUpload,
+    tr,
   ]);
 
   const ensureCameraPermission = useCallback(async () => {
@@ -1184,7 +1297,13 @@ export default function ChatDetailScreen() {
           height: 2556,
           capturedAt: Date.now(),
         };
-        emitCameraCaptured(previewAsset);
+        const result = await sendMediaWithUpload([previewAsset]);
+        if (result.failedCount > 0) {
+          Alert.alert(
+            tr("发送失败", "Send failed"),
+            result.lastError || tr("媒体上传失败，请重试。", "Media upload failed. Please retry.")
+          );
+        }
         return;
       }
 
@@ -1213,20 +1332,117 @@ export default function ChatDetailScreen() {
         fileSize: captured.fileSize || undefined,
         capturedAt: Date.now(),
       };
-      emitCameraCaptured(previewAsset);
+      const sendResult = await sendMediaWithUpload([previewAsset]);
+      if (sendResult.failedCount > 0) {
+        Alert.alert(
+          tr("发送失败", "Send failed"),
+          sendResult.lastError || tr("媒体上传失败，请重试。", "Media upload failed. Please retry.")
+        );
+      }
     } catch (err) {
       Alert.alert(tr("拍照失败", "Camera failed"), formatApiError(err));
     } finally {
       cameraCaptureInFlightRef.current = false;
     }
-  }, [emitCameraCaptured, ensureCameraPermission, isE2E, tr]);
+  }, [ensureCameraPermission, isE2E, sendMediaWithUpload, tr]);
 
   const openCameraFlow = useCallback(() => {
     pendingOpenPanelAfterKeyboardHideRef.current = false;
     pendingKeyboardFromPanelRef.current = false;
     activeKeyboardTargetRef.current = null;
+    hidePlusPanel({ duration: PLUS_PANEL_ANIM_DURATION });
+    closeMediaSheet({ clearSelection: true, duration: 0 });
     void openCameraCapture();
-  }, [openCameraCapture]);
+  }, [closeMediaSheet, hidePlusPanel, openCameraCapture]);
+
+  const ensureLibraryPermission = useCallback(async () => {
+    let permission = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (permission.granted) return true;
+
+    if (hasRequestedLibraryPermissionRef.current) {
+      Alert.alert(
+        tr("需要相册权限", "Media library permission required"),
+        tr("请在系统设置中允许相册访问后再试。", "Enable media-library access in system settings and try again.")
+      );
+      return false;
+    }
+
+    hasRequestedLibraryPermissionRef.current = true;
+    permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.granted) return true;
+
+    Alert.alert(
+      tr("需要相册权限", "Media library permission required"),
+      tr("未获得相册权限，暂时无法选择媒体。", "Media-library access was not granted, unable to pick files right now.")
+    );
+    return false;
+  }, [tr]);
+
+  const openImagePicker = useCallback(async () => {
+    if (imagePickInFlightRef.current) return;
+    imagePickInFlightRef.current = true;
+    try {
+      if (isE2E) {
+        const result = await sendMediaWithUpload(e2eSheetAssets.slice(0, 2));
+        if (result.failedCount > 0) {
+          Alert.alert(
+            tr("发送失败", "Send failed"),
+            result.lastError || tr("媒体上传失败，请重试。", "Media upload failed. Please retry.")
+          );
+        }
+        return;
+      }
+
+      const granted = await ensureLibraryPermission();
+      if (!granted) return;
+
+      const picker = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images", "videos"],
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+        selectionLimit: 20,
+        quality: 1,
+      });
+      if (picker.canceled || picker.assets.length === 0) return;
+
+      const pickedAssets: MediaPickerAsset[] = picker.assets.map((asset, index) => {
+        const type: MediaPickerAsset["type"] = asset.type === "video" ? "video" : "image";
+        return {
+          id: asset.assetId || `image_picker_${Date.now()}_${index}`,
+          type,
+          uri: asset.uri,
+          thumbUri: asset.uri,
+          duration: type === "video" ? Math.max(0, Math.round(asset.duration || 0)) : undefined,
+          filename: asset.fileName || undefined,
+          width: asset.width || undefined,
+          height: asset.height || undefined,
+          fileSize: asset.fileSize || undefined,
+          capturedAt: Date.now(),
+        };
+      });
+
+      const result = await sendMediaWithUpload(pickedAssets);
+      if (result.failedCount > 0) {
+        Alert.alert(
+          tr("发送失败", "Send failed"),
+          result.lastError || tr("部分媒体发送失败，请重试。", "Some media failed to send. Please retry.")
+        );
+      }
+    } catch (err) {
+      Alert.alert(tr("选择媒体失败", "Media picker failed"), formatApiError(err));
+    } finally {
+      imagePickInFlightRef.current = false;
+    }
+  }, [e2eSheetAssets, ensureLibraryPermission, isE2E, sendMediaWithUpload, tr]);
+
+  const openImageFlow = useCallback(() => {
+    pendingOpenPanelAfterKeyboardHideRef.current = false;
+    pendingKeyboardFromPanelRef.current = false;
+    activeKeyboardTargetRef.current = null;
+    hidePlusPanel({ duration: PLUS_PANEL_ANIM_DURATION });
+    closeMediaSheet({ clearSelection: true, duration: 0 });
+    void openImagePicker();
+  }, [closeMediaSheet, hidePlusPanel, openImagePicker]);
 
   const handlePlusPanelItemPress = useCallback(
     (key: PlusPanelItem["key"]) => {
@@ -1234,25 +1450,20 @@ export default function ChatDetailScreen() {
         openCameraFlow();
         return;
       }
-      if (key !== "image") {
-        Alert.alert(
-          tr("敬请期待", "Coming soon"),
-          tr("该功能将在后续版本开放。", "This feature will be enabled in a future update.")
-        );
+      if (key === "image") {
+        if (!chatId) {
+          openMediaSheet();
+          return;
+        }
+        openImageFlow();
         return;
       }
-      if (!chatId) {
-        openMediaSheet();
-        return;
-      }
-      router.push({
-        pathname: "./media-picker",
-        params: {
-          chatId,
-        },
-      });
+      Alert.alert(
+        tr("敬请期待", "Coming soon"),
+        tr("该功能将在后续版本开放。", "This feature will be enabled in a future update.")
+      );
     },
-    [chatId, openCameraFlow, openMediaSheet, router, tr]
+    [chatId, openCameraFlow, openImageFlow, openMediaSheet, tr]
   );
 
   const handleTogglePlusPanel = useCallback(() => {
@@ -1326,6 +1537,7 @@ export default function ChatDetailScreen() {
   const [myBotStreaming, setMyBotStreaming] = useState(false);
 
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
+  const [uploadingMediaByMessageId, setUploadingMediaByMessageId] = useState<Record<string, boolean>>({});
 
   const baseGiftedMessages = useMemo(() => {
     const baseTime = Date.now();
@@ -1364,6 +1576,7 @@ export default function ChatDetailScreen() {
     setHasMore(true);
     setLoadingOlder(false);
     setPendingMessages([]);
+    setUploadingMediaByMessageId({});
     setHasUserScrolled(false);
     setShowOriginalByMessageId({});
     closeMediaSheet({ clearSelection: true, duration: 0 });
@@ -2682,6 +2895,7 @@ export default function ChatDetailScreen() {
       };
 
       const messageBody = () => {
+        const isMediaUploading = Boolean(uploadingMediaByMessageId[raw.id]);
         if (raw.type === "voice") {
           const voiceLabel = raw.voiceDuration
             ? tr(`语音 · ${raw.voiceDuration}`, `Voice · ${raw.voiceDuration}`)
@@ -2709,6 +2923,17 @@ export default function ChatDetailScreen() {
             ) : null}
             {raw.imageUri ? (
               <View style={styles.imageWrap}>
+                {isMediaUploading ? (
+                  <View style={[styles.mediaUploadBadge, meFinal && styles.mediaUploadBadgeMe]}>
+                    <ActivityIndicator
+                      size="small"
+                      color={meFinal ? "rgba(255,255,255,0.95)" : "rgba(191,219,254,0.95)"}
+                    />
+                    <Text style={[styles.mediaUploadText, meFinal && styles.mediaUploadTextMe]}>
+                      {tr("上传中...", "Uploading...")}
+                    </Text>
+                  </View>
+                ) : null}
                 <Image source={{ uri: raw.imageUri }} style={styles.imagePreview} />
                 {raw.imageName ? <Text style={styles.imageLabel}>{raw.imageName}</Text> : null}
               </View>
@@ -2836,6 +3061,7 @@ export default function ChatDetailScreen() {
       showOriginalByMessageId,
       thread.avatar,
       tr,
+      uploadingMediaByMessageId,
       user?.avatar,
       user?.displayName,
     ]
@@ -4272,6 +4498,30 @@ const styles = StyleSheet.create({
   },
   imageWrap: {
     gap: 6,
+  },
+  mediaUploadBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(15,23,42,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.45)",
+  },
+  mediaUploadBadgeMe: {
+    backgroundColor: "rgba(30,41,59,0.7)",
+    borderColor: "rgba(191,219,254,0.5)",
+  },
+  mediaUploadText: {
+    color: "rgba(191,219,254,0.95)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  mediaUploadTextMe: {
+    color: "rgba(248,250,252,0.95)",
   },
   imagePreview: {
     width: 200,

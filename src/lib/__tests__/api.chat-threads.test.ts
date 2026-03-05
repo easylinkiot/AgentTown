@@ -1,4 +1,4 @@
-import { createChatThread, setAuthToken } from "../api";
+import { createChatThread, sendThreadMessage, setAuthToken } from "../api";
 import type { ChatThread } from "@/src/types";
 
 function mockResponse(payload: unknown, status = 200) {
@@ -56,5 +56,40 @@ describe("chat thread api", () => {
     expect(body.groupCommanderUserId).toBeUndefined();
     expect(body.groupType).toBe("toc");
     expect(body.groupSubCategory).toBe("ops");
+  });
+
+  it("sends thread message request body with only documented fields", async () => {
+    fetchMock.mockResolvedValue(
+      mockResponse({
+        threadId: "thread_1",
+        userMessage: { id: "msg_1", content: "hello", senderAvatar: "", type: "text", isMe: true },
+      })
+    );
+
+    await sendThreadMessage("thread_1", {
+      content: "hello",
+      type: "image",
+      imageUri: "https://cdn.example.com/a.jpg",
+      imageName: "a.jpg",
+      senderId: "u_1",
+      senderName: "Tester",
+      senderAvatar: "https://cdn.example.com/u.jpg",
+      senderType: "human",
+      isMe: true,
+      requestAI: false,
+      systemInstruction: "ignore",
+      history: [{ role: "user", text: "h" }],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/v1/chat/threads/thread_1/messages");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse((init.body as string) || "{}") as Record<string, unknown>;
+    expect(body).toEqual({
+      content: "hello",
+      type: "image",
+      imageUri: "https://cdn.example.com/a.jpg",
+      imageName: "a.jpg",
+    });
   });
 });
