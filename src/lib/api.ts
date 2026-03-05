@@ -222,6 +222,32 @@ export interface ATChatMessageListResponse {
   list: ATChatMessage[];
 }
 
+export interface V2ChatSession {
+  id: string;
+  title?: string;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface V2ChatSessionsResponse {
+  list: V2ChatSession[];
+  has_more?: boolean;
+  next_before?: number;
+}
+
+export interface V2ChatSessionMessage {
+  id?: string;
+  role?: string;
+  content?: string;
+  message_type?: string;
+  created_at?: string | number;
+  updated_at?: string | number;
+}
+
+export interface V2ChatSessionMessagesResponse {
+  list: V2ChatSessionMessage[];
+}
+
 export interface ATChatHistoryPagination {
   page_size?: number;
   next_cursor?: string;
@@ -813,6 +839,63 @@ export function mapATMessageToConversation(
     isMe,
     time: createdAt,
   };
+}
+
+export async function listV2ChatSessions(options: {
+  limit?: number;
+  before?: number;
+  eventNum?: number;
+} = {}): Promise<V2ChatSession[]> {
+  const params = new URLSearchParams();
+  if (typeof options.limit === "number" && options.limit > 0) {
+    params.set("limit", String(options.limit));
+  }
+  if (typeof options.before === "number" && Number.isFinite(options.before) && options.before > 0) {
+    params.set("before", String(options.before));
+  }
+  if (typeof options.eventNum === "number" && options.eventNum > 0) {
+    params.set("event_num", String(options.eventNum));
+  }
+  const qs = params.toString();
+  const payload = await apiFetch<V2ChatSessionsResponse | V2ChatSession[]>(
+    `/v2/chat/sessions${qs ? `?${qs}` : ""}`
+  );
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && Array.isArray(payload.list)
+      ? payload.list
+      : [];
+  const normalized: V2ChatSession[] = [];
+  for (const row of rows) {
+    const id = coerceString(row?.id);
+    if (!id) continue;
+    normalized.push({
+      id,
+      title: coerceString(row?.title),
+      created_at: coerceNumber(row?.created_at),
+      updated_at: coerceNumber(row?.updated_at),
+    });
+  }
+  return normalized;
+}
+
+export async function listV2ChatSessionMessages(sessionId: string): Promise<V2ChatSessionMessage[]> {
+  const payload = await apiFetch<V2ChatSessionMessagesResponse | V2ChatSessionMessage[]>(
+    `/v2/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+  );
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && Array.isArray(payload.list)
+      ? payload.list
+      : [];
+  return rows.map((row) => ({
+    id: coerceString(row?.id),
+    role: coerceString(row?.role),
+    content: typeof row?.content === "string" ? row.content : "",
+    message_type: coerceString(row?.message_type) || "text",
+    created_at: row?.created_at,
+    updated_at: row?.updated_at,
+  }));
 }
 
 export async function listChatSessions(options: ATListSessionsInput = {}): Promise<ATSession[]> {

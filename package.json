@@ -48,6 +48,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-navigation/drawer": "^7.9.4",
     "@react-navigation/native": "^7.1.8",
     "expo": "~54.0.33",
     "expo-apple-authentication": "~8.0.8",
@@ -72,6 +73,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-gesture-handler": "^2.30.0",
     "react-native-gifted-chat": "^2.8.1",
     "react-native-keyboard-controller": "^1.18.5",
     "react-native-reanimated": "~4.1.1",

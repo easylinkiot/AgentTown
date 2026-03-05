@@ -28,6 +28,7 @@ import {
   listThreadMessages as listThreadMessagesApi,
   listChatThreads as listChatThreadsApi,
   listChatSessionMessages as listChatSessionMessagesApi,
+  listV2ChatSessionMessages as listV2ChatSessionMessagesApi,
   getThreadDisplayLanguage as getThreadDisplayLanguageApi,
   patchCustomSkill as patchCustomSkillApi,
   patchTask as patchTaskApi,
@@ -47,6 +48,7 @@ import {
   type CreateCustomSkillInput,
   type SendThreadMessageInput,
   type SendThreadMessageOutput,
+  type V2ChatSessionMessage,
 } from "@/src/lib/api";
 import {
   Agent,
@@ -107,7 +109,10 @@ interface AgentTownContextValue {
   updateThreadLanguage: (threadId: string, next: ThreadDisplayLanguage) => Promise<void>;
   updateVoiceModeEnabled: (next: boolean) => void;
   refreshAll: () => Promise<void>;
-  refreshThreadMessages: (threadId: string) => Promise<void>;
+  refreshThreadMessages: (
+    threadId: string,
+    options?: { preferV2SessionApi?: boolean }
+  ) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<number>;
   sendMessage: (threadId: string, payload: SendThreadMessageInput) => Promise<SendThreadMessageOutput | null>;
   createFriend: (input: {
@@ -441,6 +446,47 @@ function sortMessagesBySeqOrTime(messages: ConversationMessage[]): ConversationM
   });
 }
 
+function normalizeLooseDateTime(value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const millis = value > 1_000_000_000_000 ? value : value * 1000;
+    const parsed = new Date(millis);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : "";
+  }
+  return "";
+}
+
+function mapV2SessionMessageToConversation(
+  row: V2ChatSessionMessage,
+  currentUserId: string,
+  threadId: string,
+  index: number
+): ConversationMessage {
+  const role = (row.role || "").trim().toLowerCase();
+  const isUserRole = role === "user";
+  const senderName = isUserRole ? "Me" : role === "assistant" ? "Assistant" : "System";
+  const senderType = isUserRole ? "human" : role === "assistant" ? "agent" : "system";
+  const timestamp = normalizeLooseDateTime(row.updated_at ?? row.created_at) || new Date().toISOString();
+  const fallbackId = `${threadId}_v2_${index}_${Date.now()}`;
+  return {
+    id: (row.id || "").trim() || fallbackId,
+    threadId,
+    senderId: isUserRole ? currentUserId : role === "assistant" ? "assistant" : "system",
+    senderName,
+    senderAvatar: "",
+    senderType,
+    content: (row.content || "").trim(),
+    type: (row.message_type || "text").trim() || "text",
+    isMe: isUserRole && Boolean(currentUserId),
+    time: timestamp,
+  };
+}
+
 function previewMessage(message: ConversationMessage): string {
   if (message.type === "image") {
     return message.content ? `[Image] ${message.content}` : "[Image]";
@@ -725,7 +771,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     };
   }, [chatThreads, isSignedIn, patchThreadLanguageMap, userID]);
 
-  const refreshThreadMessages = useCallback(async (threadId: string) => {
+  const refreshThreadMessages = useCallback(async (
+    threadId: string,
+    options?: { preferV2SessionApi?: boolean }
+  ) => {
     if (!threadId) return;
 
     // Load from local cache first for instant paint.
@@ -739,6 +788,29 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
 
     let latest: ConversationMessage[] = [];
     historyCursorByThreadRef.current[threadId] = null;
+    const preferV2SessionApi =
+      Boolean(options?.preferV2SessionApi) || threadId.trim().toLowerCase().startsWith("sess_");
+    let loadedViaV2SessionApi = false;
+    if (preferV2SessionApi) {
+      try {
+        const rows = await listV2ChatSessionMessagesApi(threadId);
+        latest = rows.map((row, index) => mapV2SessionMessageToConversation(row, userID, threadId, index));
+        loadedViaV2SessionApi = true;
+      } catch {
+        // Fallback to legacy chain below.
+      }
+    }
+    if (loadedViaV2SessionApi) {
+      latest = sortMessagesBySeqOrTime(latest);
+      const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
+      const safeMerged = Array.isArray(merged) ? merged : [];
+      void writeThreadCache(userID, threadId, safeMerged);
+      setMessagesByThread((prev) => ({
+        ...prev,
+        [threadId]: safeMerged.slice(-MESSAGE_RENDER_WINDOW),
+      }));
+      return;
+    }
     try {
       const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
       latest = Array.isArray(latestRaw) ? latestRaw : [];
@@ -754,8 +826,15 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         latest = (response.list || []).map((row) => mapATMessageToConversation(row, userID, threadId));
         historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
       } else {
-        const response = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
-        latest = response.map((row) => mapATMessageToConversation(row, userID, threadId));
+        try {
+          const response = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+          latest = response.map((row) => mapATMessageToConversation(row, userID, threadId));
+        } catch {
+          const response = await listV2ChatSessionMessagesApi(threadId);
+          latest = response.map((row, index) =>
+            mapV2SessionMessageToConversation(row, userID, threadId, index)
+          );
+        }
       }
     }
     latest = sortMessagesBySeqOrTime(latest);

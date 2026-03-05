@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { DrawerActions, useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -36,10 +38,8 @@ import {
   MessageProps,
   SystemMessageProps,
 } from "react-native-gifted-chat";
-import Svg, { Path, Rect } from "react-native-svg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { DrawerActions, useNavigation } from "@react-navigation/native";
+import Svg, { Path, Rect } from "react-native-svg";
 
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
@@ -48,29 +48,29 @@ import {
   getCachedAgentSessions,
   preloadAgentSessions,
 } from "@/src/features/chat/agent-sessions-cache";
+import {
+  assistCandidateSelectionKey,
+  buildTaskItemFromCandidate,
+} from "@/src/features/chat/ask-ai-helpers";
 import { tx } from "@/src/i18n/translate";
 import {
   agentChat as agentChatApi,
   aiText,
   createTask as createTaskApi,
+  type DiscoverUser,
   discoverUsers as discoverUsersApi,
   formatApiError,
   listAgents as listAgentsApi,
   listFriends as listFriendsApi,
   type V2ChatSession,
-  type DiscoverUser,
 } from "@/src/lib/api";
 import {
-  assistCandidateSelectionKey,
-  buildTaskItemFromCandidate,
-} from "@/src/features/chat/ask-ai-helpers";
-import {
-  runChatAssist,
-  runChatCompletions,
   type AssistCandidate,
   type ChatAssistAction,
   type ChatAssistRequest,
   type ChatCompletionsRequest,
+  runChatAssist,
+  runChatCompletions,
 } from "@/src/services/chatAssist";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -1308,7 +1308,7 @@ export default function ChatDetailScreen() {
     setKeyboardTarget(null);
   }, [setKeyboardTarget]);
 
-  const [devStreamEnabled, setDevStreamEnabled] = useState(__DEV__);
+  const [devStreamEnabled, setDevStreamEnabled] = useState(false);
   const [streamingById, setStreamingById] = useState<Record<string, string>>({});
   const streamInitRef = useRef(false);
   const streamTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1945,6 +1945,24 @@ export default function ChatDetailScreen() {
           if (aiAgentMode) {
             const nextSessionId = (resolvedAgentSessionId || (isNewAgentSession ? "" : chatId)).trim();
             if (nextSessionId) {
+              let refreshed = false;
+              await refreshThreadMessages(nextSessionId, { preferV2SessionApi: true })
+                .then(() => {
+                  refreshed = true;
+                })
+                .catch(() => {
+                  // Keep send result successful even when list refresh fails.
+                });
+              if (refreshed) {
+                setPendingMessages((prev) =>
+                  prev.filter((msg) => msg._id !== localId && msg._id !== botLocalId)
+                );
+              }
+              if (startedFromNewAgentSession) {
+                setTimeout(async () => {
+                  await refreshAgentSessionsCache(true);
+                }, 3000);
+              }
               if (nextSessionId !== chatId) {
                 router.replace({
                   pathname: "/ai-chat/[id]",
@@ -1953,11 +1971,6 @@ export default function ChatDetailScreen() {
                     isGroup: "false",
                   },
                 });
-              } else {
-                void refreshThreadMessages(
-                  nextSessionId,
-                  aiAgentMode ? { preferV2SessionApi: true } : undefined
-                );
               }
             }
           }
@@ -1975,10 +1988,6 @@ export default function ChatDetailScreen() {
           delete next[botLocalId];
           return next;
         });
-        if (aiAgentMode && startedFromNewAgentSession && resolvedAgentSessionId) {
-          void refreshAgentSessionsCache(true);
-        }
-
       } else {
         const result = await sendUserOnlyMessage(content);
         if (!result) {
@@ -2084,6 +2093,7 @@ export default function ChatDetailScreen() {
       try {
         if (action === "ask_anything") {
           const completionsRequest: ChatCompletionsRequest = {
+            stream: true,
             input: askAI.trim(),
             session_id: chatId,
           };
@@ -3938,7 +3948,7 @@ export default function ChatDetailScreen() {
         <Modal visible={threadMenuModal} transparent animationType="fade" onRequestClose={() => setThreadMenuModal(false)}>
           <Pressable style={styles.modalOverlayBottom} onPress={() => setThreadMenuModal(false)}>
             <Pressable style={styles.actionSheet} onPress={() => null}>
-              {__DEV__ ? (
+              {__DEV__ && !aiAgentMode ? (
                 <Pressable
                   style={styles.menuItem}
                   onPress={() => setDevStreamEnabled((prev) => !prev)}

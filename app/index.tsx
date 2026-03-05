@@ -22,6 +22,7 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
+import { getCachedAgentSessions, preloadAgentSessions } from "@/src/features/chat/agent-sessions-cache";
 import { tx } from "@/src/i18n/translate";
 import {
   acceptFriendRequest,
@@ -123,6 +124,7 @@ export default function HomeScreen() {
   const [groupCommanderUserId, setGroupCommanderUserId] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [refreshingChats, setRefreshingChats] = useState(false);
+  const [openingAskAnything, setOpeningAskAnything] = useState(false);
 
   const list = useMemo(() => {
     const sorted = chatThreads.filter((thread) => !isMyBotThreadId(thread.id));
@@ -285,6 +287,12 @@ export default function HomeScreen() {
     }
   }, [friendModal]);
 
+  useEffect(() => {
+    void preloadAgentSessions().catch(() => {
+      // Ignore preload failures on home. Chat page will retry.
+    });
+  }, []);
+
   const handleOpenThread = useCallback(
     async (thread: ChatThread) => {
       let nextThread = thread;
@@ -334,6 +342,28 @@ export default function HomeScreen() {
     },
     [addChatThread, router]
   );
+
+  const handleOpenAskAnything = useCallback(async () => {
+    if (openingAskAnything) return;
+    setOpeningAskAnything(true);
+    try {
+      const cached = getCachedAgentSessions();
+      const sessions = cached.length > 0 ? cached : await preloadAgentSessions();
+      const latest = sessions[0];
+      router.push({
+        pathname: "/ai-chat/[id]",
+        params: {
+          id: latest?.id || "new",
+          name: latest?.title || tr("AI 助手", "AI Assistant"),
+          isGroup: "false",
+        },
+      });
+    } catch (err) {
+      setUiError(formatApiError(err));
+    } finally {
+      setOpeningAskAnything(false);
+    }
+  }, [openingAskAnything, router, tr]);
 
   const openEntityConfig = useCallback(
     (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
@@ -624,20 +654,23 @@ export default function HomeScreen() {
           <Pressable
             testID="home-mybot-entry"
             style={styles.askBar}
-            onPress={() =>
-              router.push({
-                pathname: "/chat/[id]",
-                params: { id: "mybot", name: botConfig.name, avatar: botConfig.avatar, isGroup: "false" },
-              })
-            }
+            onPress={() => {
+              void handleOpenAskAnything();
+            }}
           >
             <View style={styles.askPlus}>
               <Ionicons name="add" size={16} color="rgba(226,232,240,0.92)" />
             </View>
             <Text style={styles.askPlaceholder}>{tr("Ask anything", "Ask anything")}</Text>
             <View style={styles.askRight}>
-              <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.75)" />
-              <Ionicons name="send" size={16} color="rgba(226,232,240,0.75)" />
+              {openingAskAnything ? (
+                <ActivityIndicator size="small" color="rgba(226,232,240,0.75)" />
+              ) : (
+                <>
+                  <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.75)" />
+                  <Ionicons name="send" size={16} color="rgba(226,232,240,0.75)" />
+                </>
+              )}
             </View>
           </Pressable>
 

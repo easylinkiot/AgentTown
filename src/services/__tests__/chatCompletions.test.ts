@@ -51,7 +51,12 @@ describe("chat completions stream", () => {
     );
 
     expect(latest).toBe("Hello");
-    expect(latestClientConfig?.url).toContain("/v1/chat/completions");
+    expect(latestClientConfig?.url).toContain("/v2/chat/completions");
     expect(latestClientConfig?.method).toBe("POST");
+    expect(JSON.parse(String(latestClientConfig?.body))).toEqual({
+      message: { text: "hello" },
+      knowledge_enabled: false,
+      stream: true,
+    });
   });
 });

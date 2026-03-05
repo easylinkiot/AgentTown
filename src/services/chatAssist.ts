@@ -31,9 +31,11 @@ export interface ChatAssistRequest {
 
 export interface ChatCompletionsRequest {
   stream?: boolean;
+  omitStreamField?: boolean;
   input?: string;
   prompt?: string;
   session_id?: string;
+  knowledge_enabled?: boolean;
   target_type?: string;
   target_id?: string;
   bot_owner_user_id?: string;
@@ -427,6 +429,12 @@ function toEventError(payload: unknown, fallback = "Assist stream error") {
   return new Error(fallback);
 }
 
+function isStreamDonePayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return false;
+  const row = payload as { done?: unknown; is_done?: unknown };
+  return row.done === true || row.is_done === true;
+}
+
 export function mergeAssistCandidates(previous: AssistCandidate[], incoming: AssistCandidate[]) {
   if (incoming.length === 0) return previous;
   const next = [...previous];
@@ -768,7 +776,7 @@ export async function runChatCompletions(
 ) {
   if (abortSignal?.aborted) return;
 
-  const url = `${getApiBaseUrl()}/v1/chat/completions`;
+  const url = `${getApiBaseUrl()}/v2/chat/completions`;
   const token = getAuthToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -778,10 +786,23 @@ export async function runChatCompletions(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const payload = {
-    ...request,
-    stream: true,
+  const text = (request.input ?? request.prompt ?? "").toString();
+  const payload: {
+    message: { text: string };
+    knowledge_enabled: boolean;
+    stream?: boolean;
+    session_id?: string;
+  } = {
+    message: { text },
+    knowledge_enabled: Boolean(request.knowledge_enabled),
   };
+  if (!request.omitStreamField) {
+    payload.stream = request.stream ?? true;
+  }
+  const sessionId = (request.session_id || "").trim();
+  if (sessionId) {
+    payload.session_id = sessionId;
+  }
 
   let streamText = "";
 
@@ -808,7 +829,7 @@ export async function runChatCompletions(
       const data = parseEventData(event.data);
       handlers.onEvent?.(eventName, data);
 
-      if (eventName === "done") {
+      if (eventName === "done" || eventName === "response.completed" || isStreamDonePayload(data)) {
         handlers.onDone?.();
         finish();
         return;

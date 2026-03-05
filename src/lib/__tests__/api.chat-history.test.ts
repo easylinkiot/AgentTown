@@ -1,6 +1,8 @@
 import {
   listChatSessionMessages,
   listChatSessions,
+  listV2ChatSessionMessages,
+  listV2ChatSessions,
   mapATMessageToConversation,
   queryChatHistory,
   queryChatTargetHistory,
@@ -69,6 +71,32 @@ describe("chat history api", () => {
     expect(url).toBe(
       "https://api.example.com/v1/chat/sessions/sess_1/messages?message_type=text&before_seq_no=20&limit=10"
     );
+  });
+
+  it("lists v2 chat sessions", async () => {
+    fetchMock.mockResolvedValue(
+      mockResponse({
+        list: [{ id: "sess_v2_1", title: "V2 S1", updated_at: 1741000020 }],
+      })
+    );
+
+    const sessions = await listV2ChatSessions({ limit: 10, eventNum: 50 });
+    expect(sessions).toHaveLength(1);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/v2/chat/sessions?limit=10&event_num=50");
+  });
+
+  it("lists v2 session messages", async () => {
+    fetchMock.mockResolvedValue(
+      mockResponse({
+        list: [{ role: "user", content: "hello" }],
+      })
+    );
+
+    const rows = await listV2ChatSessionMessages("sess_v2_1");
+    expect(rows).toHaveLength(1);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/v2/chat/sessions/sess_v2_1/messages");
   });
 
   it("queries chat history and returns pagination", async () => {

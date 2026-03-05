@@ -1,3 +1,5 @@
+import "react-native-gesture-handler";
+
 import { Stack, useRouter, useSegments } from "expo-router";
 import React, { useEffect } from "react";
 import { ActivityIndicator, StyleSheet } from "react-native";
@@ -51,6 +53,7 @@ function RootStack() {
       <Stack.Screen name="forgot-password" options={{ animation: "fade" }} />
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="ai-chat" />
       <Stack.Screen name="chat/tasks" />
       <Stack.Screen
         name="chat/media-picker"
