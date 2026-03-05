@@ -1316,7 +1316,7 @@ export default function ChatDetailScreen() {
     setKeyboardTarget(null);
   }, [setKeyboardTarget]);
 
-  const [devStreamEnabled, setDevStreamEnabled] = useState(__DEV__);
+  const [devStreamEnabled, setDevStreamEnabled] = useState(false);
   const [streamingById, setStreamingById] = useState<Record<string, string>>({});
   const streamInitRef = useRef(false);
   const streamTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
