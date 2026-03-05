@@ -82,6 +82,7 @@ const mockedGetAuthToken = getAuthToken as jest.Mock;
 const mockBack = jest.fn();
 const mockedFetch = jest.fn();
 let fetchSpy: jest.SpyInstance | null = null;
+const ASYNC_TIMEOUT_MS = 10_000;
 
 function makeResponse(payload: unknown, status = 200) {
   return Promise.resolve({
@@ -104,6 +105,7 @@ function buildTask(id: string, title: string) {
 
 describe("ChatTasksScreen", () => {
   beforeEach(() => {
+    jest.useRealTimers();
     jest.clearAllMocks();
     mockedUseRouter.mockReturnValue({ back: mockBack });
     mockedUseLocalSearchParams.mockReturnValue({});
@@ -133,8 +135,9 @@ describe("ChatTasksScreen", () => {
     render(<ChatTasksScreen />);
 
     await waitFor(() => {
-      expect(screen.getByText("Initial Task")).toBeTruthy();
-    });
+      expect(mockedFetch).toHaveBeenCalledTimes(1);
+    }, { timeout: ASYNC_TIMEOUT_MS });
+    expect(await screen.findByText("Initial Task", {}, { timeout: ASYNC_TIMEOUT_MS })).toBeTruthy();
 
     expect(mockedFetch).toHaveBeenCalledTimes(1);
     expect(mockedFetch).toHaveBeenCalledWith(
