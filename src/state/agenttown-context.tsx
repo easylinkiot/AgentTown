@@ -547,6 +547,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const notificationSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const threadLanguageSyncSignatureRef = useRef("");
 
   const persistThreadLanguageMap = useCallback(
     async (next: Record<string, ThreadDisplayLanguage>) => {
@@ -725,6 +726,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     if (!isSignedIn || !userID) {
+      threadLanguageSyncSignatureRef.current = "";
       return () => {
         cancelled = true;
       };
@@ -733,16 +735,25 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       .map((item) => item.id?.trim() || "")
       .filter(Boolean)
       .slice(0, 40);
-    if (threadIds.length === 0) {
+    const uniqueThreadIds = Array.from(new Set(threadIds));
+    if (uniqueThreadIds.length === 0) {
+      threadLanguageSyncSignatureRef.current = "";
       return () => {
         cancelled = true;
       };
     }
+    const signature = [...uniqueThreadIds].sort().join("|");
+    if (signature === threadLanguageSyncSignatureRef.current) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    threadLanguageSyncSignatureRef.current = signature;
 
     (async () => {
       const remoteMap: Record<string, ThreadDisplayLanguage> = {};
       await Promise.all(
-        threadIds.map(async (threadId) => {
+        uniqueThreadIds.map(async (threadId) => {
           try {
             const pref = await getThreadDisplayLanguageApi(threadId);
             if (isThreadDisplayLanguage(pref.language)) {

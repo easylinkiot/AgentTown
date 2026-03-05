@@ -1,7 +1,14 @@
 import mockAsyncStorage from "@react-native-async-storage/async-storage/jest/async-storage-mock";
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
-import { fetchBootstrap, listChatThreads, listThreadMessages, subscribeRealtime } from "@/src/lib/api";
+import {
+  fetchBootstrap,
+  getThreadDisplayLanguage,
+  listChatThreads,
+  listThreadMessages,
+  sendThreadMessage,
+  subscribeRealtime,
+} from "@/src/lib/api";
 import { useAuth } from "../auth-context";
 import { AgentTownProvider, useAgentTown } from "../agenttown-context";
 
@@ -73,8 +80,10 @@ jest.mock("@/src/lib/api", () => ({
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedFetchBootstrap = fetchBootstrap as jest.Mock;
+const mockedGetThreadDisplayLanguage = getThreadDisplayLanguage as jest.Mock;
 const mockedListChatThreads = listChatThreads as jest.Mock;
 const mockedListThreadMessages = listThreadMessages as jest.Mock;
+const mockedSendThreadMessage = sendThreadMessage as jest.Mock;
 const mockedSubscribeRealtime = subscribeRealtime as jest.Mock;
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -94,6 +103,10 @@ describe("agenttown-context cache safety", () => {
     });
 
     mockedSubscribeRealtime.mockImplementation(() => () => {});
+    mockedGetThreadDisplayLanguage.mockResolvedValue({
+      thread_id: "qatr03011208",
+      language: "en",
+    });
     mockedFetchBootstrap.mockResolvedValue({
       chatThreads: [],
       tasks: [],
@@ -130,6 +143,37 @@ describe("agenttown-context cache safety", () => {
         time: "Now",
       },
     ]);
+    mockedSendThreadMessage.mockImplementation(async (threadId: string, payload: { content?: string }) => {
+      const content = (payload?.content || "").trim() || "fallback";
+      return {
+        userMessage: {
+          id: "msg_local_send",
+          threadId,
+          senderId: "u_owner",
+          senderName: "Owner",
+          senderAvatar: "",
+          senderType: "human",
+          content,
+          type: "text",
+          isMe: true,
+          time: "Now",
+        },
+        messages: [
+          {
+            id: "msg_local_send",
+            threadId,
+            senderId: "u_owner",
+            senderName: "Owner",
+            senderAvatar: "",
+            senderType: "human",
+            content,
+            type: "text",
+            isMe: true,
+            time: "Now",
+          },
+        ],
+      };
+    });
   });
 
   it("does not crash when file-system path probing fails and still loads thread messages", async () => {
@@ -148,5 +192,20 @@ describe("agenttown-context cache safety", () => {
     expect(mockFs.readAsStringAsync).not.toHaveBeenCalled();
     expect(mockFs.makeDirectoryAsync).not.toHaveBeenCalled();
     expect(mockFs.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it("does not refetch thread display language after sendMessage updates thread preview", async () => {
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+    await waitFor(() => expect(mockedGetThreadDisplayLanguage).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await result.current.sendMessage("qatr03011208", {
+        content: "hello",
+      });
+    });
+
+    await waitFor(() => expect(mockedSendThreadMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedGetThreadDisplayLanguage).toHaveBeenCalledTimes(1));
   });
 });
