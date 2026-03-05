@@ -1,3 +1,5 @@
+/* global jest */
+
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(async () => ({ granted: true })),
   requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
