@@ -45,6 +45,7 @@ export function AppTopNav({
           return (
             <Pressable
               key={item.key}
+              testID={`top-nav-item-${item.key}`}
               style={[styles.item, active && styles.itemActive]}
               onPress={() => {
                 if (!active) router.push(item.href as never);

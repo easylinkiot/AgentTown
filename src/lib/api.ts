@@ -1755,6 +1755,12 @@ export async function installMiniApp(appId: string, install = true) {
   });
 }
 
+export async function installPresetMiniApp(presetKey: "news" | "price" | "words") {
+  return apiFetch<MiniApp>(`/v1/miniapps/presets/${encodeURIComponent(presetKey)}/install`, {
+    method: "POST",
+  });
+}
+
 export async function runMiniApp(appId: string, payload: RunMiniAppInput) {
   return apiFetch<RunMiniAppOutput>(`/v1/miniapps/${encodeURIComponent(appId)}/run`, {
     method: "POST",

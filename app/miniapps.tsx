@@ -68,6 +68,7 @@ export default function MiniAppsScreen() {
     <KeyframeBackground>
       <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
+          <View testID="miniapps-screen" />
           <View style={styles.headerRow}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
