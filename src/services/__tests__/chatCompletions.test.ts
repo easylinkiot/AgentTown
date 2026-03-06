@@ -1,6 +1,10 @@
 /* eslint-disable import/first */
 
 let latestClientConfig: any;
+let mockStreamEvents: Array<
+  | { kind: "custom"; eventName: string; payload: unknown }
+  | { kind: "message"; payload: unknown }
+>;
 
 jest.mock("@/src/lib/api", () => ({
   getAuthToken: jest.fn(() => null),
@@ -14,15 +18,17 @@ jest.mock("@/src/lib/sse-client", () => ({
       latestClientConfig = config;
     }
     start() {
-      this.config.onCustomEvent?.("message_delta", {
-        data: JSON.stringify({ delta: { text: "Hel" } }),
-      });
-      this.config.onCustomEvent?.("message_delta", {
-        data: JSON.stringify({ delta: { text: "lo" } }),
-      });
-      this.config.onCustomEvent?.("done", {
-        data: JSON.stringify({ ok: true }),
-      });
+      for (const event of mockStreamEvents) {
+        if (event.kind === "message") {
+          this.config.onMessage?.({
+            data: JSON.stringify(event.payload),
+          });
+          continue;
+        }
+        this.config.onCustomEvent?.(event.eventName, {
+          data: JSON.stringify(event.payload),
+        });
+      }
     }
     stop() {
       return undefined;
@@ -35,6 +41,11 @@ import { runChatCompletions } from "../chatAssist";
 describe("chat completions stream", () => {
   beforeEach(() => {
     latestClientConfig = null;
+    mockStreamEvents = [
+      { kind: "custom", eventName: "message_delta", payload: { delta: { text: "Hel" } } },
+      { kind: "custom", eventName: "message_delta", payload: { delta: { text: "lo" } } },
+      { kind: "custom", eventName: "done", payload: { ok: true } },
+    ];
   });
 
   it("aggregates text from SSE delta events", async () => {
@@ -58,5 +69,32 @@ describe("chat completions stream", () => {
       knowledge_enabled: false,
       stream: true,
     });
+  });
+
+  it("does not duplicate text when a full message event arrives after deltas", async () => {
+    mockStreamEvents = [
+      { kind: "custom", eventName: "message_delta", payload: { delta: { text: "如果你有需求可以随时找我帮忙" } } },
+      { kind: "custom", eventName: "message_delta", payload: { delta: { text: "噢;" } } },
+      { kind: "message", payload: { text: "如果你有需求可以随时找我帮忙噢;" } },
+      { kind: "custom", eventName: "done", payload: { ok: true } },
+    ];
+
+    const snapshots: string[] = [];
+    await runChatCompletions(
+      {
+        input: "hello",
+      },
+      {
+        onText: (text) => {
+          snapshots.push(text);
+        },
+      }
+    );
+
+    expect(snapshots).toEqual([
+      "如果你有需求可以随时找我帮忙",
+      "如果你有需求可以随时找我帮忙噢;",
+      "如果你有需求可以随时找我帮忙噢;",
+    ]);
   });
 });

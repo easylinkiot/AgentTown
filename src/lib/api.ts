@@ -7,8 +7,11 @@ import {
   ConversationMessage,
   Friend,
   FriendRequest,
+  KnowledgeDataset,
   MiniApp,
   MiniAppTemplate,
+  NPC,
+  NPCSkillBinding,
   RealtimeEvent,
   TaskItem,
   ThreadDisplayLanguage,
@@ -265,6 +268,24 @@ export interface V2ChatSessionMessagesResponse {
   list: V2ChatSessionMessage[];
 }
 
+export interface CreateNPCInput {
+  scope?: "user" | "system";
+  name: string;
+  avatar_url?: string;
+  intro?: string;
+  system_prompt: string;
+  model_name?: string;
+}
+
+export interface UpdateNPCInput {
+  name?: string;
+  avatar_url?: string;
+  intro?: string;
+  system_prompt?: string;
+  model_name?: string;
+  status?: "active" | "inactive" | string;
+}
+
 export interface ATChatHistoryPagination {
   page_size?: number;
   next_cursor?: string;
@@ -357,6 +378,50 @@ type V2UserSkill = {
   created_at?: unknown;
   updated_at?: unknown;
   version?: unknown;
+};
+
+type V2NPCSkillBinding = {
+  id?: unknown;
+  npc_id?: unknown;
+  skill_id?: unknown;
+  skill_name?: unknown;
+  skill_scope?: unknown;
+  enabled?: unknown;
+  priority?: unknown;
+  created_at?: unknown;
+};
+
+type V2NPC = {
+  id?: unknown;
+  scope?: unknown;
+  owner_user_id?: unknown;
+  name?: unknown;
+  avatar_url?: unknown;
+  intro?: unknown;
+  system_prompt?: unknown;
+  model_name?: unknown;
+  status?: unknown;
+  skill_bindings?: unknown;
+  knowledge_ids?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+};
+
+type V2KnowledgeEntry = {
+  id?: unknown;
+  dataset_id?: unknown;
+  type?: unknown;
+  name?: unknown;
+  created_at?: unknown;
+};
+
+type V2KnowledgeDataset = {
+  id?: unknown;
+  user_id?: unknown;
+  name?: unknown;
+  entries?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
 };
 
 export interface RoleRepliesInput {
@@ -459,6 +524,93 @@ function normalizeDateTime(value: unknown) {
   const millis = unix > 1_000_000_000_000 ? unix : unix * 1000;
   const asDate = new Date(millis);
   return Number.isFinite(asDate.getTime()) ? asDate.toISOString() : "";
+}
+
+function normalizeV2SessionRow(row: V2ChatSession | null | undefined): V2ChatSession | null {
+  const id = coerceString(row?.id);
+  if (!id) return null;
+  const normalized: V2ChatSession = {
+    id,
+    title: coerceString(row?.title),
+    created_at: coerceNumber(row?.created_at),
+    updated_at: coerceNumber(row?.updated_at),
+  };
+  return normalized;
+}
+
+function normalizeNPCSkillBinding(
+  row: V2NPCSkillBinding | null | undefined,
+  index: number
+): NPCSkillBinding | null {
+  const id = coerceString(row?.id) || `npc_binding_${index}`;
+  const skillId = coerceString(row?.skill_id) || "";
+  const skillName = coerceString(row?.skill_name) || skillId || "Unnamed Skill";
+  return {
+    id,
+    npcId: coerceString(row?.npc_id) || "",
+    skillId,
+    skillName,
+    skillScope: coerceString(row?.skill_scope) || "system",
+    enabled: typeof row?.enabled === "boolean" ? row.enabled : true,
+    priority: coerceNumber(row?.priority) || 0,
+    createdAt: normalizeDateTime(row?.created_at),
+  };
+}
+
+function normalizeNPC(row: V2NPC | null | undefined, index: number): NPC | null {
+  const id = coerceString(row?.id);
+  if (!id) return null;
+  const bindings = Array.isArray(row?.skill_bindings)
+    ? row.skill_bindings
+        .map((item, bindingIndex) => normalizeNPCSkillBinding(item as V2NPCSkillBinding, bindingIndex))
+        .filter((item): item is NPCSkillBinding => Boolean(item))
+    : [];
+  const knowledgeIds = Array.isArray(row?.knowledge_ids)
+    ? row.knowledge_ids.map((item) => coerceString(item)).filter((item): item is string => Boolean(item))
+    : [];
+  return {
+    id,
+    scope: coerceString(row?.scope) || "user",
+    ownerUserId: coerceString(row?.owner_user_id),
+    name: coerceString(row?.name) || `NPC ${index + 1}`,
+    avatarUrl: coerceString(row?.avatar_url),
+    intro: coerceString(row?.intro),
+    systemPrompt: coerceString(row?.system_prompt) || "",
+    modelName: coerceString(row?.model_name),
+    status: coerceString(row?.status),
+    skillBindings: bindings,
+    knowledgeIds,
+    createdAt: normalizeDateTime(row?.created_at),
+    updatedAt: normalizeDateTime(row?.updated_at),
+  };
+}
+
+function normalizeKnowledgeDataset(row: V2KnowledgeDataset | null | undefined, index: number): KnowledgeDataset | null {
+  const id = coerceString(row?.id);
+  if (!id) return null;
+  const entries = Array.isArray(row?.entries)
+    ? row.entries
+        .map((item, entryIndex) => {
+          const entry = item as V2KnowledgeEntry;
+          const entryId = coerceString(entry?.id) || `${id}_entry_${entryIndex}`;
+          return {
+            id: entryId,
+            datasetId: coerceString(entry?.dataset_id) || id,
+            type: coerceString(entry?.type) || "text",
+            name: coerceString(entry?.name) || `Entry ${entryIndex + 1}`,
+            createdAt: normalizeDateTime(entry?.created_at),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  return {
+    id,
+    userId: coerceString(row?.user_id),
+    name: coerceString(row?.name) || `Dataset ${index + 1}`,
+    entries,
+    createdAt: normalizeDateTime(row?.created_at),
+    updatedAt: normalizeDateTime(row?.updated_at),
+  };
 }
 
 function parseRetryAfterSeconds(headerValue: string | null) {
@@ -887,23 +1039,65 @@ export async function listV2ChatSessions(options: {
     : payload && Array.isArray(payload.list)
       ? payload.list
       : [];
-  const normalized: V2ChatSession[] = [];
-  for (const row of rows) {
-    const id = coerceString(row?.id);
-    if (!id) continue;
-    normalized.push({
-      id,
-      title: coerceString(row?.title),
-      created_at: coerceNumber(row?.created_at),
-      updated_at: coerceNumber(row?.updated_at),
-    });
-  }
-  return normalized;
+  return rows
+    .map((row) => normalizeV2SessionRow(row))
+    .filter((row): row is V2ChatSession => Boolean(row));
 }
 
 export async function listV2ChatSessionMessages(sessionId: string): Promise<V2ChatSessionMessage[]> {
   const payload = await apiFetch<V2ChatSessionMessagesResponse | V2ChatSessionMessage[]>(
     `/v2/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+  );
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && Array.isArray(payload.list)
+      ? payload.list
+      : [];
+  return rows.map((row) => ({
+    id: coerceString(row?.id),
+    role: coerceString(row?.role),
+    content: typeof row?.content === "string" ? row.content : "",
+    message_type: coerceString(row?.message_type) || "text",
+    created_at: row?.created_at,
+    updated_at: row?.updated_at,
+  }));
+}
+
+export async function listNPCSessions(
+  npcId: string,
+  options: {
+    limit?: number;
+    before?: number;
+    eventNum?: number;
+  } = {}
+): Promise<V2ChatSession[]> {
+  const params = new URLSearchParams();
+  if (typeof options.limit === "number" && options.limit > 0) {
+    params.set("limit", String(options.limit));
+  }
+  if (typeof options.before === "number" && Number.isFinite(options.before) && options.before > 0) {
+    params.set("before", String(options.before));
+  }
+  if (typeof options.eventNum === "number" && options.eventNum > 0) {
+    params.set("event_num", String(options.eventNum));
+  }
+  const qs = params.toString();
+  const payload = await apiFetch<V2ChatSessionsResponse | V2ChatSession[]>(
+    `/v2/npc/${encodeURIComponent(npcId)}/sessions${qs ? `?${qs}` : ""}`
+  );
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && Array.isArray(payload.list)
+      ? payload.list
+      : [];
+  return rows
+    .map((row) => normalizeV2SessionRow(row))
+    .filter((row): row is V2ChatSession => Boolean(row));
+}
+
+export async function listNPCSessionMessages(npcId: string, sessionId: string): Promise<V2ChatSessionMessage[]> {
+  const payload = await apiFetch<V2ChatSessionMessagesResponse | V2ChatSessionMessage[]>(
+    `/v2/npc/${encodeURIComponent(npcId)}/sessions/${encodeURIComponent(sessionId)}/messages`
   );
   const rows = Array.isArray(payload)
     ? payload
@@ -1308,6 +1502,120 @@ export async function toggleAgentSkill(agentId: string, skillId: string, install
     {
       method: "POST",
       body: JSON.stringify({ install }),
+    }
+  );
+}
+
+export async function listKnowledgeDatasets(): Promise<KnowledgeDataset[]> {
+  const payload = await apiFetch<{ list?: V2KnowledgeDataset[] } | V2KnowledgeDataset[]>("/v2/knowledge");
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && Array.isArray(payload.list)
+      ? payload.list
+      : [];
+  return rows
+    .map((row, index) => normalizeKnowledgeDataset(row, index))
+    .filter((row): row is KnowledgeDataset => Boolean(row));
+}
+
+export async function listNPCs(): Promise<NPC[]> {
+  const payload = await apiFetch<{ list?: V2NPC[] } | V2NPC[]>("/v2/npc");
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && Array.isArray(payload.list)
+      ? payload.list
+      : [];
+  return rows
+    .map((row, index) => normalizeNPC(row, index))
+    .filter((row): row is NPC => Boolean(row));
+}
+
+export async function getNPC(npcId: string): Promise<NPC> {
+  const payload = await apiFetch<V2NPC>(`/v2/npc/${encodeURIComponent(npcId)}`);
+  const normalized = normalizeNPC(payload, 0);
+  if (!normalized) {
+    throw new Error("NPC payload missing id");
+  }
+  return normalized;
+}
+
+export async function createNPC(payload: CreateNPCInput): Promise<NPC> {
+  const created = await apiFetch<V2NPC>("/v2/npc", {
+    method: "POST",
+    body: JSON.stringify({
+      scope: payload.scope,
+      name: payload.name,
+      avatar_url: payload.avatar_url,
+      intro: payload.intro,
+      system_prompt: payload.system_prompt,
+      model_name: payload.model_name,
+    }),
+  });
+  const normalized = normalizeNPC(created, 0);
+  if (!normalized) {
+    throw new Error("Create NPC response missing id");
+  }
+  return normalized;
+}
+
+export async function updateNPC(npcId: string, payload: UpdateNPCInput): Promise<NPC> {
+  const updated = await apiFetch<V2NPC>(`/v2/npc/${encodeURIComponent(npcId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: payload.name,
+      avatar_url: payload.avatar_url,
+      intro: payload.intro,
+      system_prompt: payload.system_prompt,
+      model_name: payload.model_name,
+      status: payload.status,
+    }),
+  });
+  const normalized = normalizeNPC(updated, 0);
+  if (!normalized) {
+    throw new Error("Update NPC response missing id");
+  }
+  return normalized;
+}
+
+export async function deleteNPC(npcId: string) {
+  return apiFetch<{ ok?: boolean }>(`/v2/npc/${encodeURIComponent(npcId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function bindNPCSkill(npcId: string, skillId: string, skillScope: string = "system") {
+  return apiFetch<{ ok?: boolean }>(
+    `/v2/npc/${encodeURIComponent(npcId)}/skills/${encodeURIComponent(skillId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ skill_scope: skillScope }),
+    }
+  );
+}
+
+export async function unbindNPCSkill(npcId: string, bindingId: string) {
+  return apiFetch<{ ok?: boolean }>(
+    `/v2/npc/${encodeURIComponent(npcId)}/skills/${encodeURIComponent(bindingId)}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+export async function bindNPCKnowledge(npcId: string, datasetId: string) {
+  return apiFetch<{ ok?: boolean }>(
+    `/v2/npc/${encodeURIComponent(npcId)}/knowledge/${encodeURIComponent(datasetId)}`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function unbindNPCKnowledge(npcId: string, datasetId: string) {
+  return apiFetch<{ ok?: boolean }>(
+    `/v2/npc/${encodeURIComponent(npcId)}/knowledge/${encodeURIComponent(datasetId)}`,
+    {
+      method: "DELETE",
     }
   );
 }

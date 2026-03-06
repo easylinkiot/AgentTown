@@ -8,15 +8,21 @@ const DEFAULT_API_BASE_URL = "https://agenttown-api.kittens.cloud";
 const ASK_ANYTHING_STREAM_CANDIDATE_ID = "__assist_ask_anything_stream__";
 const ASSIST_DEBUG_PREFIX = "[chatAssist]";
 const AGENTTOWN_FALLBACK_PREFIX = "[agenttown-fallback]";
-const ASSIST_ACTION_TO_SKILL_ID: Record<Exclude<ChatAssistAction, "ask_anything">, string> = {
+const ASSIST_ACTION_TO_SKILL_ID: Record<AssistSkillAction, string> = {
   auto_reply: "professional-reply",
   add_task: "action-needs",
   translate: "translate",
   follow_up: "generate-idea",
 };
 
-export type ChatAssistAction = "auto_reply" | "add_task" | "ask_anything" | "translate" | "follow_up";
-export type AssistSkillAction = Exclude<ChatAssistAction, "ask_anything">;
+export type ChatAssistAction =
+  | "auto_reply"
+  | "add_task"
+  | "ask_anything"
+  | "translate"
+  | "follow_up"
+  | "generic_assist";
+export type AssistSkillAction = Exclude<ChatAssistAction, "ask_anything" | "generic_assist">;
 export const DEFAULT_ASSIST_SKILL_ACTIONS: readonly AssistSkillAction[] = [
   "auto_reply",
   "add_task",
@@ -26,9 +32,10 @@ export const DEFAULT_ASSIST_SKILL_ACTIONS: readonly AssistSkillAction[] = [
 
 export interface ChatAssistSkill {
   id: string;
-  action: AssistSkillAction;
+  action: AssistSkillAction | null;
   name: string;
   description?: string;
+  userInputRequired: boolean;
 }
 
 export function getDefaultAssistSkillId(action: AssistSkillAction) {
@@ -60,6 +67,7 @@ export interface ChatCompletionsRequest {
   target_id?: string;
   bot_owner_user_id?: string;
   skill_ids?: string[];
+  path?: string;
 }
 
 export interface AssistCandidate {
@@ -186,6 +194,17 @@ function toNumber(value: unknown) {
   return undefined;
 }
 
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+  }
+  return undefined;
+}
+
 function inferAssistSkillAction(skillID: string, name: string): AssistSkillAction | null {
   const haystack = `${skillID} ${name}`.toLowerCase().replace(/[_\s]+/g, "-");
   if (!haystack) return null;
@@ -238,19 +257,22 @@ function normalizeAssistSkill(item: unknown, index: number) {
     order?: unknown;
     sort?: unknown;
     priority?: unknown;
+    user_input_required?: unknown;
+    userInputRequired?: unknown;
   };
   const id = toText(row.skill_id) || toText(row.id);
   if (!id) return null;
   const name = toText(row.display_name) || toText(row.name) || toText(row.title) || toText(row.label) || id;
   const action = inferAssistSkillAction(id, name);
-  if (!action) return null;
   const description = toText(row.description) || toText(row.desc) || undefined;
   const order = toNumber(row.order) ?? toNumber(row.sort) ?? toNumber(row.priority) ?? index;
+  const userInputRequired = toBoolean(row.user_input_required) ?? toBoolean(row.userInputRequired) ?? false;
   return {
     id,
     action,
     name,
     description,
+    userInputRequired,
     order,
     index,
   };
@@ -499,6 +521,24 @@ function extractTextDelta(eventName: string, payload: unknown) {
     if (outputText !== "") return outputText;
   }
   return "";
+}
+
+function mergeStreamText(previousText: string, eventName: string, nextText: string) {
+  if (!nextText) return previousText;
+  if (eventName !== "message") {
+    return `${previousText}${nextText}`;
+  }
+  if (!previousText) {
+    return nextText;
+  }
+  if (
+    nextText === previousText ||
+    nextText.startsWith(previousText) ||
+    nextText.includes(previousText)
+  ) {
+    return nextText;
+  }
+  return `${previousText}${nextText}`;
 }
 
 function sanitizeAskAnythingText(input: string) {
@@ -819,9 +859,10 @@ export async function listChatAssistSkills(abortSignal?: AbortSignal) {
   }
   type NormalizedAssistSkill = {
     id: string;
-    action: AssistSkillAction;
+    action: AssistSkillAction | null;
     name: string;
     description?: string;
+    userInputRequired: boolean;
     order: number;
     index: number;
   };
@@ -834,16 +875,14 @@ export async function listChatAssistSkills(abortSignal?: AbortSignal) {
   }
   normalized.sort((a, b) => a.order - b.order || a.index - b.index);
 
-  const seenActions = new Set<AssistSkillAction>();
   const out: ChatAssistSkill[] = [];
   for (const item of normalized) {
-    if (seenActions.has(item.action)) continue;
-    seenActions.add(item.action);
     out.push({
       id: item.id,
       action: item.action,
       name: item.name,
       description: item.description,
+      userInputRequired: item.userInputRequired,
     });
   }
   return out;
@@ -885,7 +924,8 @@ export async function runChatAssist(
     return;
   }
 
-  const fallbackSkillID = ASSIST_ACTION_TO_SKILL_ID[request.action];
+  const fallbackSkillID =
+    request.action === "generic_assist" ? "" : ASSIST_ACTION_TO_SKILL_ID[request.action];
   const skillID = toText(request.skill_id) || fallbackSkillID;
   const token = getAuthToken();
   const url = `${getApiBaseUrl()}/v2/chat/assist`;
@@ -940,7 +980,8 @@ export async function runChatCompletions(
 ) {
   if (abortSignal?.aborted) return;
 
-  const url = `${getApiBaseUrl()}/v2/chat/completions`;
+  const path = (request.path || "").trim() || "/v2/chat/completions";
+  const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
   const token = getAuthToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -1007,7 +1048,7 @@ export async function runChatCompletions(
 
       const delta = extractTextDelta(eventName, data);
       if (!delta) return;
-      streamText = `${streamText}${delta}`;
+      streamText = mergeStreamText(streamText, eventName, delta);
       handlers.onText?.(streamText);
     };
 

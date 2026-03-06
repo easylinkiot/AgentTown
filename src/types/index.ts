@@ -133,6 +133,50 @@ export interface SkillCatalogItem {
   tags?: string[];
 }
 
+export interface NPCSkillBinding {
+  id: string;
+  npcId: string;
+  skillId: string;
+  skillName: string;
+  skillScope: string;
+  enabled: boolean;
+  priority: number;
+  createdAt: string;
+}
+
+export interface NPC {
+  id: string;
+  scope: string;
+  ownerUserId?: string;
+  name: string;
+  avatarUrl?: string;
+  intro?: string;
+  systemPrompt: string;
+  modelName?: string;
+  status?: string;
+  skillBindings: NPCSkillBinding[];
+  knowledgeIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeDatasetEntry {
+  id: string;
+  datasetId: string;
+  type: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface KnowledgeDataset {
+  id: string;
+  userId?: string;
+  name: string;
+  entries: KnowledgeDatasetEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CustomSkill {
   id: string;
   name: string;

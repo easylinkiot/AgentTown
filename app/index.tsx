@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Modal,
@@ -20,7 +21,8 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { MiniAppDock } from "@/src/components/MiniAppDock";
-import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
+import { NpcListItem } from "@/src/components/NpcListItem";
+import { LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { getCachedAgentSessions, preloadAgentSessions } from "@/src/features/chat/agent-sessions-cache";
 import { tx } from "@/src/i18n/translate";
@@ -30,12 +32,13 @@ import {
   discoverUsers,
   formatApiError,
   listFriendRequests,
+  listNPCs,
   rejectFriendRequest,
   scanFriendQR,
 } from "@/src/lib/api";
 import { isMyBotThreadId, useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
-import { ChatThread, FriendRequest } from "@/src/types";
+import { ChatThread, FriendRequest, NPC } from "@/src/types";
 
 type GroupCategoryOption = {
   key: string;
@@ -122,6 +125,7 @@ export default function HomeScreen() {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [refreshingChats, setRefreshingChats] = useState(false);
   const [openingAskAnything, setOpeningAskAnything] = useState(false);
+  const [npcList, setNpcList] = useState<NPC[]>([]);
 
   const list = useMemo(() => {
     const sorted = chatThreads.filter((thread) => !isMyBotThreadId(thread.id));
@@ -291,6 +295,33 @@ export default function HomeScreen() {
     });
   }, [isSignedIn]);
 
+  const refreshNPCList = useCallback(async () => {
+    try {
+      const rows = await listNPCs();
+      setNpcList(rows);
+    } catch (err) {
+      setNpcList([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setNpcList([]);
+      return;
+    }
+    void refreshNPCList();
+  }, [isSignedIn, refreshNPCList]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isSignedIn) {
+        setNpcList([]);
+        return;
+      }
+      void refreshNPCList();
+    }, [isSignedIn, refreshNPCList])
+  );
+
   const handleOpenThread = useCallback(
     (thread: ChatThread) => {
       router.push({
@@ -327,6 +358,19 @@ export default function HomeScreen() {
       setOpeningAskAnything(false);
     }
   }, [openingAskAnything, router, tr]);
+
+  const handleOpenNpc = useCallback(
+    (npc: NPC) => {
+      router.push({
+        pathname: "/npc-chat/[npcId]",
+        params: {
+          npcId: npc.id,
+          name: npc.name,
+        },
+      });
+    },
+    [router]
+  );
 
   const openEntityConfig = useCallback(
     (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
@@ -574,7 +618,7 @@ export default function HomeScreen() {
     setUiError(null);
     setRefreshingChats(true);
     try {
-      await refreshAll();
+      await Promise.all([refreshAll(), refreshNPCList()]);
     } catch (err) {
       setUiError(formatApiError(err));
     } finally {
@@ -585,7 +629,7 @@ export default function HomeScreen() {
       }
       setRefreshingChats(false);
     }
-  }, [refreshAll, refreshingChats]);
+  }, [refreshAll, refreshNPCList, refreshingChats]);
 
   return (
     <KeyframeBackground>
@@ -682,11 +726,14 @@ export default function HomeScreen() {
                 />
               )}
               contentContainerStyle={styles.listContent}
-              ListEmptyComponent={
-                <EmptyState
-                  title={tr("暂无会话", "No chats yet")}
-                  hint={tr("点击右上角创建朋友或群聊", "Tap the top-right icon to add a friend or create a group")}
-                />
+              ListHeaderComponent={
+                npcList.length > 0 ? (
+                  <View style={styles.npcListWrap}>
+                    {npcList.map((npc) => (
+                      <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
+                    ))}
+                  </View>
+                ) : null
               }
             />
           )}
@@ -796,6 +843,16 @@ export default function HomeScreen() {
               <Pressable style={styles.sheetItem} onPress={() => router.push("/miniapps" as never)}>
                 <Ionicons name="apps-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("Mini Apps", "Mini Apps")}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => {
+                  setPeopleModal(false);
+                  router.push("/npc-create" as never);
+                }}
+              >
+                <Ionicons name="sparkles-outline" size={16} color="#bfdbfe" />
+                <Text style={styles.sheetText}>{tr("创建 NPC", "Create NPC")}</Text>
               </Pressable>
               <Pressable style={styles.sheetClose} onPress={() => setPeopleModal(false)}>
                 <Text style={styles.sheetCloseText}>{tr("关闭", "Close")}</Text>
@@ -1146,6 +1203,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingTop: 6,
     paddingBottom: 18,
+  },
+  npcListWrap: {
+    marginBottom: 8,
   },
   refreshHint: {
     minHeight: 34,
