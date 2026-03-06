@@ -1131,120 +1131,59 @@ export async function uploadFileV2(input: UploadV2FileInput): Promise<UploadV2Fi
     };
   };
 
-  const fieldNames = ["file", "files", "upload"] as const;
-  let lastError: unknown = null;
-  for (const fieldName of fieldNames) {
-    const form = new FormData();
-    form.append(fieldName, {
-      uri,
-      name: filename,
-      type: mimeType,
-    } as any);
-    form.append("filename", filename);
+  const form = new FormData();
+  form.append("file", {
+    uri,
+    name: filename,
+    type: mimeType,
+  } as any);
+  form.append("filename", filename);
 
-    const response = await fetch(`${base}${path}`, {
+  const response = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    const parsed = parseApiErrorBody(text);
+    const bodyError = parsed?.error;
+    const code = coerceString(bodyError?.code) || coerceString(parsed?.code);
+    const canonicalMessage =
+      coerceString(bodyError?.message) ||
+      coerceString(parsed?.message) ||
+      sanitizeRawErrorText(text) ||
+      "API request failed";
+    const requestId =
+      coerceString(bodyError?.requestId) ||
+      coerceString(parsed?.requestId) ||
+      coerceString(response.headers.get("x-request-id")) ||
+      coerceString(response.headers.get("x-correlation-id"));
+    const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+    const details = bodyError?.details ?? parsed?.details;
+    throw new ApiError({
+      status: response.status,
       method: "POST",
-      headers,
-      body: form,
+      path,
+      baseUrl: base,
+      code,
+      details,
+      requestId,
+      retryAfterSeconds,
+      message: canonicalMessage,
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      const parsed = parseApiErrorBody(text);
-      const bodyError = parsed?.error;
-      const code = coerceString(bodyError?.code) || coerceString(parsed?.code);
-      const canonicalMessage =
-        coerceString(bodyError?.message) ||
-        coerceString(parsed?.message) ||
-        sanitizeRawErrorText(text) ||
-        `API request failed (${fieldName})`;
-      const requestId =
-        coerceString(bodyError?.requestId) ||
-        coerceString(parsed?.requestId) ||
-        coerceString(response.headers.get("x-request-id")) ||
-        coerceString(response.headers.get("x-correlation-id"));
-      const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
-      const details = bodyError?.details ?? parsed?.details;
-
-      lastError = new ApiError({
-        status: response.status,
-        method: "POST",
-        path,
-        baseUrl: base,
-        code,
-        details,
-        requestId,
-        retryAfterSeconds,
-        message: canonicalMessage,
-      });
-      continue;
-    }
-
-    const rawText = response.status === 204 ? "" : await response.text();
-    let payload: unknown = {};
-    if (rawText) {
-      try {
-        payload = JSON.parse(rawText);
-      } catch {
-        payload = { url: rawText };
-      }
-    }
-    return parseUploadPayload(payload);
   }
 
-  if (lastError instanceof ApiError && /file is required/i.test(lastError.message) && Platform.OS !== "web") {
+  const rawText = response.status === 204 ? "" : await response.text();
+  let payload: unknown = {};
+  if (rawText) {
     try {
-      const legacyFs = await import("expo-file-system/legacy");
-      const uploadType = (legacyFs as any).FileSystemUploadType?.MULTIPART;
-      const legacyResponse = await (legacyFs as any).uploadAsync(`${base}${path}`, uri, {
-        httpMethod: "POST",
-        uploadType,
-        fieldName: "file",
-        mimeType,
-        headers,
-      });
-
-      if (!legacyResponse || typeof legacyResponse.status !== "number") {
-        throw new Error("Legacy upload returned invalid response.");
-      }
-      if (legacyResponse.status < 200 || legacyResponse.status >= 300) {
-        const text = `${legacyResponse.body || ""}`;
-        const parsed = parseApiErrorBody(text);
-        const bodyError = parsed?.error;
-        const code = coerceString(bodyError?.code) || coerceString(parsed?.code);
-        const canonicalMessage =
-          coerceString(bodyError?.message) ||
-          coerceString(parsed?.message) ||
-          sanitizeRawErrorText(text) ||
-          "API request failed (legacy upload)";
-        throw new ApiError({
-          status: legacyResponse.status,
-          method: "POST",
-          path,
-          baseUrl: base,
-          code,
-          details: bodyError?.details ?? parsed?.details,
-          message: canonicalMessage,
-        });
-      }
-
-      let payload: unknown = {};
-      const bodyText = `${legacyResponse.body || ""}`.trim();
-      if (bodyText) {
-        try {
-          payload = JSON.parse(bodyText);
-        } catch {
-          payload = { url: bodyText };
-        }
-      }
-      return parseUploadPayload(payload);
-    } catch (legacyErr) {
-      lastError = legacyErr;
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = { url: rawText };
     }
   }
-
-  if (lastError) throw lastError;
-  throw new Error("File upload failed.");
+  return parseUploadPayload(payload);
 }
 
 export async function generateRoleReplies(threadId: string, payload: RoleRepliesInput) {

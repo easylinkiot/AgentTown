@@ -82,5 +82,32 @@ describe("v2 files upload api", () => {
     expect(result.url).toBe("https://cdn.example.com/files/top-level.jpg");
     expect(result.name).toBe("2.jpg");
     expect(result.mimeType).toBe("image/jpeg");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends only one upload request when api returns file is required", async () => {
+    fetchMock.mockResolvedValue(
+      mockResponse(
+        {
+          error: {
+            message: "file is required",
+          },
+          message: "file is required",
+        },
+        400
+      )
+    );
+
+    await expect(
+      uploadFileV2({
+        uri: "file:///tmp/3.jpg",
+        name: "3.jpg",
+        mimeType: "image/jpeg",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "file is required",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
