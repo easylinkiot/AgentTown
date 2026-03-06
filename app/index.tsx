@@ -84,7 +84,7 @@ function presenceRoleIcon(role: PresenceRole): React.ComponentProps<typeof Ionic
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { isSignedIn, user } = useAuth();
   const {
     chatThreads,
     friends,
@@ -285,10 +285,11 @@ export default function HomeScreen() {
   }, [friendModal]);
 
   useEffect(() => {
+    if (!isSignedIn) return;
     void preloadAgentSessions().catch(() => {
       // Ignore preload failures on home. Chat page will retry.
     });
-  }, []);
+  }, [isSignedIn]);
 
   const handleOpenThread = useCallback(
     (thread: ChatThread) => {

@@ -1,4 +1,5 @@
 import {
+  listChatAssistSkills,
   mergeAssistCandidates,
   runChatAssist,
   reduceAssistCandidatesFromEvent,
@@ -283,6 +284,82 @@ describe("chatAssist helpers", () => {
         description: "Before Friday",
         priority: "high",
       },
+    ]);
+  });
+
+  it("lists v2 assist skills and maps them into known actions", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          skills: [
+            { id: "professional-reply", name: "Reply Pro" },
+            { id: "action-needs", title: "Task Extractor" },
+            { id: "translate", label: "Translate" },
+            { id: "generate-idea", display_name: "Follow-up" },
+            { id: "unknown-skill", name: "Skip me" },
+          ],
+        }),
+    } as Response);
+
+    const list = await listChatAssistSkills();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/v2/chat/assist/skills");
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer access-token");
+    expect(list).toEqual([
+      { id: "professional-reply", action: "auto_reply", name: "Reply Pro" },
+      { id: "action-needs", action: "add_task", name: "Task Extractor" },
+      { id: "translate", action: "translate", name: "Translate" },
+      { id: "generate-idea", action: "follow_up", name: "Follow-up" },
+    ]);
+  });
+
+  it("prefers explicit skill_id from UI-selected assist skill", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          candidates: {
+            candidates: [{ id: "r1", text: "Reply One" }],
+          },
+        }),
+    } as Response);
+
+    await runChatAssist({
+      action: "auto_reply",
+      skill_id: "professional-reply-v2",
+      input: "rewrite this",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse((init.body as string) || "{}");
+    expect(body.skill_id).toBe("professional-reply-v2");
+  });
+
+  it("maps underscore skill ids from v2-api doc style", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          skills: [
+            { id: "professional_reply", name: "Professional Reply" },
+            { id: "action_needs", name: "Action Needs" },
+            { id: "generate_idea", name: "Generate Idea" },
+          ],
+        }),
+    } as Response);
+
+    const list = await listChatAssistSkills();
+    expect(list).toEqual([
+      { id: "professional_reply", action: "auto_reply", name: "Professional Reply" },
+      { id: "action_needs", action: "add_task", name: "Action Needs" },
+      { id: "generate_idea", action: "follow_up", name: "Generate Idea" },
     ]);
   });
 });

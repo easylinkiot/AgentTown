@@ -16,9 +16,28 @@ const ASSIST_ACTION_TO_SKILL_ID: Record<Exclude<ChatAssistAction, "ask_anything"
 };
 
 export type ChatAssistAction = "auto_reply" | "add_task" | "ask_anything" | "translate" | "follow_up";
+export type AssistSkillAction = Exclude<ChatAssistAction, "ask_anything">;
+export const DEFAULT_ASSIST_SKILL_ACTIONS: readonly AssistSkillAction[] = [
+  "auto_reply",
+  "add_task",
+  "translate",
+  "follow_up",
+];
+
+export interface ChatAssistSkill {
+  id: string;
+  action: AssistSkillAction;
+  name: string;
+  description?: string;
+}
+
+export function getDefaultAssistSkillId(action: AssistSkillAction) {
+  return ASSIST_ACTION_TO_SKILL_ID[action];
+}
 
 export interface ChatAssistRequest {
   action: ChatAssistAction;
+  skill_id?: string;
   input?: string;
   question?: string;
   target_type?: string;
@@ -155,6 +174,85 @@ function toText(value: unknown) {
 
 function toRawText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function toNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function inferAssistSkillAction(skillID: string, name: string): AssistSkillAction | null {
+  const haystack = `${skillID} ${name}`.toLowerCase().replace(/[_\s]+/g, "-");
+  if (!haystack) return null;
+  if (haystack.includes("translate")) return "translate";
+  if (haystack.includes("action-needs") || haystack.includes("add-task") || haystack.includes("task")) {
+    return "add_task";
+  }
+  if (haystack.includes("follow") || haystack.includes("idea")) return "follow_up";
+  if (haystack.includes("professional-reply") || haystack.includes("auto-reply") || haystack.includes("reply")) {
+    return "auto_reply";
+  }
+  return null;
+}
+
+function extractAssistSkillRows(payload: unknown, depth = 0): unknown[] {
+  if (depth > 4) return [];
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  const row = payload as {
+    skills?: unknown;
+    list?: unknown;
+    items?: unknown;
+    data?: unknown;
+    payload?: unknown;
+    result?: unknown;
+  };
+  if (Array.isArray(row.skills)) return row.skills;
+  const listLike = extractCandidateArray(row.skills);
+  if (listLike.length > 0) return listLike;
+  if (Array.isArray(row.list)) return row.list;
+  if (Array.isArray(row.items)) return row.items;
+  for (const nested of [row.data, row.payload, row.result]) {
+    const next = extractAssistSkillRows(nested, depth + 1);
+    if (next.length > 0) return next;
+  }
+  return [];
+}
+
+function normalizeAssistSkill(item: unknown, index: number) {
+  if (!item || typeof item !== "object") return null;
+  const row = item as {
+    id?: unknown;
+    skill_id?: unknown;
+    name?: unknown;
+    title?: unknown;
+    label?: unknown;
+    display_name?: unknown;
+    description?: unknown;
+    desc?: unknown;
+    order?: unknown;
+    sort?: unknown;
+    priority?: unknown;
+  };
+  const id = toText(row.skill_id) || toText(row.id);
+  if (!id) return null;
+  const name = toText(row.display_name) || toText(row.name) || toText(row.title) || toText(row.label) || id;
+  const action = inferAssistSkillAction(id, name);
+  if (!action) return null;
+  const description = toText(row.description) || toText(row.desc) || undefined;
+  const order = toNumber(row.order) ?? toNumber(row.sort) ?? toNumber(row.priority) ?? index;
+  return {
+    id,
+    action,
+    name,
+    description,
+    order,
+    index,
+  };
 }
 
 function isDebugEnabled() {
@@ -686,6 +784,62 @@ function buildV2AssistMessages(request: ChatAssistRequest) {
   return [{ role: "user" as const, content: combined }];
 }
 
+export async function listChatAssistSkills(abortSignal?: AbortSignal) {
+  const token = getAuthToken();
+  const response = await fetch(`${getApiBaseUrl()}/v2/chat/assist/skills`, {
+    method: "GET",
+    signal: abortSignal,
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const text = await response.text();
+  let body: unknown = {};
+  if (text.trim()) {
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      body = { message: text };
+    }
+  }
+  if (!response.ok) {
+    const row = body as { message?: unknown; error?: { message?: unknown } };
+    const message = toText(row?.error?.message) || toText(row?.message) || "Assist skills request failed";
+    throw new Error(message);
+  }
+  type NormalizedAssistSkill = {
+    id: string;
+    action: AssistSkillAction;
+    name: string;
+    description?: string;
+    order: number;
+    index: number;
+  };
+  const normalized: NormalizedAssistSkill[] = [];
+  const rows = extractAssistSkillRows(body);
+  for (let index = 0; index < rows.length; index += 1) {
+    const item = normalizeAssistSkill(rows[index], index);
+    if (!item) continue;
+    normalized.push(item);
+  }
+  normalized.sort((a, b) => a.order - b.order || a.index - b.index);
+
+  const seenActions = new Set<AssistSkillAction>();
+  const out: ChatAssistSkill[] = [];
+  for (const item of normalized) {
+    if (seenActions.has(item.action)) continue;
+    seenActions.add(item.action);
+    out.push({
+      id: item.id,
+      action: item.action,
+      name: item.name,
+      description: item.description,
+    });
+  }
+  return out;
+}
+
 export async function runChatAssist(
   request: ChatAssistRequest,
   handlers: RunChatAssistHandlers = {},
@@ -722,7 +876,8 @@ export async function runChatAssist(
     return;
   }
 
-  const skillID = ASSIST_ACTION_TO_SKILL_ID[request.action];
+  const fallbackSkillID = ASSIST_ACTION_TO_SKILL_ID[request.action];
+  const skillID = toText(request.skill_id) || fallbackSkillID;
   const token = getAuthToken();
   const url = `${getApiBaseUrl()}/v2/chat/assist`;
   const response = await fetch(url, {

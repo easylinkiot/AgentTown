@@ -66,10 +66,13 @@ import {
   type V2ChatSession,
 } from "@/src/lib/api";
 import {
+  DEFAULT_ASSIST_SKILL_ACTIONS,
   type AssistCandidate,
   type ChatAssistAction,
   type ChatAssistRequest,
   type ChatCompletionsRequest,
+  getDefaultAssistSkillId,
+  listChatAssistSkills,
   runChatAssist,
   runChatCompletions,
 } from "@/src/services/chatAssist";
@@ -121,8 +124,17 @@ type TaskNavIconProps = {
   color?: string;
   size?: number;
 };
+type AskAISkillOption = {
+  action: Exclude<ChatAssistAction, "ask_anything">;
+  skillId: string;
+  name?: string;
+};
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const DEFAULT_ASK_AI_SKILL_OPTIONS: AskAISkillOption[] = DEFAULT_ASSIST_SKILL_ACTIONS.map((action) => ({
+  action,
+  skillId: getDefaultAssistSkillId(action),
+}));
 
 const MESSAGE_FALLBACK_GAP = 1000;
 const DEV_STREAM_CHUNK_SIZE = 1;
@@ -153,6 +165,21 @@ const THREAD_LANGUAGE_OPTIONS: { key: TranslationMode; label: string }[] = [
 ];
 const GROUP_REPLY_MODE_STORAGE_PREFIX = "agenttown.group.reply.mode";
 
+function askAISkillFallbackLabel(action: Exclude<ChatAssistAction, "ask_anything">, tr: (zh: string, en: string) => string) {
+  switch (action) {
+    case "auto_reply":
+      return tr("回复", "Reply");
+    case "add_task":
+      return tr("任务", "Task");
+    case "translate":
+      return tr("翻译", "Translate");
+    case "follow_up":
+      return tr("跟进", "Follow-up");
+    default:
+      return action;
+  }
+}
+
 function TaskNavIcon({ color = "rgba(226,232,240,0.92)", size = 16 }: TaskNavIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -182,6 +209,18 @@ function formatMediaDuration(totalSeconds?: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function isIOSPhotoLibraryUri(uri: string) {
+  return Platform.OS === "ios" && uri.trim().toLowerCase().startsWith("ph://");
+}
+
+function normalizeRenderableImageUri(primary?: string, fallback?: string) {
+  const first = (primary || "").trim();
+  if (first && !isIOSPhotoLibraryUri(first)) return first;
+  const second = (fallback || "").trim();
+  if (second && !isIOSPhotoLibraryUri(second)) return second;
+  return "";
 }
 
 function inferMediaMimeType(asset: MediaPickerAsset) {
@@ -932,12 +971,20 @@ export default function ChatDetailScreen() {
         const mapped: MediaPickerAsset[] = await Promise.all(
           page.assets.map(async (asset) => {
             const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
-            let sourceUri = asset.uri;
-            let thumbUri = asset.uri;
+            let sourceUri = (asset.uri || "").trim();
+            let thumbUri = sourceUri;
+            try {
+              const info = await MediaLibrary.getAssetInfoAsync(asset.id);
+              const localUri = (info.localUri || "").trim();
+              const infoUri = (info.uri || "").trim();
+              sourceUri = localUri || infoUri || sourceUri;
+            } catch {
+              sourceUri = sourceUri || (asset.uri || "").trim();
+            }
+            thumbUri = sourceUri;
+
             if (isVideo) {
               try {
-                const info = await MediaLibrary.getAssetInfoAsync(asset.id);
-                sourceUri = (info.localUri || info.uri || asset.uri).trim() || asset.uri;
                 const thumbnail = await VideoThumbnails.getThumbnailAsync(sourceUri, {
                   time: 0,
                 });
@@ -949,6 +996,9 @@ export default function ChatDetailScreen() {
               } catch {
                 thumbUri = sourceUri;
               }
+            }
+            if (isIOSPhotoLibraryUri(thumbUri)) {
+              thumbUri = "";
             }
             return {
               id: asset.id,
@@ -1127,6 +1177,7 @@ export default function ChatDetailScreen() {
       const localId = `local_media_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`;
       const inferredName = inferUploadFilename(asset, index);
       const isVideo = asset.type === "video";
+      const previewImageUri = isVideo ? "" : normalizeRenderableImageUri(asset.uri, asset.thumbUri);
       const localMessage: ConversationMessage = {
         id: localId,
         threadId: chatId,
@@ -1136,7 +1187,7 @@ export default function ChatDetailScreen() {
         senderType: "human",
         content: isVideo ? inferredName : tr("[图片]", "[Image]"),
         type: isVideo ? "text" : "image",
-        imageUri: isVideo ? undefined : asset.uri,
+        imageUri: previewImageUri || undefined,
         imageName: isVideo ? undefined : inferredName,
         isMe: true,
         time: tr("刚刚", "Now"),
@@ -1693,6 +1744,7 @@ export default function ChatDetailScreen() {
   const [askAISelectedIndex, setAskAISelectedIndex] = useState(0);
   const [askAISelectedTaskKeys, setAskAISelectedTaskKeys] = useState<Set<string>>(new Set());
   const [askAIAction, setAskAIAction] = useState<ChatAssistAction>("auto_reply");
+  const [askAISkillOptions, setAskAISkillOptions] = useState<AskAISkillOption[]>(DEFAULT_ASK_AI_SKILL_OPTIONS);
   const [askAIMoreMenuOpen, setAskAIMoreMenuOpen] = useState(false);
   const [askAIError, setAskAIError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -2248,12 +2300,62 @@ export default function ChatDetailScreen() {
     };
   }, [abortAskAIStream]);
 
+  useEffect(() => {
+    if (!chatId) return;
+    let alive = true;
+    const controller = new AbortController();
+
+    const loadAssistSkills = async () => {
+      try {
+        const skills = await listChatAssistSkills(controller.signal);
+        if (!alive) return;
+        if (skills.length === 0) {
+          setAskAISkillOptions(DEFAULT_ASK_AI_SKILL_OPTIONS);
+          return;
+        }
+        setAskAISkillOptions(
+          skills.map((skill) => ({
+            action: skill.action,
+            skillId: skill.id,
+            name: skill.name,
+          }))
+        );
+      } catch {
+        if (!alive || controller.signal.aborted) return;
+        setAskAISkillOptions(DEFAULT_ASK_AI_SKILL_OPTIONS);
+      }
+    };
+
+    void loadAssistSkills();
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [chatId]);
+
   const closeActionModal = useCallback(() => {
     if (isAddingTasks) return;
     abortAskAIStream();
     setAskAIMoreMenuOpen(false);
     setActionModal(false);
   }, [abortAskAIStream, isAddingTasks]);
+
+  const askAISkillOptionByAction = useMemo(() => {
+    const next: Partial<Record<Exclude<ChatAssistAction, "ask_anything">, AskAISkillOption>> = {};
+    for (const item of askAISkillOptions) {
+      next[item.action] = item;
+    }
+    return next;
+  }, [askAISkillOptions]);
+  const defaultAssistAction = askAISkillOptions[0]?.action || "auto_reply";
+  const askAIPrimarySkillOptions = askAISkillOptions.slice(0, 2);
+  const askAIOverflowSkillOptions = askAISkillOptions.slice(2);
+
+  useEffect(() => {
+    if (askAIAction === "ask_anything") return;
+    if (askAISkillOptionByAction[askAIAction]) return;
+    setAskAIAction(defaultAssistAction);
+  }, [askAIAction, askAISkillOptionByAction, defaultAssistAction]);
 
   const runAssistGeneration = useCallback(
     async (action: ChatAssistAction) => {
@@ -2269,6 +2371,11 @@ export default function ChatDetailScreen() {
         selected_message_id: actionMessage.id,
         selected_message_content: selectedMessageContent,
       } as const;
+      const selectedSkill = action === "ask_anything" ? null : askAISkillOptionByAction[action];
+      if (action !== "ask_anything" && !selectedSkill?.skillId) {
+        setAskAIError(tr("AI 技能加载中，请稍后重试。", "Assist skills are still loading. Please try again."));
+        return;
+      }
 
       if (action === "ask_anything") {
         const question = askAI.trim();
@@ -2298,6 +2405,9 @@ export default function ChatDetailScreen() {
       setIsAddingTasks(false);
 
       const assistRequest: ChatAssistRequest = { ...requestPayload };
+      if (selectedSkill?.skillId) {
+        assistRequest.skill_id = selectedSkill.skillId;
+      }
       const inlineInput = askAI.trim();
       if (action === "ask_anything") {
         assistRequest.input = inlineInput;
@@ -2382,6 +2492,7 @@ export default function ChatDetailScreen() {
       abortAskAIStream,
       actionMessage,
       askAI,
+      askAISkillOptionByAction,
       chatId,
       isStreaming,
       thread.targetId,
@@ -2400,7 +2511,7 @@ export default function ChatDetailScreen() {
     setAskAISelectedIndex(0);
     setAskAISelectedTaskKeys(new Set());
     setAskAIError(null);
-    setAskAIAction("auto_reply");
+    setAskAIAction(defaultAssistAction);
     setAskAIMoreMenuOpen(false);
     setIsStreaming(false);
     setIsAddingTasks(false);
@@ -2417,7 +2528,7 @@ export default function ChatDetailScreen() {
     setAskAISelectedIndex(0);
     setAskAISelectedTaskKeys(new Set());
     setAskAIError(null);
-    setAskAIAction("auto_reply");
+    setAskAIAction(defaultAssistAction);
     setAskAIMoreMenuOpen(false);
     setIsStreaming(false);
     setIsAddingTasks(false);
@@ -2911,6 +3022,7 @@ export default function ChatDetailScreen() {
             </View>
           );
         }
+        const previewImageUri = normalizeRenderableImageUri(raw.imageUri);
 
         return (
           <View style={styles.messageBody}>
@@ -2921,7 +3033,7 @@ export default function ChatDetailScreen() {
                 </Text>
               </View>
             ) : null}
-            {raw.imageUri ? (
+            {previewImageUri ? (
               <View style={styles.imageWrap}>
                 {isMediaUploading ? (
                   <View style={[styles.mediaUploadBadge, meFinal && styles.mediaUploadBadgeMe]}>
@@ -2934,7 +3046,7 @@ export default function ChatDetailScreen() {
                     </Text>
                   </View>
                 ) : null}
-                <Image source={{ uri: raw.imageUri }} style={styles.imagePreview} />
+                <Image source={{ uri: previewImageUri }} style={styles.imagePreview} />
                 {raw.imageName ? <Text style={styles.imageLabel}>{raw.imageName}</Text> : null}
               </View>
             ) : null}
@@ -3074,8 +3186,9 @@ export default function ChatDetailScreen() {
     { paddingBottom: keyboardPadding },
   ];
   const chatBodyStyle = [styles.chatBody, isWideDesktopWeb && !aiAgentMode ? styles.chatBodyWide : null];
+  const askAIPrimaryActionSet = new Set(askAIPrimarySkillOptions.map((item) => item.action));
   const askAIActionIsOverflow =
-    askAIAction === "ask_anything" || askAIAction === "translate" || askAIAction === "follow_up";
+    askAIAction === "ask_anything" || !askAIPrimaryActionSet.has(askAIAction as Exclude<ChatAssistAction, "ask_anything">);
   const canAbortMyBotSend = myBotStreaming && (isMyBotChatThreadId(chatId) || aiAgentMode);
   const sendDisabled = canAbortMyBotSend ? false : submitting || !input.trim();
   const mediaSendDisabled = mediaSending || selectedAssets.length === 0;
@@ -3095,7 +3208,17 @@ export default function ChatDetailScreen() {
           ]}
           onPress={() => toggleMediaSelection(item.id)}
         >
-          <Image source={{ uri: item.thumbUri }} style={styles.mediaAssetThumb} />
+          {item.thumbUri ? (
+            <Image source={{ uri: item.thumbUri }} style={styles.mediaAssetThumb} />
+          ) : (
+            <View style={[styles.mediaAssetThumb, styles.mediaAssetThumbPlaceholder]}>
+              <Ionicons
+                name={item.type === "video" ? "videocam-outline" : "image-outline"}
+                size={18}
+                color="rgba(226,232,240,0.9)"
+              />
+            </View>
+          )}
           <View style={[styles.mediaAssetCheck, selected && styles.mediaAssetCheckSelected]}>
             {selected ? <Ionicons name="checkmark" size={12} color="#f8fafc" /> : null}
           </View>
@@ -3641,27 +3764,22 @@ export default function ChatDetailScreen() {
                 />
               </View>
               <View style={styles.aiModeRow}>
-                <Pressable
-                  style={[styles.aiModeBtn, askAIAction === "auto_reply" && styles.aiModeBtnActive]}
-                  onPress={() => {
-                    setAskAIAction("auto_reply");
-                    setAskAIMoreMenuOpen(false);
-                    void runAssistGeneration("auto_reply");
-                  }}
-                  disabled={isStreaming || isAddingTasks}
-                >
-                  <Text style={styles.aiModeBtnText}>{tr("回复", "Reply")}</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.aiModeBtn, askAIAction === "add_task" && styles.aiModeBtnActive]}
-                  onPress={() => {
-                    setAskAIAction("add_task");
-                    setAskAIMoreMenuOpen(false);
-                  }}
-                  disabled={isStreaming || isAddingTasks}
-                >
-                  <Text style={styles.aiModeBtnText}>{tr("任务", "Task")}</Text>
-                </Pressable>
+                {askAIPrimarySkillOptions.map((option) => (
+                  <Pressable
+                    key={option.action}
+                    style={[styles.aiModeBtn, askAIAction === option.action && styles.aiModeBtnActive]}
+                    onPress={() => {
+                      setAskAIAction(option.action);
+                      setAskAIMoreMenuOpen(false);
+                      if (option.action === "auto_reply") {
+                        void runAssistGeneration("auto_reply");
+                      }
+                    }}
+                    disabled={isStreaming || isAddingTasks}
+                  >
+                    <Text style={styles.aiModeBtnText}>{option.name || askAISkillFallbackLabel(option.action, tr)}</Text>
+                  </Pressable>
+                ))}
                 <Pressable
                   style={[
                     styles.aiModeBtn,
@@ -3686,34 +3804,25 @@ export default function ChatDetailScreen() {
                   >
                     <Text style={styles.aiModeMoreItemText}>{tr("问答", "Ask")}</Text>
                   </Pressable>
-                  <Pressable
-                    style={[
-                      styles.aiModeMoreItem,
-                      styles.aiModeMoreItemDivider,
-                      askAIAction === "translate" && styles.aiModeMoreItemActive,
-                    ]}
-                    onPress={() => {
-                      setAskAIAction("translate");
-                      setAskAIMoreMenuOpen(false);
-                    }}
-                    disabled={isStreaming || isAddingTasks}
-                  >
-                    <Text style={styles.aiModeMoreItemText}>{tr("翻译", "Translate")}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.aiModeMoreItem,
-                      styles.aiModeMoreItemDivider,
-                      askAIAction === "follow_up" && styles.aiModeMoreItemActive,
-                    ]}
-                    onPress={() => {
-                      setAskAIAction("follow_up");
-                      setAskAIMoreMenuOpen(false);
-                    }}
-                    disabled={isStreaming || isAddingTasks}
-                  >
-                    <Text style={styles.aiModeMoreItemText}>{tr("跟进", "Follow-up")}</Text>
-                  </Pressable>
+                  {askAIOverflowSkillOptions.map((option) => (
+                    <Pressable
+                      key={option.action}
+                      style={[
+                        styles.aiModeMoreItem,
+                        styles.aiModeMoreItemDivider,
+                        askAIAction === option.action && styles.aiModeMoreItemActive,
+                      ]}
+                      onPress={() => {
+                        setAskAIAction(option.action);
+                        setAskAIMoreMenuOpen(false);
+                      }}
+                      disabled={isStreaming || isAddingTasks}
+                    >
+                      <Text style={styles.aiModeMoreItemText}>
+                        {option.name || askAISkillFallbackLabel(option.action, tr)}
+                      </Text>
+                    </Pressable>
+                  ))}
                   <Pressable
                     style={[styles.aiModeMoreItem, styles.aiModeMoreItemDivider]}
                     onPress={() => {
@@ -4722,6 +4831,11 @@ const styles = StyleSheet.create({
   mediaAssetThumb: {
     width: "100%",
     height: "100%",
+  },
+  mediaAssetThumbPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.52)",
   },
   mediaAssetCheck: {
     position: "absolute",

@@ -35,15 +35,9 @@ import {
 WebBrowser.maybeCompleteAuthSession();
 
 const DEV_LOGIN_PRESET = {
-  email: "admin.local@agenttown.dev",
-  password: "AgentTown#2026!",
-  displayName: "Local Admin",
-};
-
-const DEV_LOGIN_PRESET_ = {
-  email: "fulladmin.20260225@agenttown.dev",
-  password: "AgentTown#2026",
-  displayName: "Local Admin",
+  email: "2244661996@qq.com",
+  password: "aes123xx",
+  displayName: "Sven",
 };
 
 interface GoogleProfile {
