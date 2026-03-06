@@ -2250,11 +2250,11 @@ export default function ChatDetailScreen() {
               }
               if (nextSessionId !== chatId) {
                 router.replace({
-                  pathname: "/ai-chat/[id]",
+                  pathname: "/ai-chat/[id]" as never,
                   params: {
                     id: nextSessionId,
                     isGroup: "false",
-                  },
+                  } as never,
                 });
               }
             }

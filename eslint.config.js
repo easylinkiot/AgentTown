@@ -14,6 +14,15 @@ module.exports = [
     },
   },
   {
-    ignores: [".expo/**", "dist/**", "web-build/**", "design/**"],
+    ignores: [
+      ".expo/**",
+      "artifacts/**",
+      "design/**",
+      "dist/**",
+      "e2e-artifacts/**",
+      "reports/**",
+      "test-evidence/**",
+      "web-build/**",
+    ],
   },
 ];

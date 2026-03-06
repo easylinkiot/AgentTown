@@ -432,8 +432,8 @@ export default function NPCChatScreen() {
               style={styles.editBtn}
               onPress={() =>
                 router.push({
-                  pathname: "/npc-config/[npcId]",
-                  params: { npcId, entrySource: "chat" },
+                  pathname: "/npc-config/[npcId]" as never,
+                  params: { npcId, entrySource: "chat" } as never,
                 })
               }
             >

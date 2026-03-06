@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -7,7 +8,9 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -30,11 +33,13 @@ import {
   acceptFriendRequest,
   ApiError,
   discoverUsers,
+  extractFriendQrToken,
   formatApiError,
   listFriendRequests,
   listNPCs,
   rejectFriendRequest,
   scanFriendQR,
+  subscribeRealtime,
 } from "@/src/lib/api";
 import { isMyBotThreadId, useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -116,6 +121,9 @@ export default function HomeScreen() {
   const [scanToken, setScanToken] = useState("");
   const [friendActionBusy, setFriendActionBusy] = useState(false);
   const [friendActionStatus, setFriendActionStatus] = useState<string | null>(null);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [scannerLocked, setScannerLocked] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const [groupName, setGroupName] = useState("");
   const [groupAvatar, setGroupAvatar] = useState("");
@@ -280,11 +288,54 @@ export default function HomeScreen() {
   }, [friendModal, user?.id]);
 
   useEffect(() => {
+    const actorUserID = (user?.id || "").trim();
+    if (!isSignedIn || !actorUserID) return;
+
+    const syncIncomingRequests = async () => {
+      try {
+        const list = await listFriendRequests();
+        const incoming = Array.isArray(list)
+          ? list.filter(
+              (req) =>
+                (req.status || "").trim() === "pending" &&
+                (req.toUserId || "").trim() === actorUserID
+            )
+          : [];
+        setFriendRequests(incoming);
+      } catch {
+        // Keep the last visible request state if realtime refresh fails.
+      }
+    };
+
+    const unsubscribe = subscribeRealtime((event) => {
+      if (!event?.type) return;
+      if (event.type !== "friend.request.created" && event.type !== "friend.request.updated") return;
+
+      const payload = (event.payload || {}) as Partial<FriendRequest>;
+      const fromUserId = (payload.fromUserId || "").trim();
+      const toUserId = (payload.toUserId || "").trim();
+      if (fromUserId !== actorUserID && toUserId !== actorUserID) return;
+
+      if (fromUserId === actorUserID && (payload.status || "").trim() === "accepted") {
+        setFriendActionStatus(tr("对方已接受邀请，已进入好友列表。", "Invite accepted. The friend is now in your list."));
+      }
+
+      if (friendModal) {
+        void syncIncomingRequests();
+      }
+    });
+
+    return unsubscribe;
+  }, [friendModal, isSignedIn, tr, user?.id]);
+
+  useEffect(() => {
     if (!friendModal) {
       setFriendQuery("");
       setScanToken("");
       setFriendActionStatus(null);
       setFriendActionBusy(false);
+      setScannerVisible(false);
+      setScannerLocked(false);
     }
   }, [friendModal]);
 
@@ -299,7 +350,7 @@ export default function HomeScreen() {
     try {
       const rows = await listNPCs();
       setNpcList(rows);
-    } catch (err) {
+    } catch {
       setNpcList([]);
     }
   }, []);
@@ -345,12 +396,12 @@ export default function HomeScreen() {
       const sessions = cached.length > 0 ? cached : await preloadAgentSessions();
       const latest = sessions[0];
       router.push({
-        pathname: "/ai-chat/[id]",
+        pathname: "/ai-chat/[id]" as never,
         params: {
           id: latest?.id || "new",
           name: latest?.title || tr("AI 助手", "AI Assistant"),
           isGroup: "false",
-        },
+        } as never,
       });
     } catch (err) {
       setUiError(formatApiError(err));
@@ -362,11 +413,11 @@ export default function HomeScreen() {
   const handleOpenNpc = useCallback(
     (npc: NPC) => {
       router.push({
-        pathname: "/npc-chat/[npcId]",
+        pathname: "/npc-chat/[npcId]" as never,
         params: {
           npcId: npc.id,
           name: npc.name,
-        },
+        } as never,
       });
     },
     [router]
@@ -511,9 +562,14 @@ export default function HomeScreen() {
     setRequestActionId(requestId);
     setUiError(null);
     try {
-      await acceptFriendRequest(requestId);
+      const accepted = await acceptFriendRequest(requestId);
       await refreshAll();
       setFriendRequests((prev) => prev.filter((item) => item.id !== requestId));
+      setFriendActionStatus(tr("好友邀请已接受。", "Friend invite accepted."));
+      if (accepted.thread?.id) {
+        setFriendModal(false);
+        handleOpenThread(accepted.thread);
+      }
     } catch (err) {
       setUiError(formatApiError(err));
     } finally {
@@ -535,8 +591,8 @@ export default function HomeScreen() {
     }
   };
 
-  const handleScanByToken = async () => {
-    const token = scanToken.trim();
+  const handleScanByToken = async (rawInput = scanToken) => {
+    const token = extractFriendQrToken(rawInput);
     if (!token || friendActionBusy) return;
     setUiError(null);
     setFriendActionBusy(true);
@@ -570,7 +626,7 @@ export default function HomeScreen() {
 
   const handleConfirmFriendAction = async () => {
     if (friendActionBusy) return;
-    if (scanToken.trim()) {
+    if (extractFriendQrToken(scanToken)) {
       await handleScanByToken();
       return;
     }
@@ -578,7 +634,42 @@ export default function HomeScreen() {
   };
 
   const canConfirmFriendAction =
-    (friendQuery.trim().length > 0 || scanToken.trim().length > 0) && !friendActionBusy;
+    (friendQuery.trim().length > 0 || extractFriendQrToken(scanToken).length > 0) && !friendActionBusy;
+
+  const handleOpenScanner = useCallback(async () => {
+    setUiError(null);
+    setFriendActionStatus(null);
+    if (cameraPermission?.granted) {
+      setScannerLocked(false);
+      setScannerVisible(true);
+      return;
+    }
+    const next = await requestCameraPermission();
+    if (!next.granted) {
+      setUiError(tr("没有相机权限，无法扫码。", "Camera permission is required to scan QR codes."));
+      return;
+    }
+    setScannerLocked(false);
+    setScannerVisible(true);
+  }, [cameraPermission?.granted, requestCameraPermission, tr]);
+
+  const handleCameraScanned = useCallback(
+    async ({ data }: BarcodeScanningResult) => {
+      if (scannerLocked) return;
+      const raw = typeof data === "string" ? data : "";
+      const token = extractFriendQrToken(raw);
+      if (!token) {
+        setUiError(tr("未识别到好友二维码。", "No valid friend QR code was detected."));
+        return;
+      }
+      setScannerLocked(true);
+      setScannerVisible(false);
+      setScanToken(raw);
+      await handleScanByToken(raw);
+      setScannerLocked(false);
+    },
+    [handleScanByToken, scannerLocked, tr]
+  );
 
   const handleCreateGroup = async () => {
     const safeName = groupName.trim();
@@ -863,6 +954,10 @@ export default function HomeScreen() {
 
         <Modal visible={friendModal} transparent animationType="fade" onRequestClose={() => setFriendModal(false)}>
           <Pressable style={styles.modalOverlay} onPress={() => setFriendModal(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+            >
             <Pressable style={styles.formCard} onPress={() => null}>
               <Text style={styles.formTitle}>{tr("添加朋友", "Add Friend")}</Text>
               <TextInput
@@ -877,8 +972,8 @@ export default function HomeScreen() {
               />
               <Text style={styles.friendHelpText}>
                 {tr(
-                  "可直接输入好友账号，或粘贴好友分享的二维码内容。",
-                  "Enter your friend's account, or paste a QR payload shared by your friend."
+                  "可直接输入好友账号，或粘贴好友分享的二维码 / 链接。",
+                  "Enter your friend's account, or paste a QR payload / share link."
                 )}
               </Text>
 
@@ -886,14 +981,30 @@ export default function HomeScreen() {
                 <TextInput
                   value={scanToken}
                   onChangeText={setScanToken}
-                  placeholder={tr("粘贴二维码内容以添加好友", "Paste QR payload to add friend")}
+                  placeholder={tr("粘贴二维码、分享链接或扫码结果", "Paste QR payload, share link, or scan result")}
                   placeholderTextColor="rgba(148,163,184,0.9)"
                   style={[styles.input, styles.qrScanInput]}
                 autoComplete="off"
                 textContentType="oneTimeCode"
                 importantForAutofill="no"
                 />
+                <Pressable
+                  style={[styles.scanBtn, friendActionBusy && styles.formCtaDisabled]}
+                  onPress={() => {
+                    void handleOpenScanner();
+                  }}
+                  disabled={friendActionBusy}
+                >
+                  <Ionicons name="scan-outline" size={16} color="#dbeafe" />
+                  <Text style={styles.scanBtnText}>{tr("扫码", "Scan")}</Text>
+                </Pressable>
               </View>
+              <Text style={styles.friendHelpText}>
+                {tr(
+                  "系统相机扫码打开 AgentTown 后，也会自动识别好友二维码。",
+                  "If the system camera opens AgentTown after scanning, the friend QR will be recognized automatically."
+                )}
+              </Text>
 
               <View style={styles.candidateList}>
                 {friendActionStatus ? (
@@ -982,11 +1093,16 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
             </Pressable>
+            </KeyboardAvoidingView>
           </Pressable>
         </Modal>
 
         <Modal visible={groupModal} transparent animationType="fade" onRequestClose={() => setGroupModal(false)}>
           <Pressable style={styles.modalOverlay} onPress={() => setGroupModal(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+            >
             <Pressable style={styles.formCard} onPress={() => null}>
               <Text style={styles.formTitle}>{tr("新建群聊", "New Group")}</Text>
               <TextInput
@@ -1085,7 +1201,50 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
             </Pressable>
+            </KeyboardAvoidingView>
           </Pressable>
+        </Modal>
+
+        <Modal
+          visible={scannerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setScannerVisible(false);
+            setScannerLocked(false);
+          }}
+        >
+          <View style={styles.scannerOverlay}>
+            <View style={styles.scannerCard}>
+              <View style={styles.scannerHeader}>
+                <Text style={styles.formTitle}>{tr("扫描好友二维码", "Scan Friend QR")}</Text>
+                <Pressable
+                  style={styles.scannerCloseBtn}
+                  onPress={() => {
+                    setScannerVisible(false);
+                    setScannerLocked(false);
+                  }}
+                >
+                  <Ionicons name="close" size={18} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+              </View>
+              <Text style={styles.friendHelpText}>
+                {tr(
+                  "将好友二维码放入取景框，识别后会直接发送邀请或添加好友。",
+                  "Place your friend's QR code inside the frame. AgentTown will add or invite automatically."
+                )}
+              </Text>
+              <View style={styles.scannerPreview}>
+                <CameraView
+                  style={styles.scannerCamera}
+                  facing="back"
+                  barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                  onBarcodeScanned={scannerLocked ? undefined : handleCameraScanned}
+                />
+                <View pointerEvents="none" style={styles.scannerFrame} />
+              </View>
+            </View>
+          </View>
         </Modal>
       </SafeAreaView>
     </KeyframeBackground>
@@ -1415,6 +1574,23 @@ const styles = StyleSheet.create({
   qrScanInput: {
     flex: 1,
   },
+  scanBtn: {
+    minWidth: 86,
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.45)",
+    backgroundColor: "rgba(37,99,235,0.28)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+  },
+  scanBtnText: {
+    color: "#dbeafe",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   friendStatusCard: {
     borderRadius: 10,
     borderWidth: 1,
@@ -1462,6 +1638,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 12,
     lineHeight: 18,
+  },
+  scannerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2,6,23,0.82)",
+    paddingHorizontal: 18,
+    paddingVertical: 40,
+    justifyContent: "center",
+  },
+  scannerCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(15,23,42,0.92)",
+    padding: 16,
+    gap: 12,
+  },
+  scannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  scannerCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  scannerPreview: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 18,
+    aspectRatio: 1,
+    backgroundColor: "#020617",
+  },
+  scannerCamera: {
+    flex: 1,
+  },
+  scannerFrame: {
+    position: "absolute",
+    left: "16%",
+    right: "16%",
+    top: "16%",
+    bottom: "16%",
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: "rgba(191,219,254,0.92)",
   },
   requestSection: {
     marginBottom: 8,

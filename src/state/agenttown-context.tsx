@@ -384,6 +384,57 @@ function updateThreadPreview(threads: ChatThread[], threadId: string, preview: s
   return next;
 }
 
+function syncDirectThreadFromFriend(threads: ChatThread[], friend: Friend): ChatThread[] {
+  const threadId = (friend.threadId || "").trim();
+  const friendUserId = (friend.userId || "").trim();
+  if (!threadId) return threads;
+
+  let changed = false;
+  const nextThreads = threads.map((thread) => {
+    if (thread.id !== threadId) return thread;
+
+    const nextName = (friend.name || "").trim() || thread.name;
+    const nextAvatar = (friend.avatar || "").trim() || thread.avatar;
+    const nextTargetType = thread.targetType || "user";
+    const nextTargetId = friendUserId || thread.targetId;
+
+    if (
+      thread.name === nextName &&
+      thread.avatar === nextAvatar &&
+      thread.targetType === nextTargetType &&
+      thread.targetId === nextTargetId
+    ) {
+      return thread;
+    }
+
+    changed = true;
+    return {
+      ...thread,
+      name: nextName,
+      avatar: nextAvatar,
+      targetType: nextTargetType,
+      targetId: nextTargetId,
+    };
+  });
+
+  if (changed) return nextThreads;
+
+  return upsertById(
+    threads,
+    {
+      id: threadId,
+      name: (friend.name || "").trim() || "Direct chat",
+      avatar: (friend.avatar || "").trim(),
+      message: "",
+      time: "Now",
+      isGroup: false,
+      targetType: "user",
+      targetId: friendUserId,
+    },
+    true
+  );
+}
+
 function mergeThreadsById(...lists: ChatThread[][]): ChatThread[] {
   const order: string[] = [];
   const byId = new Map<string, ChatThread>();
@@ -1137,6 +1188,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const payload = event.payload as Friend;
           if (!payload?.id) break;
           setFriends((prev) => upsertById(prev, payload, true));
+          setChatThreads((prev) => syncDirectThreadFromFriend(prev, payload));
           break;
         }
         case "friend.deleted": {
@@ -1174,6 +1226,13 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             if (members.some((item) => item.id === payload.id)) {
               return prev;
             }
+            setChatThreads((threads) =>
+              threads.map((thread) =>
+                thread.id === threadId && thread.isGroup
+                  ? { ...thread, memberCount: (thread.memberCount || 0) + 1 }
+                  : thread
+              )
+            );
             return {
               ...prev,
               [threadId]: [...members, { ...payload, threadId }],
@@ -1186,7 +1245,21 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const threadId = event.threadId || payload?.threadId;
           if (!threadId || !payload?.id) break;
           setThreadMembers((prev) => {
+            const hasCachedMembers = threadId in prev;
             const members = prev[threadId] || [];
+            if (hasCachedMembers && !members.some((item) => item.id === payload.id)) {
+              return prev;
+            }
+            setChatThreads((threads) =>
+              threads.map((thread) =>
+                thread.id === threadId && thread.isGroup
+                  ? { ...thread, memberCount: Math.max(1, (thread.memberCount || 1) - 1) }
+                  : thread
+              )
+            );
+            if (!hasCachedMembers) {
+              return prev;
+            }
             return {
               ...prev,
               [threadId]: members.filter((item) => item.id !== payload.id),
@@ -1424,23 +1497,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         if (created.mode === "friend" && created.friend) {
           const nextFriend = created.friend as Friend;
           setFriends((prev) => upsertById(prev, nextFriend, true));
+          setChatThreads((prev) => syncDirectThreadFromFriend(prev, nextFriend));
 
           const threadId = (nextFriend.threadId || "").trim();
           if (threadId) {
-            setChatThreads((prev) => {
-              if (prev.some((thread) => thread.id === threadId)) return prev;
-              const directThread: ChatThread = {
-                id: threadId,
-                name: nextFriend.name || "Direct chat",
-                avatar: nextFriend.avatar || "",
-                message: "",
-                time: "Now",
-                isGroup: false,
-                targetType: "user",
-                targetId: nextFriend.userId || "",
-              };
-              return upsertById(prev, directThread, true);
-            });
             return nextFriend;
           }
 
@@ -1639,18 +1699,18 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             if (members.some((item) => item.id === member.id)) {
               return prev;
             }
+            setChatThreads((threads) =>
+              threads.map((thread) =>
+                thread.id === threadId && thread.isGroup
+                  ? { ...thread, memberCount: (thread.memberCount || 0) + 1 }
+                  : thread
+              )
+            );
             return {
               ...prev,
               [threadId]: [...members, member],
             };
           });
-          setChatThreads((prev) =>
-            prev.map((thread) =>
-              thread.id === threadId && thread.isGroup
-                ? { ...thread, memberCount: (thread.memberCount || 0) + 1 }
-                : thread
-            )
-          );
         } catch (err) {
           throw err;
         }

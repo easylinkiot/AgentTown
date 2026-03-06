@@ -389,11 +389,13 @@ describe("chatAssist helpers", () => {
     expect(url).toBe("https://api.example.com/v2/chat/assist/skills");
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer access-token");
-    expect(list).toEqual([
-      { id: "professional-reply", action: "auto_reply", name: "Reply Pro" },
-      { id: "action-needs", action: "add_task", name: "Task Extractor" },
-      { id: "translate", action: "translate", name: "Translate" },
-      { id: "generate-idea", action: "follow_up", name: "Follow-up" },
+    expect(list).toHaveLength(5);
+    expect(list).toMatchObject([
+      { id: "professional-reply", action: "auto_reply", name: "Reply Pro", userInputRequired: false },
+      { id: "action-needs", action: "add_task", name: "Task Extractor", userInputRequired: false },
+      { id: "translate", action: "translate", name: "Translate", userInputRequired: false },
+      { id: "generate-idea", action: "follow_up", name: "Follow-up", userInputRequired: false },
+      { id: "unknown-skill", action: null, name: "Skip me", userInputRequired: false },
     ]);
   });
 
@@ -435,10 +437,11 @@ describe("chatAssist helpers", () => {
     } as Response);
 
     const list = await listChatAssistSkills();
-    expect(list).toEqual([
-      { id: "professional_reply", action: "auto_reply", name: "Professional Reply" },
-      { id: "action_needs", action: "add_task", name: "Action Needs" },
-      { id: "generate_idea", action: "follow_up", name: "Generate Idea" },
+    expect(list).toHaveLength(3);
+    expect(list).toMatchObject([
+      { id: "professional_reply", action: "auto_reply", name: "Professional Reply", userInputRequired: false },
+      { id: "action_needs", action: "add_task", name: "Action Needs", userInputRequired: false },
+      { id: "generate_idea", action: "follow_up", name: "Generate Idea", userInputRequired: false },
     ]);
   });
 });
