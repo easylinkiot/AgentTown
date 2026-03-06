@@ -25,6 +25,7 @@ import {
   generateRoleReplies as generateRoleRepliesApi,
   installBotSkill as installBotSkillApi,
   installMiniApp as installMiniAppApi,
+  installPresetMiniApp as installPresetMiniAppApi,
   listThreadMembers as listThreadMembersApi,
   listThreadMessages as listThreadMessagesApi,
   listChatThreads as listChatThreadsApi,
@@ -165,6 +166,7 @@ interface AgentTownContextValue {
   generateRoleReplies: (threadId: string, prompt: string, memberIds?: string[]) => Promise<ConversationMessage[]>;
   generateMiniApp: (query: string, sources: string[]) => Promise<MiniApp | null>;
   installMiniApp: (appId: string, install?: boolean) => Promise<void>;
+  installPresetMiniApp: (presetKey: "news" | "price" | "words") => Promise<MiniApp>;
   runMiniApp: (
     appId: string,
     input: string,
@@ -1834,6 +1836,11 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         if (!appId) return;
         const updated = await installMiniAppApi(appId, install);
         setMiniApps((prev) => upsertById(prev, updated, true));
+      },
+      installPresetMiniApp: async (presetKey) => {
+        const updated = await installPresetMiniAppApi(presetKey);
+        setMiniApps((prev) => upsertById(prev, updated, true));
+        return updated;
       },
       runMiniApp: async (appId, input, params, threadId) => {
         if (!appId || (!input.trim() && !params)) return null;

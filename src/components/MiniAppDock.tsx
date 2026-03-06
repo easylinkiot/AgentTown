@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
+  Alert,
   Image,
   Modal,
   Pressable,
@@ -16,8 +17,10 @@ import { tx } from "@/src/i18n/translate";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { AppLanguage, MiniApp } from "@/src/types";
 
-type DockAction = {
-  id: string;
+type PresetKey = "news" | "price" | "words";
+
+type PresetAction = {
+  id: PresetKey;
   zh: string;
   en: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -37,9 +40,9 @@ type DockExample = {
   promptEn: string;
 };
 
-const QUICK_ACTIONS: DockAction[] = [
+const PRESET_ACTIONS: PresetAction[] = [
   {
-    id: "focus",
+    id: "news",
     zh: "关注",
     en: "News",
     icon: "newspaper-outline",
@@ -70,17 +73,6 @@ const QUICK_ACTIONS: DockAction[] = [
       "生成一个英语背单词 Mini App：每天随机生成高阶词，提供美式发音、同义/反义词、例句、记忆口诀和小测题，并支持翻面记忆海报。",
     promptEn:
       "Build a daily vocabulary mini app: word of the day with pronunciation, synonyms/antonyms, example sentence, memory tip, and quiz line in a flip-to-reveal poster layout.",
-  },
-  {
-    id: "tasks",
-    zh: "待办",
-    en: "Todo",
-    icon: "checkmark-done-outline",
-    color: "#22c55e",
-    promptZh:
-      "生成一个待办象限 Mini App：把任务按紧急/重要排序。海报包含4个核心指标卡、今日重点、风险提示和下一步执行建议。",
-    promptEn:
-      "Build an Eisenhower-matrix mini app that ranks tasks by urgency/importance. Poster should include 4 KPI cards, today's focus, risk alerts, and next-step recommendations.",
   },
 ];
 
@@ -134,12 +126,8 @@ const EXAMPLES: DockExample[] = [
   },
 ];
 
-function actionLabel(action: DockAction, language: AppLanguage) {
+function actionLabel(action: PresetAction, language: AppLanguage) {
   return language === "zh" ? action.zh : action.en;
-}
-
-function promptForAction(action: DockAction, language: AppLanguage) {
-  return language === "zh" ? action.promptZh : action.promptEn;
 }
 
 function exampleTitle(example: DockExample, language: AppLanguage) {
@@ -160,9 +148,31 @@ function heroForApp(app: MiniApp | null) {
   return "https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?auto=format&fit=crop&w=1200&q=60";
 }
 
+function inferPresetKey(app: MiniApp): PresetKey | null {
+  const rawPreset = typeof app.presetKey === "string" ? app.presetKey.trim().toLowerCase() : "";
+  if (rawPreset === "news" || rawPreset === "price" || rawPreset === "words") {
+    return rawPreset;
+  }
+
+  const category = (app.category || "").trim().toLowerCase();
+  const previewType = typeof app.preview?.uiType === "string" ? app.preview.uiType.trim().toLowerCase() : "";
+  const query = (app.query || "").trim().toLowerCase();
+
+  if (category === "news_feed" || previewType === "news_feed" || query.includes("news") || query.includes("早报")) {
+    return "news";
+  }
+  if (category === "price_tracker" || previewType === "price_tracker" || query.includes("price") || query.includes("比价")) {
+    return "price";
+  }
+  if (category === "flashcard" || previewType === "flashcard" || query.includes("word") || query.includes("单词")) {
+    return "words";
+  }
+  return null;
+}
+
 export function MiniAppDock() {
   const router = useRouter();
-  const { language, miniAppGeneration, generateMiniApp, installMiniApp } = useAgentTown();
+  const { language, miniApps, miniAppGeneration, generateMiniApp, installMiniApp, installPresetMiniApp } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
 
   const [collapsed, setCollapsed] = useState(false);
@@ -170,6 +180,29 @@ export function MiniAppDock() {
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<MiniApp | null>(null);
+  const [pendingPreset, setPendingPreset] = useState<PresetKey | null>(null);
+
+  const installedByPreset = useMemo(() => {
+    const map: Record<PresetKey, MiniApp | null> = {
+      news: null,
+      price: null,
+      words: null,
+    };
+    for (const app of miniApps) {
+      if (!app.installed) continue;
+      const key = inferPresetKey(app);
+      if (!key) continue;
+      if (!map[key]) {
+        map[key] = app;
+      }
+    }
+    return map;
+  }, [miniApps]);
+
+  const installedCustomApps = useMemo(
+    () => miniApps.filter((app) => app.installed && !inferPresetKey(app)),
+    [miniApps]
+  );
 
   const latestGenerated = useMemo(() => generated, [generated]);
 
@@ -197,9 +230,40 @@ export function MiniAppDock() {
 
   const canInstall = !!latestGenerated && !latestGenerated.installed;
 
+  const handlePresetPress = (presetKey: PresetKey) => {
+    const installed = installedByPreset[presetKey];
+    if (installed) {
+      router.push(`/miniapp/${installed.id}`);
+      return;
+    }
+    if (pendingPreset) return;
+
+    Alert.alert(
+      tr("未安装", "Not Installed"),
+      tr("该默认 Mini App 还未安装，是否现在安装并打开？", "This default mini app is not installed. Install and open now?"),
+      [
+        { text: tr("取消", "Cancel"), style: "cancel" },
+        {
+          text: tr("安装并打开", "Install & Open"),
+          onPress: () => {
+            setPendingPreset(presetKey);
+            void installPresetMiniApp(presetKey)
+              .then((app) => {
+                router.push(`/miniapp/${app.id}`);
+              })
+              .catch(() => {
+                Alert.alert(tr("安装失败", "Install failed"), tr("请稍后重试。", "Please try again later."));
+              })
+              .finally(() => setPendingPreset(null));
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <>
-      <View style={styles.dockCard}>
+      <View style={styles.dockCard} testID="miniapp-dock">
         <View style={styles.dockTop}>
           <Pressable style={styles.sideBtn} onPress={() => openGenerator("")}>
             <Ionicons name="add" size={16} color="#e2e8f0" />
@@ -221,25 +285,61 @@ export function MiniAppDock() {
         </View>
 
         {!collapsed ? (
-          <View style={styles.quickRow}>
-            {QUICK_ACTIONS.map((action) => (
+          <View style={styles.quickSection}>
+            <Text style={styles.quickHeading}>{tr("默认应用", "Default Apps")}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickRow}>
+              {PRESET_ACTIONS.map((action) => {
+                const installed = installedByPreset[action.id];
+                const isPending = pendingPreset === action.id;
+                return (
+                  <Pressable
+                    key={action.id}
+                    style={styles.quickItem}
+                    testID={`miniapp-preset-card-${action.id}`}
+                    onPress={() => handlePresetPress(action.id)}
+                  >
+                    <View style={[styles.quickIcon, { backgroundColor: `${action.color}2A`, borderColor: `${action.color}55` }]}>
+                      <Ionicons name={action.icon} size={16} color={action.color} />
+                    </View>
+                    <Text style={styles.quickLabel}>{actionLabel(action, language)}</Text>
+                    <Text style={styles.quickState} testID={`miniapp-preset-state-${action.id}`}>
+                      {isPending
+                        ? tr("安装中...", "Installing...")
+                        : installed
+                        ? tr("打开", "Open")
+                        : tr("去安装", "Install")}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              {installedCustomApps.map((app) => (
+                <Pressable
+                  key={app.id}
+                  style={styles.quickItem}
+                  testID={`miniapp-installed-card-${app.id}`}
+                  onPress={() => router.push(`/miniapp/${app.id}`)}
+                >
+                  <View style={[styles.quickIcon, styles.quickIconCustom]}>
+                    <Ionicons name="apps-outline" size={16} color="#38bdf8" />
+                  </View>
+                  <Text style={styles.quickLabel} numberOfLines={1}>{app.name}</Text>
+                  <Text style={styles.quickState}>{tr("打开", "Open")}</Text>
+                </Pressable>
+              ))}
+
               <Pressable
-                key={action.id}
                 style={styles.quickItem}
-                onPress={() => {
-                  if (action.id === "tasks") {
-                    router.push("/tasks");
-                    return;
-                  }
-                  openGenerator(promptForAction(action, language));
-                }}
+                testID="miniapp-tasks-entry"
+                onPress={() => router.push("/tasks")}
               >
-                <View style={[styles.quickIcon, { backgroundColor: `${action.color}2A`, borderColor: `${action.color}55` }]}>
-                  <Ionicons name={action.icon} size={16} color={action.color} />
+                <View style={[styles.quickIcon, styles.quickIconTasks]}>
+                  <Ionicons name="checkmark-done-outline" size={16} color="#22c55e" />
                 </View>
-                <Text style={styles.quickLabel}>{actionLabel(action, language)}</Text>
+                <Text style={styles.quickLabel}>{tr("任务", "Tasks")}</Text>
+                <Text style={styles.quickState}>{tr("打开", "Open")}</Text>
               </Pressable>
-            ))}
+            </ScrollView>
           </View>
         ) : null}
 
@@ -424,13 +524,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  quickSection: {
+    gap: 8,
+  },
+  quickHeading: {
+    color: "rgba(148,163,184,0.92)",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
   quickRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     gap: 10,
+    paddingRight: 4,
   },
   quickItem: {
-    flex: 1,
+    width: 92,
     alignItems: "center",
     gap: 6,
   },
@@ -442,10 +551,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  quickIconCustom: {
+    backgroundColor: "rgba(56,189,248,0.16)",
+    borderColor: "rgba(56,189,248,0.32)",
+  },
+  quickIconTasks: {
+    backgroundColor: "rgba(34,197,94,0.16)",
+    borderColor: "rgba(34,197,94,0.32)",
+  },
   quickLabel: {
     color: "rgba(226,232,240,0.86)",
     fontSize: 11,
     fontWeight: "800",
+    textAlign: "center",
+  },
+  quickState: {
+    color: "rgba(125,211,252,0.95)",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.6,
   },
   progressWrap: {
     gap: 8,

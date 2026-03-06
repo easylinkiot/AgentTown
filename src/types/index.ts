@@ -150,6 +150,7 @@ export type MiniAppStatus = "draft" | "generated" | "installed";
 
 export interface MiniApp {
   id: string;
+  presetKey?: string;
   name: string;
   summary: string;
   query: string;

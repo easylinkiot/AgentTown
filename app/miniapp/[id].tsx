@@ -32,6 +32,7 @@ export default function MiniAppDetailScreen() {
         <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
           <View style={styles.container}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
+              <View testID="miniapp-detail-back-anchor" />
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
             </Pressable>
             <EmptyState title={tr("Mini App 不存在", "Mini app not found")} hint={tr("请返回列表刷新后重试", "Go back and refresh list")} icon="alert-circle-outline" />
@@ -46,7 +47,7 @@ export default function MiniAppDetailScreen() {
   return (
     <KeyframeBackground>
       <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
-        <View style={styles.container}>
+        <View style={styles.container} testID="miniapp-detail-screen">
           <View style={styles.headerRow}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
@@ -54,6 +55,7 @@ export default function MiniAppDetailScreen() {
             <Text style={styles.title} numberOfLines={1}>{app.name}</Text>
             <Pressable
               style={styles.installBtn}
+              testID="miniapp-detail-install-toggle"
               onPress={() => void installMiniApp(app.id, !app.installed).catch((err) => setError(formatApiError(err)))}
             >
               <Text style={styles.installText}>{app.installed ? tr("卸载", "Uninstall") : tr("安装", "Install")}</Text>

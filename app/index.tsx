@@ -605,7 +605,7 @@ export default function HomeScreen() {
               <Pressable style={styles.topIcon} onPress={() => router.push("/town-map" as never)}>
                 <Ionicons name="locate-outline" size={16} color="rgba(226,232,240,0.92)" />
               </Pressable>
-              <Pressable style={styles.topIcon} onPress={() => setPeopleModal(true)}>
+              <Pressable style={styles.topIcon} testID="home-quick-actions-open" onPress={() => setPeopleModal(true)}>
                 <Ionicons name="people-outline" size={16} color="rgba(226,232,240,0.92)" />
               </Pressable>
             </View>
@@ -792,7 +792,7 @@ export default function HomeScreen() {
                 <Ionicons name="hardware-chip-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("Agent / Bot", "Agents / Bots")}</Text>
               </Pressable>
-              <Pressable style={styles.sheetItem} onPress={() => router.push("/miniapps" as never)}>
+              <Pressable style={styles.sheetItem} testID="home-quick-miniapps" onPress={() => router.push("/miniapps" as never)}>
                 <Ionicons name="apps-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("Mini Apps", "Mini Apps")}</Text>
               </Pressable>
