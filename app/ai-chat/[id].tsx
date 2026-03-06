@@ -159,6 +159,8 @@ const DEFAULT_ASK_AI_SKILL_OPTION_BY_ACTION: Record<Exclude<ChatAssistAction, "a
 const MESSAGE_FALLBACK_GAP = 1000;
 const DEV_STREAM_CHUNK_SIZE = 1;
 const DEV_STREAM_INTERVAL_MS = 50;
+const LIVE_STREAM_RENDER_CHUNK_SIZE = 2;
+const LIVE_STREAM_RENDER_INTERVAL_MS = 40;
 const KEYBOARD_CLEARANCE = 25;
 const KEYBOARD_CLEARANCE_IOS = 25;
 const PLUS_PANEL_BASE_HEIGHT = 300;
@@ -230,6 +232,11 @@ function formatMediaDuration(totalSeconds?: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function isImagePlaceholderText(text: string) {
+  const normalized = (text || "").trim().toLowerCase();
+  return normalized === "[image]" || normalized === "[图片]";
 }
 
 function isIOSPhotoLibraryUri(uri: string) {
@@ -1526,6 +1533,10 @@ export default function ChatDetailScreen() {
   const streamInitRef = useRef(false);
   const streamTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const streamedIdsRef = useRef<Set<string>>(new Set());
+  const liveStreamTargetsRef = useRef<Record<string, string>>({});
+  const liveStreamShownRef = useRef<Record<string, string>>({});
+  const liveStreamDoneRef = useRef<Set<string>>(new Set());
+  const liveStreamTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const myBotSessionIdRef = useRef("");
   const myBotStreamAbortRef = useRef<AbortController | null>(null);
   const [myBotStreaming, setMyBotStreaming] = useState(false);
@@ -1582,9 +1593,89 @@ export default function ChatDetailScreen() {
     setMyBotStreaming(false);
   }, []);
 
+  const clearLiveStreamById = useCallback((id: string) => {
+    if (!id) return;
+    const timer = liveStreamTimersRef.current[id];
+    if (timer) {
+      clearTimeout(timer);
+      delete liveStreamTimersRef.current[id];
+    }
+    delete liveStreamTargetsRef.current[id];
+    delete liveStreamShownRef.current[id];
+    liveStreamDoneRef.current.delete(id);
+    setStreamingById((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  const ensureLiveStreamPump = useCallback(
+    (id: string) => {
+      if (!id || liveStreamTimersRef.current[id]) return;
+      const tick = () => {
+        const target = liveStreamTargetsRef.current[id] || "";
+        const shown = liveStreamShownRef.current[id] || "";
+        if (shown.length < target.length) {
+          const nextLength = Math.min(target.length, shown.length + LIVE_STREAM_RENDER_CHUNK_SIZE);
+          const nextText = target.slice(0, nextLength);
+          liveStreamShownRef.current[id] = nextText;
+          setStreamingById((prev) => {
+            if (prev[id] === nextText) return prev;
+            return { ...prev, [id]: nextText };
+          });
+        }
+
+        const latestTarget = liveStreamTargetsRef.current[id] || "";
+        const latestShown = liveStreamShownRef.current[id] || "";
+        if (latestShown.length >= latestTarget.length) {
+          delete liveStreamTimersRef.current[id];
+          if (liveStreamDoneRef.current.has(id)) {
+            clearLiveStreamById(id);
+          }
+          return;
+        }
+        liveStreamTimersRef.current[id] = setTimeout(tick, LIVE_STREAM_RENDER_INTERVAL_MS);
+      };
+      tick();
+    },
+    [clearLiveStreamById]
+  );
+
+  const enqueueLiveStreamText = useCallback(
+    (id: string, text: string) => {
+      if (!id) return;
+      const safeText = text || "";
+      const previousTarget = liveStreamTargetsRef.current[id] || "";
+      if (safeText.length < previousTarget.length) {
+        liveStreamShownRef.current[id] = safeText;
+      } else if (liveStreamShownRef.current[id] === undefined) {
+        liveStreamShownRef.current[id] = "";
+      }
+      liveStreamTargetsRef.current[id] = safeText;
+      ensureLiveStreamPump(id);
+    },
+    [ensureLiveStreamPump]
+  );
+
+  const finalizeLiveStreamById = useCallback(
+    (id: string, finalText: string) => {
+      if (!id) return;
+      liveStreamDoneRef.current.add(id);
+      enqueueLiveStreamText(id, finalText);
+    },
+    [enqueueLiveStreamText]
+  );
+
   const stopAllStreams = useCallback(() => {
     Object.values(streamTimersRef.current).forEach((timer) => clearTimeout(timer));
     streamTimersRef.current = {};
+    Object.values(liveStreamTimersRef.current).forEach((timer) => clearTimeout(timer));
+    liveStreamTimersRef.current = {};
+    liveStreamTargetsRef.current = {};
+    liveStreamShownRef.current = {};
+    liveStreamDoneRef.current = new Set();
     setStreamingById({});
   }, []);
 
@@ -2118,10 +2209,7 @@ export default function ChatDetailScreen() {
               onText: (text) => {
                 if (controller.signal.aborted) return;
                 latestText = text;
-                setStreamingById((prev) => {
-                  if (prev[botLocalId] === text) return prev;
-                  return { ...prev, [botLocalId]: text };
-                });
+                enqueueLiveStreamText(botLocalId, text);
               },
               onEvent: (eventName, payload) => {
                 if (!aiAgentMode && eventName !== "message_start" && eventName !== "trace") return;
@@ -2157,6 +2245,7 @@ export default function ChatDetailScreen() {
               };
             })
           );
+          finalizeLiveStreamById(botLocalId, finalText);
           ok = true;
           if (aiAgentMode) {
             const nextSessionId = (resolvedAgentSessionId || (isNewAgentSession ? "" : chatId)).trim();
@@ -2192,18 +2281,13 @@ export default function ChatDetailScreen() {
           }
         } else if (controller.signal.aborted) {
           ok = true;
+          clearLiveStreamById(botLocalId);
           setPendingMessages((prev) => prev.filter((msg) => msg._id !== botLocalId));
         } else {
           setFailedDraft(content);
+          clearLiveStreamById(botLocalId);
           setPendingMessages((prev) => prev.filter((msg) => msg._id !== botLocalId));
         }
-
-        setStreamingById((prev) => {
-          if (!(botLocalId in prev)) return prev;
-          const next = { ...prev };
-          delete next[botLocalId];
-          return next;
-        });
       } else {
         const result = await sendUserOnlyMessage(content);
         if (!result) {
@@ -2214,12 +2298,7 @@ export default function ChatDetailScreen() {
       }
     } catch {
       if (botLocalId) {
-        setStreamingById((prev) => {
-          if (!(botLocalId in prev)) return prev;
-          const next = { ...prev };
-          delete next[botLocalId];
-          return next;
-        });
+        clearLiveStreamById(botLocalId);
         setPendingMessages((prev) => prev.filter((msg) => msg._id !== botLocalId));
         myBotStreamAbortRef.current = null;
         setMyBotStreaming(false);
@@ -2991,6 +3070,7 @@ export default function ChatDetailScreen() {
           );
         }
         const previewImageUri = normalizeRenderableImageUri(raw.imageUri);
+        const hideImagePlaceholder = Boolean(previewImageUri) && isImagePlaceholderText(displayText);
 
         return (
           <View style={styles.messageBody}>
@@ -3018,7 +3098,7 @@ export default function ChatDetailScreen() {
                 {raw.imageName ? <Text style={styles.imageLabel}>{raw.imageName}</Text> : null}
               </View>
             ) : null}
-            {displayText ? (
+            {displayText && !hideImagePlaceholder ? (
               <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{displayText}</Text>
             ) : null}
             {canToggleOriginal ? (
