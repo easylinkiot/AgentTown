@@ -530,6 +530,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     messagesByThreadRef.current = messagesByThread;
   }, [messagesByThread]);
   const [friends, setFriends] = useState<Friend[]>(defaultFriends);
+  const friendsRef = useRef<Friend[]>(defaultFriends);
+  useEffect(() => {
+    friendsRef.current = friends;
+  }, [friends]);
   const [threadMembers, setThreadMembers] =
     useState<Record<string, ThreadMember[]>>(defaultThreadMembers);
   const [agents, setAgents] = useState<Agent[]>(defaultAgents);
@@ -579,6 +583,21 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     },
     [persistThreadLanguageMap]
   );
+
+  const shouldUseThreadMessageCache = useCallback((threadId: string) => {
+    const id = threadId.trim();
+    if (!id) return true;
+
+    const thread = chatThreadsRef.current.find((item) => item.id === id);
+    const targetType = (thread?.targetType || "").trim().toLowerCase();
+    if (targetType === "user") return false;
+
+    if (friendsRef.current.some((friend) => (friend.threadId || "").trim() === id && friend.kind === "human")) {
+      return false;
+    }
+
+    return true;
+  }, []);
 
   const refreshAll = useCallback(async () => {
     const [bootstrapResult, threadsResult] = await Promise.allSettled([
@@ -790,9 +809,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     options?: { preferV2SessionApi?: boolean }
   ) => {
     if (!threadId) return;
+    const useThreadCache = shouldUseThreadMessageCache(threadId);
 
     // Load from local cache first for instant paint.
-    const cached = await readThreadCache(userID, threadId);
+    const cached = useThreadCache ? await readThreadCache(userID, threadId) : null;
     if (cached && cached.length > 0) {
       setMessagesByThread((prev) => ({
         ...prev,
@@ -802,8 +822,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
 
     let latest: ConversationMessage[] = [];
     historyCursorByThreadRef.current[threadId] = null;
-    const preferV2SessionApi =
-      Boolean(options?.preferV2SessionApi) || threadId.trim().toLowerCase().startsWith("sess_");
+    const preferV2SessionApi = Boolean(options?.preferV2SessionApi);
     let loadedViaV2SessionApi = false;
     if (preferV2SessionApi) {
       try {
@@ -818,7 +837,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       latest = sortMessagesBySeqOrTime(latest);
       const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
       const safeMerged = Array.isArray(merged) ? merged : [];
-      void writeThreadCache(userID, threadId, safeMerged);
+      if (useThreadCache) {
+        void writeThreadCache(userID, threadId, safeMerged);
+      }
       setMessagesByThread((prev) => ({
         ...prev,
         [threadId]: safeMerged.slice(-MESSAGE_RENDER_WINDOW),
@@ -840,27 +861,22 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         latest = (response.list || []).map((row) => mapATMessageToConversation(row, userID, threadId));
         historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
       } else {
-        try {
-          const response = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
-          latest = response.map((row) => mapATMessageToConversation(row, userID, threadId));
-        } catch {
-          const response = await listV2ChatSessionMessagesApi(threadId);
-          latest = response.map((row, index) =>
-            mapV2SessionMessageToConversation(row, userID, threadId, index)
-          );
-        }
+        const response = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+        latest = response.map((row) => mapATMessageToConversation(row, userID, threadId));
       }
     }
     latest = sortMessagesBySeqOrTime(latest);
     const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
     const safeMerged = Array.isArray(merged) ? merged : [];
-    void writeThreadCache(userID, threadId, safeMerged);
+    if (useThreadCache) {
+      void writeThreadCache(userID, threadId, safeMerged);
+    }
 
     setMessagesByThread((prev) => ({
       ...prev,
       [threadId]: safeMerged.slice(-MESSAGE_RENDER_WINDOW),
     }));
-  }, [userID]);
+  }, [shouldUseThreadMessageCache, userID]);
 
   const loadOlderMessages = useCallback(async (threadId: string) => {
     if (!threadId) return 0;
@@ -868,9 +884,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     if (current.length === 0) return 0;
     const oldest = current[0]?.id;
     if (!oldest) return 0;
+    const useThreadCache = shouldUseThreadMessageCache(threadId);
 
     // Try local cache first.
-    const cached = await readThreadCache(userID, threadId);
+    const cached = useThreadCache ? await readThreadCache(userID, threadId) : null;
     if (cached && cached.length > 0) {
       const idx = cached.findIndex((m) => m.id === oldest);
       if (idx > 0) {
@@ -928,14 +945,16 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         [threadId]: [...uniqueOlder, ...history],
       };
     });
-    void (async () => {
-      const base = (await readThreadCache(userID, threadId)) || [];
-      const merged = mergePrependUnique(base, older);
-      await writeThreadCache(userID, threadId, merged);
-    })();
+    if (useThreadCache) {
+      void (async () => {
+        const base = (await readThreadCache(userID, threadId)) || [];
+        const merged = mergePrependUnique(base, older);
+        await writeThreadCache(userID, threadId, merged);
+      })();
+    }
 
     return older.length;
-  }, [userID]);
+  }, [shouldUseThreadMessageCache, userID]);
 
   const listMembers = useCallback(async (threadId: string) => {
     if (!threadId) return;
@@ -1075,7 +1094,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             };
           });
 
-          void upsertThreadCache(userID, threadId, [normalizedPayload]);
+          if (shouldUseThreadMessageCache(threadId)) {
+            void upsertThreadCache(userID, threadId, [normalizedPayload]);
+          }
           setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(normalizedPayload)));
           break;
         }
@@ -1259,7 +1280,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unsubscribe();
     };
-  }, [isE2E, isSignedIn, patchThreadLanguageMap, userID]);
+  }, [isE2E, isSignedIn, patchThreadLanguageMap, shouldUseThreadMessageCache, userID]);
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {
@@ -1346,6 +1367,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       loadOlderMessages,
       sendMessage: async (threadId, payload) => {
         if (!threadId) return null;
+        const useThreadCache = shouldUseThreadMessageCache(threadId);
         if (isE2E) {
           const senderId = (payload.senderId || userID || "e2e-guest-user").trim();
           const userMessage: ConversationMessage = {
@@ -1368,7 +1390,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             ...prev,
             [threadId]: nextMessages,
           }));
-          void upsertThreadCache(userID, threadId, nextMessages);
+          if (useThreadCache) {
+            void upsertThreadCache(userID, threadId, nextMessages);
+          }
           setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(userMessage)));
           return {
             userMessage,
@@ -1382,7 +1406,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
               ...prev,
               [threadId]: result.messages,
             }));
-            void upsertThreadCache(userID, threadId, result.messages);
+            if (useThreadCache) {
+              void upsertThreadCache(userID, threadId, result.messages);
+            }
           }
           const preview = result.aiMessage
             ? previewMessage(result.aiMessage)
@@ -1932,6 +1958,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     patchThreadLanguageMap,
     refreshAll,
     refreshThreadMessages,
+    shouldUseThreadMessageCache,
     skillCatalog,
     tasks,
     threadLanguageById,

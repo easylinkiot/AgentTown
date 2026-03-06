@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { DrawerActions, useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
-import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -45,10 +44,6 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import {
-  getCachedAgentSessions,
-  preloadAgentSessions,
-} from "@/src/features/chat/agent-sessions-cache";
-import {
   assistCandidateSelectionKey,
   buildTaskItemFromCandidate,
 } from "@/src/features/chat/ask-ai-helpers";
@@ -63,12 +58,11 @@ import {
   listAgents as listAgentsApi,
   listFriends as listFriendsApi,
   uploadFileV2,
-  type V2ChatSession,
 } from "@/src/lib/api";
 import {
+  type AssistSkillAction,
   DEFAULT_ASSIST_SKILL_ACTIONS,
   type AssistCandidate,
-  type ChatAssistAction,
   type ChatAssistRequest,
   type ChatCompletionsRequest,
   getDefaultAssistSkillId,
@@ -125,36 +119,18 @@ type TaskNavIconProps = {
   size?: number;
 };
 type AskAISkillOption = {
-  action: Exclude<ChatAssistAction, "ask_anything">;
+  action: AssistSkillAction | null;
   skillId: string;
   name?: string;
+  userInputRequired: boolean;
 };
-type PrimaryAskAIAction = "auto_reply" | "add_task";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const DEFAULT_ASK_AI_SKILL_OPTIONS: AskAISkillOption[] = DEFAULT_ASSIST_SKILL_ACTIONS.map((action) => ({
   action,
   skillId: getDefaultAssistSkillId(action),
+  userInputRequired: action === "auto_reply",
 }));
-const PRIMARY_ASK_AI_ACTIONS: readonly PrimaryAskAIAction[] = ["auto_reply", "add_task"];
-const DEFAULT_ASK_AI_SKILL_OPTION_BY_ACTION: Record<Exclude<ChatAssistAction, "ask_anything">, AskAISkillOption> = {
-  auto_reply: {
-    action: "auto_reply",
-    skillId: getDefaultAssistSkillId("auto_reply"),
-  },
-  add_task: {
-    action: "add_task",
-    skillId: getDefaultAssistSkillId("add_task"),
-  },
-  translate: {
-    action: "translate",
-    skillId: getDefaultAssistSkillId("translate"),
-  },
-  follow_up: {
-    action: "follow_up",
-    skillId: getDefaultAssistSkillId("follow_up"),
-  },
-};
 
 const MESSAGE_FALLBACK_GAP = 1000;
 const DEV_STREAM_CHUNK_SIZE = 1;
@@ -185,7 +161,7 @@ const THREAD_LANGUAGE_OPTIONS: { key: TranslationMode; label: string }[] = [
 ];
 const GROUP_REPLY_MODE_STORAGE_PREFIX = "agenttown.group.reply.mode";
 
-function askAISkillFallbackLabel(action: Exclude<ChatAssistAction, "ask_anything">, tr: (zh: string, en: string) => string) {
+function askAISkillFallbackLabel(action: AssistSkillAction, tr: (zh: string, en: string) => string) {
   switch (action) {
     case "auto_reply":
       return tr("回复", "Reply");
@@ -494,8 +470,6 @@ function inferAvatarTagFromMember(member: ThreadMember): "Human" | "NPC" | "Bot"
 export default function ChatDetailScreen() {
   const isE2E = isE2ETestMode();
   const router = useRouter();
-  const navigation = useNavigation();
-  const segments = useSegments();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isWideDesktopWeb = Platform.OS === "web" && windowWidth >= 1280;
@@ -512,10 +486,12 @@ export default function ChatDetailScreen() {
   }>();
 
   const chatId = String(params.id || "");
-  const aiAgentMode =
-    String(params.mode || "").trim().toLowerCase() === "agent" ||
-    String(segments[0] || "").trim().toLowerCase() === "ai-chat";
-  const isNewAgentSession = aiAgentMode && /^new(?:_|$)/i.test(chatId);
+  const aiAgentMode = false;
+  const isNewAgentSession = false;
+  const shouldRouteToAiChat =
+    /^new(?:_|$)/i.test(chatId) ||
+    /^sess_/i.test(chatId) ||
+    String(params.mode || "").trim().toLowerCase() === "agent";
   const highlightMessageId = String(params.highlightMessageId || "");
 
   const {
@@ -546,7 +522,6 @@ export default function ChatDetailScreen() {
   const threadDisplayLanguage: ThreadDisplayLanguage = threadLanguageById[chatId] || language || "en";
   const [translationMode, setTranslationMode] = useState<TranslationMode>("off");
   const translationEnabled = translationMode !== "off";
-  const [agentSessions, setAgentSessions] = useState<V2ChatSession[]>([]);
 
   const openEntityConfig = useCallback(
     (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
@@ -568,40 +543,22 @@ export default function ChatDetailScreen() {
     [router, user?.id]
   );
 
-  const refreshAgentSessionsCache = useCallback(
-    async (force: boolean = false) => {
-      if (!aiAgentMode) return [] as V2ChatSession[];
-      try {
-        const list = await preloadAgentSessions(force);
-        setAgentSessions(list);
-        return list;
-      } catch {
-        return [] as V2ChatSession[];
-      }
-    },
-    [aiAgentMode]
-  );
-
-  useEffect(() => {
-    if (!aiAgentMode) {
-      setAgentSessions([]);
-      return;
-    }
-    const cached = getCachedAgentSessions();
-    if (cached.length > 0) {
-      setAgentSessions(cached);
-    }
-    void refreshAgentSessionsCache();
-  }, [aiAgentMode, refreshAgentSessionsCache]);
-
   useEffect(() => {
     setTranslationMode("off");
   }, [chatId]);
 
-  const activeAgentSession = useMemo(
-    () => (aiAgentMode ? agentSessions.find((session) => session.id === chatId) : undefined),
-    [aiAgentMode, agentSessions, chatId]
-  );
+  useEffect(() => {
+    if (!shouldRouteToAiChat || !chatId) return;
+    router.replace({
+      pathname: "/ai-chat/[id]",
+      params: {
+        id: chatId,
+        name: params.name || "",
+        avatar: params.avatar || "",
+        isGroup: "false",
+      },
+    });
+  }, [chatId, params.avatar, params.name, router, shouldRouteToAiChat]);
 
   const thread = useMemo(() => {
     const found = chatThreads.find((t) => t.id === chatId);
@@ -609,27 +566,14 @@ export default function ChatDetailScreen() {
 
     return {
       id: chatId,
-      name:
-        activeAgentSession?.title ||
-        params.name ||
-        (aiAgentMode ? tr("AI 对话", "AI Chat") : tr("未知会话", "Unknown chat")),
+      name: params.name || tr("未知会话", "Unknown chat"),
       avatar: params.avatar || botConfig.avatar,
       message: "",
       time: tr("刚刚", "Now"),
       isGroup: params.isGroup === "true",
       supportsVideo: true,
     };
-  }, [
-    activeAgentSession?.title,
-    aiAgentMode,
-    botConfig.avatar,
-    chatId,
-    chatThreads,
-    params.avatar,
-    params.isGroup,
-    params.name,
-    tr,
-  ]);
+  }, [botConfig.avatar, chatId, chatThreads, params.avatar, params.isGroup, params.name, tr]);
 
   const members = threadMembers[chatId] || [];
   const messages = useMemo(() => messagesByThread[chatId] || EMPTY_MESSAGES, [messagesByThread, chatId]);
@@ -1787,7 +1731,7 @@ export default function ChatDetailScreen() {
   const [askAICandidates, setAskAICandidates] = useState<AssistCandidate[]>([]);
   const [askAISelectedIndex, setAskAISelectedIndex] = useState(0);
   const [askAISelectedTaskKeys, setAskAISelectedTaskKeys] = useState<Set<string>>(new Set());
-  const [askAIAction, setAskAIAction] = useState<ChatAssistAction>("auto_reply");
+  const [selectedAskAISkillId, setSelectedAskAISkillId] = useState(DEFAULT_ASK_AI_SKILL_OPTIONS[0]?.skillId || "");
   const [askAISkillOptions, setAskAISkillOptions] = useState<AskAISkillOption[]>(DEFAULT_ASK_AI_SKILL_OPTIONS);
   const [askAIMoreMenuOpen, setAskAIMoreMenuOpen] = useState(false);
   const [askAIError, setAskAIError] = useState<string | null>(null);
@@ -1799,6 +1743,7 @@ export default function ChatDetailScreen() {
   >({});
   const [showOriginalByMessageId, setShowOriginalByMessageId] = useState<Record<string, boolean>>({});
   const translatedByMessageIdRef = useRef<Record<string, Partial<Record<ThreadDisplayLanguage, string>>>>({});
+  const askAIInputRef = useRef<TextInput | null>(null);
   const askAIAbortRef = useRef<AbortController | null>(null);
   const askAIRequestSeqRef = useRef(0);
   const askAIMountedRef = useRef(true);
@@ -1837,17 +1782,18 @@ export default function ChatDetailScreen() {
   useEffect(() => {
     let mounted = true;
     const run = async () => {
-      if (!chatId) return;
-      if (isNewAgentSession) {
-        setLoading(false);
-        setLoadError(null);
+      if (!chatId || shouldRouteToAiChat) {
+        if (mounted) {
+          setLoading(false);
+          setLoadError(null);
+        }
         return;
       }
       const prefetched = (messagesByThreadRef.current[chatId] || []).length > 0;
       setLoading(!prefetched);
       setLoadError(null);
       try {
-        await refreshThreadMessages(chatId, aiAgentMode ? { preferV2SessionApi: true } : undefined);
+        await refreshThreadMessages(chatId);
         if (thread.isGroup) {
           await listMembers(chatId);
         }
@@ -1861,7 +1807,7 @@ export default function ChatDetailScreen() {
     return () => {
       mounted = false;
     };
-  }, [chatId, isNewAgentSession, listMembers, refreshThreadMessages, thread.isGroup]);
+  }, [chatId, listMembers, refreshThreadMessages, shouldRouteToAiChat, thread.isGroup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2180,7 +2126,6 @@ export default function ChatDetailScreen() {
           ok = true;
         }
       } else if (isMyBotChatThreadId(chatId) || aiAgentMode) {
-        const startedFromNewAgentSession = isNewAgentSession;
         let resolvedAgentSessionId = "";
         botLocalId = `local_bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const botMessage: ConversationMessage = {
@@ -2271,10 +2216,7 @@ export default function ChatDetailScreen() {
                   },
                 });
               } else {
-                void refreshThreadMessages(
-                  nextSessionId,
-                  aiAgentMode ? { preferV2SessionApi: true } : undefined
-                );
+                void refreshThreadMessages(nextSessionId);
               }
             }
           }
@@ -2292,10 +2234,6 @@ export default function ChatDetailScreen() {
           delete next[botLocalId];
           return next;
         });
-        if (aiAgentMode && startedFromNewAgentSession && resolvedAgentSessionId) {
-          void refreshAgentSessionsCache(true);
-        }
-
       } else {
         const result = await sendUserOnlyMessage(content);
         if (!result) {
@@ -2362,6 +2300,7 @@ export default function ChatDetailScreen() {
             action: skill.action,
             skillId: skill.id,
             name: skill.name,
+            userInputRequired: skill.userInputRequired,
           }))
         );
       } catch {
@@ -2384,65 +2323,71 @@ export default function ChatDetailScreen() {
     setActionModal(false);
   }, [abortAskAIStream, isAddingTasks]);
 
-  const askAISkillOptionByAction = useMemo(() => {
-    const next: Partial<Record<Exclude<ChatAssistAction, "ask_anything">, AskAISkillOption>> = {};
-    for (const item of askAISkillOptions) {
-      next[item.action] = item;
-    }
-    return next;
-  }, [askAISkillOptions]);
-  const defaultAssistAction: PrimaryAskAIAction = "auto_reply";
-  const askAIPrimarySkillOptions = PRIMARY_ASK_AI_ACTIONS.map(
-    (action) => askAISkillOptionByAction[action] || DEFAULT_ASK_AI_SKILL_OPTION_BY_ACTION[action]
+  const focusAskAIInput = useCallback(() => {
+    setKeyboardTarget("askAI");
+    setTimeout(() => {
+      askAIInputRef.current?.focus();
+    }, 0);
+  }, []);
+
+  const primaryReplySkillOption = useMemo(
+    () => askAISkillOptions.find((item) => item.action === "auto_reply") || null,
+    [askAISkillOptions]
   );
-  const askAIOverflowSkillOptions = askAISkillOptions.filter(
-    (item) => item.action !== "auto_reply" && item.action !== "add_task"
+  const primaryTaskSkillOption = useMemo(
+    () => askAISkillOptions.find((item) => item.action === "add_task") || null,
+    [askAISkillOptions]
   );
+  const askAIPrimarySkillOptions = [primaryReplySkillOption, primaryTaskSkillOption].filter(
+    (item): item is AskAISkillOption => Boolean(item)
+  );
+  const askAIPrimarySkillIds = useMemo(
+    () => new Set(askAIPrimarySkillOptions.map((item) => item.skillId)),
+    [askAIPrimarySkillOptions]
+  );
+  const askAIOverflowSkillOptions = askAISkillOptions.filter((item) => !askAIPrimarySkillIds.has(item.skillId));
+  const defaultAssistSkillOption =
+    askAIPrimarySkillOptions[0] || askAISkillOptions[0] || DEFAULT_ASK_AI_SKILL_OPTIONS[0] || null;
+  const currentAskAISkillOption =
+    askAISkillOptions.find((item) => item.skillId === selectedAskAISkillId) || defaultAssistSkillOption;
+  const askAIInputEnabled = Boolean(currentAskAISkillOption?.userInputRequired);
 
   useEffect(() => {
-    if (askAIAction === "ask_anything") return;
-    if (askAISkillOptionByAction[askAIAction]) return;
-    if (askAIAction === "auto_reply" || askAIAction === "add_task") return;
-    setAskAIAction(defaultAssistAction);
-  }, [askAIAction, askAISkillOptionByAction, defaultAssistAction]);
+    if (!defaultAssistSkillOption?.skillId) return;
+    if (askAISkillOptions.some((item) => item.skillId === selectedAskAISkillId)) return;
+    setSelectedAskAISkillId(defaultAssistSkillOption.skillId);
+  }, [askAISkillOptions, defaultAssistSkillOption, selectedAskAISkillId]);
+
+  useEffect(() => {
+    if (askAIInputEnabled) return;
+    if (!askAI) return;
+    setAskAI("");
+  }, [askAI, askAIInputEnabled]);
 
   const runAssistGeneration = useCallback(
-    async (action: ChatAssistAction) => {
-      if (!actionMessage || isStreaming) return;
+    async (skillOption?: AskAISkillOption | null) => {
+      const selectedSkill = skillOption || currentAskAISkillOption;
+      if (!actionMessage || !selectedSkill || isStreaming) return;
       const selectedMessageContent = (actionMessage.content || "").trim();
+      const action = selectedSkill.action ?? "generic_assist";
+      const isReplySkill = selectedSkill.action === "auto_reply";
+      const isTranslateSkill = selectedSkill.action === "translate";
 
       const requestPayload = {
         action,
         selected_message_id: actionMessage.id,
         selected_message_content: selectedMessageContent,
       } as const;
-      const selectedSkill =
-        action === "ask_anything" ? null : askAISkillOptionByAction[action] || DEFAULT_ASK_AI_SKILL_OPTION_BY_ACTION[action];
-      if (action !== "ask_anything" && !selectedSkill?.skillId) {
-        setAskAIError(tr("AI 技能加载中，请稍后重试。", "Assist skills are still loading. Please try again."));
-        return;
-      }
-
-      const usesContextMessages = action !== "auto_reply" && action !== "ask_anything";
-      const inlineInput = action === "auto_reply" ? askAI.trim() : "";
-      const effectiveInput = inlineInput || selectedMessageContent;
+      const usesContextMessages = !isReplySkill;
+      const inputAllowed = Boolean(selectedSkill.userInputRequired);
+      const inlineInput = inputAllowed ? askAI.trim() : "";
+      const messageInput = selectedMessageContent || inlineInput;
       const contextMessages = usesContextMessages ? buildRecentAssistContextMessages(messages) : [];
-      if (action === "auto_reply" && !effectiveInput) {
-        setAskAIError(tr("消息内容为空，无法生成。", "Message is empty and cannot be used."));
-        return;
-      }
       if (usesContextMessages && contextMessages.length === 0) {
         setAskAIError(tr("当前聊天暂无可用上下文。", "There is no usable chat context yet."));
         return;
       }
-      if (action === "ask_anything") {
-        const question = effectiveInput;
-        if (!question) {
-          setAskAIError(tr("请输入问题。", "Please enter a question."));
-          return;
-        }
-      }
-      if (action === "translate" && !translationEnabled) {
+      if (isTranslateSkill && !translationEnabled) {
         setAskAIError(
           tr("翻译已关闭，请先在顶部选择目标语言。", "Translation is off. Choose a language from the top first.")
         );
@@ -2454,7 +2399,7 @@ export default function ChatDetailScreen() {
       askAIAbortRef.current = controller;
       const requestSeq = ++askAIRequestSeqRef.current;
 
-      setAskAIAction(action);
+      setSelectedAskAISkillId(selectedSkill.skillId);
       setAskAIError(null);
       setAskAICandidates([]);
       setAskAISelectedIndex(0);
@@ -2463,58 +2408,20 @@ export default function ChatDetailScreen() {
       setIsAddingTasks(false);
 
       const assistRequest: ChatAssistRequest = { ...requestPayload };
-      if (selectedSkill?.skillId) {
-        assistRequest.skill_id = selectedSkill.skillId;
-      }
-      if (contextMessages.length > 0) {
+      assistRequest.skill_id = selectedSkill.skillId;
+      if (usesContextMessages) {
         assistRequest.messages = contextMessages;
+      } else if (isReplySkill && messageInput) {
+        assistRequest.messages = [{ role: "user", content: messageInput }];
       }
       if (inlineInput) {
         assistRequest.input = inlineInput;
       }
-      if (action === "translate") {
+      if (isTranslateSkill) {
         assistRequest.target_language = threadDisplayLanguage;
       }
 
       try {
-        if (action === "ask_anything") {
-          const completionsRequest: ChatCompletionsRequest = {
-            input: effectiveInput,
-            session_id: chatId,
-          };
-          const targetType = (thread.targetType || "").trim();
-          const targetId = (thread.targetId || "").trim();
-          if (targetType) completionsRequest.target_type = targetType;
-          if (targetId) completionsRequest.target_id = targetId;
-
-          try {
-            await runChatCompletions(
-              completionsRequest,
-              {
-                onText: (text) => {
-                  if (controller.signal.aborted) return;
-                  if (!askAIMountedRef.current) return;
-                  if (requestSeq !== askAIRequestSeqRef.current) return;
-                  const safeText = text.trim();
-                  if (!safeText) return;
-                  setAskAICandidates([
-                    {
-                      id: "completion_primary",
-                      kind: "text",
-                      text: safeText,
-                    },
-                  ]);
-                  setAskAISelectedIndex(0);
-                },
-              },
-              controller.signal
-            );
-            return;
-          } catch {
-            // Fallback to assist endpoint when completions stream is unavailable.
-          }
-        }
-
         await runChatAssist(
           assistRequest,
           {
@@ -2550,12 +2457,9 @@ export default function ChatDetailScreen() {
       abortAskAIStream,
       actionMessage,
       askAI,
-      askAISkillOptionByAction,
-      chatId,
+      currentAskAISkillOption,
       isStreaming,
       messages,
-      thread.targetId,
-      thread.targetType,
       threadDisplayLanguage,
       translationEnabled,
       tr,
@@ -2570,7 +2474,7 @@ export default function ChatDetailScreen() {
     setAskAISelectedIndex(0);
     setAskAISelectedTaskKeys(new Set());
     setAskAIError(null);
-    setAskAIAction(defaultAssistAction);
+    setSelectedAskAISkillId(defaultAssistSkillOption?.skillId || "");
     setAskAIMoreMenuOpen(false);
     setIsStreaming(false);
     setIsAddingTasks(false);
@@ -2587,7 +2491,7 @@ export default function ChatDetailScreen() {
     setAskAISelectedIndex(0);
     setAskAISelectedTaskKeys(new Set());
     setAskAIError(null);
-    setAskAIAction(defaultAssistAction);
+    setSelectedAskAISkillId(defaultAssistSkillOption?.skillId || "");
     setAskAIMoreMenuOpen(false);
     setIsStreaming(false);
     setIsAddingTasks(false);
@@ -2609,8 +2513,8 @@ export default function ChatDetailScreen() {
 
   const handleAskAISubmit = useCallback(() => {
     if (isStreaming || isAddingTasks) return;
-    void runAssistGeneration(askAIAction);
-  }, [askAIAction, isAddingTasks, isStreaming, runAssistGeneration]);
+    void runAssistGeneration(currentAskAISkillOption);
+  }, [currentAskAISkillOption, isAddingTasks, isStreaming, runAssistGeneration]);
 
   const runGroupMyBot = async () => {
     const question = myBotQuestion.trim();
@@ -2795,7 +2699,7 @@ export default function ChatDetailScreen() {
     };
   }, [chatId, messages, threadDisplayLanguage, translationEnabled, translationRefreshToken]);
 
-  const isTaskCandidateMode = askAIAction === "add_task";
+  const isTaskCandidateMode = currentAskAISkillOption?.action === "add_task";
   const selectedTaskCandidates = useMemo(
     () =>
       askAICandidates
@@ -2890,7 +2794,7 @@ export default function ChatDetailScreen() {
     const text = (picked?.text || "").trim();
     if (!text) return;
 
-    if (askAIAction === "auto_reply" && actionMessage) {
+    if (currentAskAISkillOption?.action === "auto_reply" && actionMessage) {
       const targetName = (actionMessage.senderName || "").trim();
       if (thread.isGroup && targetName) {
         const mention = `@${targetName}`;
@@ -2899,7 +2803,7 @@ export default function ChatDetailScreen() {
       } else {
         setInput(text);
       }
-    } else if (askAIAction === "translate" && actionMessage) {
+    } else if (currentAskAISkillOption?.action === "translate" && actionMessage) {
       const messageId = (actionMessage.id || "").trim();
       if (messageId) {
         setTranslatedByMessageId((prev) => ({
@@ -3246,9 +3150,8 @@ export default function ChatDetailScreen() {
     { paddingBottom: keyboardPadding },
   ];
   const chatBodyStyle = [styles.chatBody, isWideDesktopWeb && !aiAgentMode ? styles.chatBodyWide : null];
-  const askAIPrimaryActionSet = new Set<string>(PRIMARY_ASK_AI_ACTIONS);
   const askAIActionIsOverflow =
-    askAIAction === "ask_anything" || !askAIPrimaryActionSet.has(askAIAction as Exclude<ChatAssistAction, "ask_anything">);
+    Boolean(currentAskAISkillOption) && !askAIPrimarySkillIds.has(currentAskAISkillOption.skillId);
   const canAbortMyBotSend = myBotStreaming && (isMyBotChatThreadId(chatId) || aiAgentMode);
   const sendDisabled = canAbortMyBotSend ? false : submitting || !input.trim();
   const mediaSendDisabled = mediaSending || selectedAssets.length === 0;
@@ -3397,6 +3300,8 @@ export default function ChatDetailScreen() {
     [renderToolbarActions, renderToolbarComposer, renderToolbarSend]
   );
 
+  if (shouldRouteToAiChat) return null;
+
   return (
     <KeyframeBackground>
       <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={[styles.safeArea, { paddingBottom: insets.bottom }]}>
@@ -3424,21 +3329,10 @@ export default function ChatDetailScreen() {
               <Text style={styles.subtitle}>
                 {thread.isGroup
                   ? tr(`${Math.max(thread.memberCount || 0, members.length)} people active`, `${Math.max(thread.memberCount || 0, members.length)} people active`)
-                  : aiAgentMode
-                    ? tr("AI Agent", "AI Agent")
-                    : tr("Direct", "Direct")}
+                  : tr("Direct", "Direct")}
               </Text>
             </Pressable>
               <View style={styles.headerActions}>
-                {aiAgentMode ? (
-                  <Pressable
-                    testID="chat-session-sidebar-toggle"
-                    style={styles.headerIcon}
-                    onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())}
-                  >
-                    <Ionicons name="menu-outline" size={16} color="rgba(226,232,240,0.92)" />
-                  </Pressable>
-                ) : null}
                 {thread.isGroup ? (
                   <Pressable
                     style={[
@@ -3560,10 +3454,7 @@ export default function ChatDetailScreen() {
               onAction={() => {
                 setLoadError(null);
                 setLoading(true);
-                void refreshThreadMessages(
-                  chatId,
-                  aiAgentMode ? { preferV2SessionApi: true } : undefined
-                )
+                void refreshThreadMessages(chatId)
                   .catch((err) => setLoadError(formatApiError(err)))
                   .finally(() => setLoading(false));
               }}
@@ -3807,6 +3698,7 @@ export default function ChatDetailScreen() {
               <View style={styles.aiAskRow}>
                 <Ionicons name="sparkles-outline" size={16} color="rgba(191,219,254,0.95)" />
                 <TextInput
+                  ref={askAIInputRef}
                   value={askAI}
                   onChangeText={setAskAI}
                   onFocus={() => setKeyboardTarget("askAI")}
@@ -3817,7 +3709,7 @@ export default function ChatDetailScreen() {
                   placeholder={tr("Ask AI...", "Ask AI...")}
                   placeholderTextColor="rgba(148,163,184,0.9)"
                   style={styles.aiAskInput}
-                  editable={!isStreaming && !isAddingTasks}
+                  editable={askAIInputEnabled && !isStreaming && !isAddingTasks}
                 autoComplete="off"
                 textContentType="oneTimeCode"
                 importantForAutofill="no"
@@ -3826,18 +3718,22 @@ export default function ChatDetailScreen() {
               <View style={styles.aiModeRow}>
                 {askAIPrimarySkillOptions.map((option) => (
                   <Pressable
-                    key={option.action}
-                    style={[styles.aiModeBtn, askAIAction === option.action && styles.aiModeBtnActive]}
+                    key={option.skillId}
+                    style={[styles.aiModeBtn, selectedAskAISkillId === option.skillId && styles.aiModeBtnActive]}
                     onPress={() => {
-                      setAskAIAction(option.action);
+                      setSelectedAskAISkillId(option.skillId);
                       setAskAIMoreMenuOpen(false);
+                      if (option.userInputRequired) {
+                        focusAskAIInput();
+                        return;
+                      }
                       if (option.action === "auto_reply" || option.action === "add_task") {
-                        void runAssistGeneration(option.action);
+                        void runAssistGeneration(option);
                       }
                     }}
                     disabled={isStreaming || isAddingTasks}
                   >
-                    <Text style={styles.aiModeBtnText}>{askAISkillFallbackLabel(option.action, tr)}</Text>
+                    <Text style={styles.aiModeBtnText}>{askAISkillFallbackLabel(option.action || "auto_reply", tr)}</Text>
                   </Pressable>
                 ))}
                 <Pressable
@@ -3862,21 +3758,25 @@ export default function ChatDetailScreen() {
                   >
                     {askAIOverflowSkillOptions.map((option) => (
                       <Pressable
-                        key={option.action}
+                        key={option.skillId}
                         style={[
                           styles.aiModeMoreItem,
                           styles.aiModeMoreItemDivider,
-                          askAIAction === option.action && styles.aiModeMoreItemActive,
+                          selectedAskAISkillId === option.skillId && styles.aiModeMoreItemActive,
                         ]}
                         onPress={() => {
-                          setAskAIAction(option.action);
+                          setSelectedAskAISkillId(option.skillId);
                           setAskAIMoreMenuOpen(false);
-                          void runAssistGeneration(option.action);
+                          if (option.userInputRequired) {
+                            focusAskAIInput();
+                            return;
+                          }
+                          void runAssistGeneration(option);
                         }}
                         disabled={isStreaming || isAddingTasks}
                       >
                         <Text style={styles.aiModeMoreItemText}>
-                          {option.name || askAISkillFallbackLabel(option.action, tr)}
+                          {option.name || (option.action ? askAISkillFallbackLabel(option.action, tr) : option.skillId)}
                         </Text>
                       </Pressable>
                     ))}
@@ -3908,8 +3808,8 @@ export default function ChatDetailScreen() {
                           "Press Enter to generate task candidates, select multiple items, then tap Add."
                         )
                       : tr(
-                          "按回车或点 Reply 生成候选，点击候选可填入消息输入框。",
-                          "Press Enter or tap Reply to generate candidates. Tap one to fill the message input."
+                          "按回车或点击技能按钮生成候选，点击候选可填入消息输入框。",
+                          "Press Enter or tap a skill to generate candidates. Tap one to fill the message input."
                         )}
                   </Text>
                 ) : (

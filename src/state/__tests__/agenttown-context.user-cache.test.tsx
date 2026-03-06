@@ -1,15 +1,13 @@
 import mockAsyncStorage from "@react-native-async-storage/async-storage/jest/async-storage-mock";
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
+import { Platform } from "react-native";
+
 import {
   fetchBootstrap,
   getThreadDisplayLanguage,
-  listChatSessionMessages,
   listChatThreads,
   listThreadMessages,
-  listV2ChatSessionMessages,
-  mapATMessageToConversation,
-  sendThreadMessage,
   subscribeRealtime,
 } from "@/src/lib/api";
 import { useAuth } from "../auth-context";
@@ -22,13 +20,15 @@ const mockFs = {
   writeAsStringAsync: jest.fn(),
   Paths: {} as Record<string, unknown>,
 };
+
 Object.defineProperty(mockFs.Paths, "document", {
   get() {
-    throw new Error("this.validatePath is not a function");
+    return { uri: "file:///tmp/" };
   },
 });
 
 jest.mock("expo-file-system", () => mockFs);
+jest.mock("expo-file-system/legacy", () => mockFs);
 
 jest.mock("../auth-context", () => ({
   useAuth: jest.fn(),
@@ -85,21 +85,24 @@ jest.mock("@/src/lib/api", () => ({
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedFetchBootstrap = fetchBootstrap as jest.Mock;
 const mockedGetThreadDisplayLanguage = getThreadDisplayLanguage as jest.Mock;
-const mockedListChatSessionMessages = listChatSessionMessages as jest.Mock;
 const mockedListChatThreads = listChatThreads as jest.Mock;
 const mockedListThreadMessages = listThreadMessages as jest.Mock;
-const mockedListV2ChatSessionMessages = listV2ChatSessionMessages as jest.Mock;
-const mockedMapATMessageToConversation = mapATMessageToConversation as jest.Mock;
-const mockedSendThreadMessage = sendThreadMessage as jest.Mock;
 const mockedSubscribeRealtime = subscribeRealtime as jest.Mock;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <AgentTownProvider>{children}</AgentTownProvider>;
 }
 
-describe("agenttown-context cache safety", () => {
+describe("agenttown-context user thread cache policy", () => {
+  const originalPlatform = Platform.OS;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAsyncStorage.clear();
+    Object.defineProperty(Platform, "OS", {
+      configurable: true,
+      value: "ios",
+    });
 
     mockedUseAuth.mockReturnValue({
       isSignedIn: true,
@@ -111,7 +114,7 @@ describe("agenttown-context cache safety", () => {
 
     mockedSubscribeRealtime.mockImplementation(() => () => {});
     mockedGetThreadDisplayLanguage.mockResolvedValue({
-      thread_id: "qatr03011208",
+      thread_id: "any_thread",
       language: "en",
     });
     mockedFetchBootstrap.mockResolvedValue({
@@ -126,103 +129,89 @@ describe("agenttown-context cache safety", () => {
       miniApps: [],
       miniAppTemplates: [],
     });
+    mockFs.getInfoAsync.mockReset();
+    mockFs.makeDirectoryAsync.mockReset();
+    mockFs.readAsStringAsync.mockReset();
+    mockFs.writeAsStringAsync.mockReset();
+    mockFs.getInfoAsync.mockResolvedValue({ exists: false });
+    mockFs.makeDirectoryAsync.mockResolvedValue(undefined);
+    mockFs.readAsStringAsync.mockResolvedValue("[]");
+    mockFs.writeAsStringAsync.mockResolvedValue(undefined);
+  });
+
+  afterAll(() => {
+    Object.defineProperty(Platform, "OS", {
+      configurable: true,
+      value: originalPlatform,
+    });
+  });
+
+  it("does not read or write local cache for user threads", async () => {
     mockedListChatThreads.mockResolvedValue([
       {
-        id: "qatr03011208",
-        name: "QA LIVE Translate",
+        id: "sess_user_1",
+        name: "Direct User",
         avatar: "",
         message: "",
         time: "Now",
-        isGroup: true,
+        isGroup: false,
+        targetType: "user",
+        targetId: "u_1",
       },
     ]);
-    mockedListChatSessionMessages.mockResolvedValue([]);
     mockedListThreadMessages.mockResolvedValue([
       {
         id: "msg_1",
-        threadId: "qatr03011208",
-        senderId: "u_2",
-        senderName: "Lina",
+        threadId: "sess_user_1",
+        senderId: "u_1",
+        senderName: "Direct User",
         senderAvatar: "",
         senderType: "human",
-        content: "需要在周五前提交版本更新。",
+        content: "hello",
         type: "text",
         isMe: false,
         time: "Now",
       },
     ]);
-    mockedListV2ChatSessionMessages.mockResolvedValue([]);
-    mockedMapATMessageToConversation.mockImplementation(
-      (row: { id?: string; content?: string }, userId: string, threadId: string) => ({
-        id: row.id || "mapped_msg",
-        threadId,
-        senderId: userId,
-        senderName: "Owner",
-        senderAvatar: "",
-        senderType: "human",
-        content: row.content || "",
-        type: "text",
-        isMe: true,
-        time: "Now",
-      })
-    );
-    mockedSendThreadMessage.mockImplementation(async (threadId: string, payload: { content?: string }) => {
-      const content = (payload?.content || "").trim() || "fallback";
-      return {
-        userMessage: {
-          id: "msg_local_send",
-          threadId,
-          senderId: "u_owner",
-          senderName: "Owner",
-          senderAvatar: "",
-          senderType: "human",
-          content,
-          type: "text",
-          isMe: true,
-          time: "Now",
-        },
-        messages: [
-          {
-            id: "msg_local_send",
-            threadId,
-            senderId: "u_owner",
-            senderName: "Owner",
-            senderAvatar: "",
-            senderType: "human",
-            content,
-            type: "text",
-            isMe: true,
-            time: "Now",
-          },
-        ],
-      };
-    });
-  });
 
-  it("does not crash when file-system path probing fails and still loads thread messages", async () => {
     const { result } = renderHook(() => useAgentTown(), { wrapper });
     await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
 
     await act(async () => {
-      await result.current.refreshThreadMessages("qatr03011208");
+      await result.current.refreshThreadMessages("sess_user_1");
     });
 
-    await waitFor(() =>
-      expect(result.current.messagesByThread["qatr03011208"]?.length || 0).toBeGreaterThan(0)
-    );
-
+    await waitFor(() => expect(result.current.messagesByThread["sess_user_1"]?.[0]?.content).toBe("hello"));
     expect(mockFs.getInfoAsync).not.toHaveBeenCalled();
     expect(mockFs.readAsStringAsync).not.toHaveBeenCalled();
-    expect(mockFs.makeDirectoryAsync).not.toHaveBeenCalled();
     expect(mockFs.writeAsStringAsync).not.toHaveBeenCalled();
   });
 
-  it("does not auto-load ai session messages into the primary chat store for sess-prefixed ids", async () => {
-    mockedListThreadMessages.mockRejectedValueOnce(new Error("thread endpoint unavailable"));
-    mockedListChatSessionMessages.mockResolvedValueOnce([
+  it("still loads non-user threads after the cache gate change", async () => {
+    mockedListChatThreads.mockResolvedValue([
       {
-        id: "msg_session_1",
-        content: "legacy session message",
+        id: "grp_1",
+        name: "Work Group",
+        avatar: "",
+        message: "",
+        time: "Now",
+        isGroup: true,
+        targetType: "group",
+        targetId: "g_1",
+      },
+    ]);
+    mockedListThreadMessages.mockResolvedValue([
+      {
+        id: "msg_group_1",
+        threadId: "grp_1",
+        senderId: "u_2",
+        senderName: "Teammate",
+        senderAvatar: "",
+        senderType: "human",
+        content: "group hello",
+        type: "text",
+        isMe: false,
+        time: "Now",
       },
     ]);
 
@@ -230,27 +219,9 @@ describe("agenttown-context cache safety", () => {
     await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
 
     await act(async () => {
-      await result.current.refreshThreadMessages("sess_legacy_1");
+      await result.current.refreshThreadMessages("grp_1");
     });
 
-    await waitFor(() =>
-      expect(result.current.messagesByThread["sess_legacy_1"]?.[0]?.content).toBe("legacy session message")
-    );
-    expect(mockedListV2ChatSessionMessages).not.toHaveBeenCalled();
-  });
-
-  it("does not refetch thread display language after sendMessage updates thread preview", async () => {
-    const { result } = renderHook(() => useAgentTown(), { wrapper });
-    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
-    await waitFor(() => expect(mockedGetThreadDisplayLanguage).toHaveBeenCalledTimes(1));
-
-    await act(async () => {
-      await result.current.sendMessage("qatr03011208", {
-        content: "hello",
-      });
-    });
-
-    await waitFor(() => expect(mockedSendThreadMessage).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mockedGetThreadDisplayLanguage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.messagesByThread["grp_1"]?.[0]?.content).toBe("group hello"));
   });
 });

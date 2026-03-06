@@ -20,6 +20,7 @@ import {
   subscribeAgentSessions,
 } from "@/src/features/chat/agent-sessions-cache";
 import { formatApiError, type V2ChatSession } from "@/src/lib/api";
+import { AiChatProvider } from "@/src/state/ai-chat-context";
 
 function AiSessionDrawerContent(props: DrawerContentComponentProps) {
   const router = useRouter();
@@ -160,23 +161,25 @@ function AiSessionDrawerContent(props: DrawerContentComponentProps) {
 export default function AiChatLayout() {
   const { width } = useWindowDimensions();
   return (
-    <Drawer
-      drawerContent={(props) => <AiSessionDrawerContent {...props} />}
-      screenOptions={{
-        headerShown: false,
-        drawerPosition: "right",
-        drawerType: "front",
-        drawerStyle: {
-          width: Math.round(width * 0.8),
-          backgroundColor: "rgba(15,23,42,0.98)",
-        },
-        sceneStyle: {
-          backgroundColor: "#070a14",
-        },
-      }}
-    >
-      <Drawer.Screen name="[id]" />
-    </Drawer>
+    <AiChatProvider>
+      <Drawer
+        drawerContent={(props) => <AiSessionDrawerContent {...props} />}
+        screenOptions={{
+          headerShown: false,
+          drawerPosition: "right",
+          drawerType: "front",
+          drawerStyle: {
+            width: Math.round(width * 0.8),
+            backgroundColor: "rgba(15,23,42,0.98)",
+          },
+          sceneStyle: {
+            backgroundColor: "#070a14",
+          },
+        }}
+      >
+        <Drawer.Screen name="[id]" />
+      </Drawer>
+    </AiChatProvider>
   );
 }
 
