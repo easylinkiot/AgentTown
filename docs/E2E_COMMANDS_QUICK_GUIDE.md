@@ -66,7 +66,19 @@ npm run e2e:env:check:ios
    - 检查 A/B 设备是否都已启动、账号是否可登录
    - 先单跑 `e2e:test:social:ios:a` 和 `e2e:test:social:ios:b` 定位端别问题
 
-## 7. 用例沉淀与管理
+## 7. 测试报告产物
+
+每次执行 Detox 用例后，会在本地自动生成以下报告：
+
+1. `reports/e2e/detox/report.html`（可视化报告）
+2. `reports/e2e/detox/junit.xml`（CI/平台可解析报告）
+
+说明：
+
+1. 报告目录已加入 `.gitignore`，默认不会提交到仓库。
+2. 若要清理历史报告，可直接删除 `reports/` 目录后重跑。
+
+## 8. 用例沉淀与管理
 
 1. 新增/修改用例后，同步更新台账：[e2e-case-registry.md](./e2e-case-registry.md)
 2. 用例分层规则与流程规范，参考：[AI_AUTOMATION_E2E_WORKFLOW.md](./AI_AUTOMATION_E2E_WORKFLOW.md)

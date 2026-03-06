@@ -39,6 +39,8 @@ yarn-error.*
 
 # generated native folders
 /artifacts
+/reports/
+/test-results/
 
 # python cache
 __pycache__/
