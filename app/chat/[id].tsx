@@ -231,6 +231,11 @@ function formatMediaDuration(totalSeconds?: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function isImagePlaceholderText(text: string) {
+  const normalized = (text || "").trim().toLowerCase();
+  return normalized === "[image]" || normalized === "[图片]";
+}
+
 function isIOSPhotoLibraryUri(uri: string) {
   return Platform.OS === "ios" && uri.trim().toLowerCase().startsWith("ph://");
 }
@@ -3077,6 +3082,7 @@ export default function ChatDetailScreen() {
           );
         }
         const previewImageUri = normalizeRenderableImageUri(raw.imageUri);
+        const hideImagePlaceholder = Boolean(previewImageUri) && isImagePlaceholderText(displayText);
 
         return (
           <View style={styles.messageBody}>
@@ -3104,7 +3110,7 @@ export default function ChatDetailScreen() {
                 {raw.imageName ? <Text style={styles.imageLabel}>{raw.imageName}</Text> : null}
               </View>
             ) : null}
-            {displayText ? (
+            {displayText && !hideImagePlaceholder ? (
               <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{displayText}</Text>
             ) : null}
             {canToggleOriginal ? (
