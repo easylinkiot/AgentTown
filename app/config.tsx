@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -22,7 +23,7 @@ import { AVATAR_PRESETS } from "@/src/constants/avatars";
 import { MARKET_DATA } from "@/src/constants/marketplace";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
-import { createFriendQR } from "@/src/lib/api";
+import { buildFriendQrDeepLink, createFriendQR } from "@/src/lib/api";
 import { generateGeminiJson } from "@/src/lib/gemini";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
@@ -127,6 +128,12 @@ const MARKET_ITEM_I18N: Record<
   },
 };
 
+function buildFriendQrImageUri(token: string) {
+  const shareLink = buildFriendQrDeepLink(token);
+  if (!shareLink) return "";
+  return `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(shareLink)}`;
+}
+
 export default function ConfigScreen() {
   const router = useRouter();
   const {
@@ -160,6 +167,7 @@ export default function ConfigScreen() {
   const [viewingSkill, setViewingSkill] = useState<MarketItem | null>(null);
   const [profileName, setProfileName] = useState(user?.displayName || "");
   const [profileEmail, setProfileEmail] = useState(user?.email || "");
+  const [profileAvatarInput, setProfileAvatarInput] = useState(user?.avatar || "");
   const [savingProfile, setSavingProfile] = useState(false);
   const [myQrToken, setMyQrToken] = useState("");
   const [myQrExpiresAt, setMyQrExpiresAt] = useState("");
@@ -172,7 +180,8 @@ export default function ConfigScreen() {
   useEffect(() => {
     setProfileName(user?.displayName || "");
     setProfileEmail(user?.email || "");
-  }, [user?.displayName, user?.email, user?.id]);
+    setProfileAvatarInput(user?.avatar || "");
+  }, [user?.avatar, user?.displayName, user?.email, user?.id]);
 
   useEffect(() => {
     setName(botConfig.name);
@@ -269,6 +278,11 @@ export default function ConfigScreen() {
     setAvatar(next);
   };
 
+  const randomizeProfileAvatar = () => {
+    const next = AVATAR_PRESETS[Math.floor(Math.random() * AVATAR_PRESETS.length)];
+    setProfileAvatarInput(next);
+  };
+
   const save = () => {
     const next: BotConfig = {
       name,
@@ -290,6 +304,7 @@ export default function ConfigScreen() {
   const handleSaveProfile = async () => {
     const nextName = profileName.trim();
     const nextEmail = profileEmail.trim();
+    const nextAvatar = profileAvatarInput.trim();
     if (!nextName) {
       Alert.alert(tr("信息不完整", "Incomplete Profile"), tr("请输入用户名。", "Please enter a username."));
       return;
@@ -304,7 +319,7 @@ export default function ConfigScreen() {
 
     setSavingProfile(true);
     try {
-      await completeProfile({ displayName: nextName, email: nextEmail });
+      await completeProfile({ displayName: nextName, email: nextEmail, avatar: nextAvatar || undefined });
       Alert.alert(tr("已更新", "Updated"), tr("账号信息已保存。", "Account profile saved."));
     } catch (err) {
       Alert.alert(
@@ -334,15 +349,20 @@ export default function ConfigScreen() {
     }
   };
 
+  const friendQrImageUri = useMemo(() => buildFriendQrImageUri(myQrToken), [myQrToken]);
+  const friendQrDeepLink = useMemo(() => buildFriendQrDeepLink(myQrToken), [myQrToken]);
+
   const handleShareMyQr = async () => {
     if (!myQrToken) {
       Alert.alert(tr("请先生成二维码", "Generate QR first"), tr("先点击“我的二维码”生成分享内容。", "Tap My QR first."));
       return;
     }
-    const content = `${tr("AgentTown 好友二维码内容", "AgentTown friend QR payload")}:\n${myQrToken}\n${tr(
-      "有效期",
-      "Expires"
-    )}: ${myQrExpiresAt || "-"}`;
+    const content = [
+      tr("AgentTown 好友二维码", "AgentTown Friend QR"),
+      friendQrDeepLink || myQrToken,
+      `${tr("备用原始码", "Fallback token")}: ${myQrToken}`,
+      `${tr("有效期", "Expires")}: ${myQrExpiresAt || "-"}`,
+    ].join("\n");
     try {
       await Share.share({ message: content });
     } catch (err) {
@@ -438,7 +458,7 @@ export default function ConfigScreen() {
             <Ionicons name="chevron-back" size={22} color="#e2e8f0" />
           </Pressable>
           <Text style={[styles.headerTitle, styles.headerTitleNeo]}>
-            {tr("Bot Configuration", "Bot Configuration")}
+            {tr("设置", "Settings")}
           </Text>
           <View style={styles.neoHeaderActions}>
             <Pressable style={[styles.headerBtn, styles.headerBtnNeo]} onPress={save}>
@@ -450,10 +470,16 @@ export default function ConfigScreen() {
           </View>
         </View>
 
-        <ScrollView
-          style={[styles.scroll, styles.scrollNeo]}
-          contentContainerStyle={[styles.scrollContent, styles.scrollContentNeo]}
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
         >
+          <ScrollView
+            style={[styles.scroll, styles.scrollNeo]}
+            contentContainerStyle={[styles.scrollContent, styles.scrollContentNeo]}
+            keyboardShouldPersistTaps="handled"
+          >
           <View style={styles.neoAccountCard}>
             <View style={styles.neoAccountHead}>
               <View style={styles.neoAccountAvatarWrap}>
@@ -491,6 +517,21 @@ export default function ConfigScreen() {
             textContentType="oneTimeCode"
             importantForAutofill="no"
             />
+            <TextInput
+              style={styles.neoAccountField}
+              value={profileAvatarInput}
+              onChangeText={setProfileAvatarInput}
+              placeholder={tr("头像地址", "Avatar URL")}
+              placeholderTextColor="rgba(148,163,184,0.85)"
+              autoCapitalize="none"
+              autoComplete="off"
+              textContentType="oneTimeCode"
+              importantForAutofill="no"
+            />
+            <Pressable style={styles.neoAvatarPresetBtn} onPress={randomizeProfileAvatar}>
+              <Ionicons name="images-outline" size={14} color="#dbeafe" />
+              <Text style={styles.neoAvatarPresetBtnText}>{tr("随机头像", "Random Avatar")}</Text>
+            </Pressable>
             <View style={styles.neoReadonlyRow}>
               <Ionicons name="call-outline" size={14} color="rgba(148,163,184,0.9)" />
               <Text style={styles.neoReadonlyText}>{profilePhone}</Text>
@@ -533,15 +574,16 @@ export default function ConfigScreen() {
             </View>
             {myQrToken ? (
               <View style={[styles.friendQrTokenCard, isNeo && styles.friendQrTokenCardNeo]}>
+                {friendQrImageUri ? <Image source={{ uri: friendQrImageUri }} style={styles.friendQrImage} /> : null}
                 <Text style={[styles.friendQrTokenTitle, isNeo && styles.friendQrTokenTitleNeo]}>
-                  {tr("好友二维码内容", "Friend QR payload")}
-                </Text>
-                <Text selectable style={[styles.friendQrTokenValue, isNeo && styles.friendQrTokenValueNeo]}>
-                  {myQrToken}
+                  {tr("好友二维码", "Friend QR")}
                 </Text>
                 <Text style={[styles.friendQrTokenHint, isNeo && styles.friendQrTokenHintNeo]}>
                   {tr("有效期至：", "Expires at: ")}
                   {myQrExpiresAt || "-"}
+                </Text>
+                <Text selectable style={[styles.friendQrTokenValue, isNeo && styles.friendQrTokenValueNeo]}>
+                  {myQrToken}
                 </Text>
               </View>
             ) : null}
@@ -817,16 +859,17 @@ export default function ConfigScreen() {
               </Text>
             </Pressable>
           </View>
-        </ScrollView>
+          </ScrollView>
 
-        <View style={styles.neoFooterWrap}>
-          <Pressable style={styles.neoApplyBtn} onPress={save}>
-            <Ionicons name="save-outline" size={18} color="#111827" />
-            <Text style={styles.neoApplyBtnText}>
-              {tr("Apply Configuration", "Apply Configuration")}
-            </Text>
-          </Pressable>
-        </View>
+          <View style={styles.neoFooterWrap}>
+            <Pressable style={styles.neoApplyBtn} onPress={save}>
+              <Ionicons name="save-outline" size={18} color="#111827" />
+              <Text style={styles.neoApplyBtnText}>
+                {tr("Apply Configuration", "Apply Configuration")}
+              </Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
@@ -837,14 +880,19 @@ export default function ConfigScreen() {
         <Pressable style={styles.headerBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#111827" />
         </Pressable>
-        <Text style={styles.headerTitle}>{tr("Bot 配置", "Bot Config")}</Text>
+        <Text style={styles.headerTitle}>{tr("设置", "Settings")}</Text>
         <Pressable style={styles.saveBtn} onPress={save}>
           <Ionicons name="save" size={16} color="white" />
           <Text style={styles.saveBtnText}>{tr("应用", "Apply")}</Text>
         </Pressable>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+      >
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{tr("账号", "Account")}</Text>
           <View style={styles.accountProfileRow}>
@@ -880,6 +928,20 @@ export default function ConfigScreen() {
           textContentType="oneTimeCode"
           importantForAutofill="no"
           />
+          <TextInput
+            style={styles.accountInput}
+            value={profileAvatarInput}
+            onChangeText={setProfileAvatarInput}
+            placeholder={tr("头像地址", "Avatar URL")}
+            autoCapitalize="none"
+            autoComplete="off"
+            textContentType="oneTimeCode"
+            importantForAutofill="no"
+          />
+          <Pressable style={styles.accountAvatarPresetBtn} onPress={randomizeProfileAvatar}>
+            <Ionicons name="images-outline" size={14} color="#dbeafe" />
+            <Text style={styles.accountAvatarPresetBtnText}>{tr("随机头像", "Random Avatar")}</Text>
+          </Pressable>
           <Pressable style={styles.accountSaveBtn} onPress={handleSaveProfile} disabled={savingProfile}>
             {savingProfile ? (
               <ActivityIndicator size="small" color="white" />
@@ -916,13 +978,14 @@ export default function ConfigScreen() {
           </View>
           {myQrToken ? (
             <View style={styles.friendQrTokenCard}>
-              <Text style={styles.friendQrTokenTitle}>{tr("好友二维码内容", "Friend QR payload")}</Text>
-              <Text selectable style={styles.friendQrTokenValue}>
-                {myQrToken}
-              </Text>
+              {friendQrImageUri ? <Image source={{ uri: friendQrImageUri }} style={styles.friendQrImage} /> : null}
+              <Text style={styles.friendQrTokenTitle}>{tr("好友二维码", "Friend QR")}</Text>
               <Text style={styles.friendQrTokenHint}>
                 {tr("有效期至：", "Expires at: ")}
                 {myQrExpiresAt || "-"}
+              </Text>
+              <Text selectable style={styles.friendQrTokenValue}>
+                {myQrToken}
               </Text>
             </View>
           ) : null}
@@ -1270,7 +1333,8 @@ export default function ConfigScreen() {
             ))
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1279,6 +1343,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#f3f4f6",
+  },
+  keyboardAvoid: {
+    flex: 1,
   },
   safeAreaNeo: {
     backgroundColor: "#070510",
@@ -1565,6 +1632,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingHorizontal: 10,
   },
+  neoAvatarPresetBtn: {
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.42)",
+    backgroundColor: "rgba(30,58,138,0.18)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  neoAvatarPresetBtnText: {
+    color: "#dbeafe",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   neoReadonlyRow: {
     minHeight: 36,
     borderRadius: 10,
@@ -1642,6 +1725,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     fontSize: 13,
   },
+  accountAvatarPresetBtn: {
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(96,165,250,0.45)",
+    backgroundColor: "#eff6ff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  accountAvatarPresetBtnText: {
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   accountSaveBtn: {
     minHeight: 40,
     borderRadius: 10,
@@ -1696,6 +1795,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     gap: 4,
+  },
+  friendQrImage: {
+    alignSelf: "center",
+    width: 168,
+    height: 168,
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    marginBottom: 4,
   },
   friendQrTokenCardNeo: {
     borderColor: "rgba(96,165,250,0.42)",

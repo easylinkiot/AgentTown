@@ -815,6 +815,7 @@ export async function authProvider(payload: {
   idToken?: string;
   email?: string;
   displayName?: string;
+  avatar?: string;
 }) {
   return apiFetch<AuthSessionPayload>("/v1/auth/provider", {
     method: "POST",
@@ -826,7 +827,7 @@ export async function authMe() {
   return apiFetch<AuthUser>("/v1/auth/me");
 }
 
-export async function authUpdateProfile(payload: { displayName: string; email: string }) {
+export async function authUpdateProfile(payload: { displayName: string; email: string; avatar?: string }) {
   return apiFetch<AuthSessionPayload>("/v1/auth/me/profile", {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -923,12 +924,9 @@ export async function listChatThreads() {
 }
 
 export async function createChatThread(payload: ChatThread) {
-  const requestPayload: Record<string, unknown> = { ...payload };
-  delete requestPayload.groupNpcName;
-  delete requestPayload.groupCommanderUserId;
   return apiFetch<ChatThread>("/v1/chat/threads", {
     method: "POST",
-    body: JSON.stringify(requestPayload),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -1406,7 +1404,7 @@ export async function listFriendRequests() {
 }
 
 export async function acceptFriendRequest(requestId: string) {
-  return apiFetch<{ ok: boolean; request: FriendRequest }>(
+  return apiFetch<{ ok: boolean; request: FriendRequest; thread?: ChatThread; friend?: Friend }>(
     `/v1/friend-requests/${encodeURIComponent(requestId)}/accept`,
     { method: "POST" }
   );
@@ -1425,10 +1423,42 @@ export async function createFriendQR() {
   });
 }
 
+export function buildFriendQrDeepLink(token: string) {
+  const safeToken = token.trim();
+  if (!safeToken) return "";
+  return `agenttown://friend-qr?token=${encodeURIComponent(safeToken)}`;
+}
+
+export function extractFriendQrToken(input: string) {
+  const value = input.trim();
+  if (!value) return "";
+  if (value.startsWith("fq1.")) {
+    return value;
+  }
+
+  const tokenMatch = value.match(/\bfq1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/);
+  if (tokenMatch?.[0]) {
+    return tokenMatch[0];
+  }
+
+  try {
+    const parsed = new URL(value);
+    const token = parsed.searchParams.get("token")?.trim() || "";
+    if (token.startsWith("fq1.")) {
+      return token;
+    }
+  } catch {
+    // Ignore non-URL input and keep trying.
+  }
+
+  return "";
+}
+
 export async function scanFriendQR(payload: ScanFriendQRInput) {
+  const token = extractFriendQrToken(payload.token || "");
   return apiFetch<CreateFriendResponse>("/v1/friend-qr/scan", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ token }),
   });
 }
 

@@ -9,6 +9,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -140,7 +141,7 @@ function localizeAuthErrorMessage(
 
 export default function SignInScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ email?: string }>();
+  const params = useLocalSearchParams<{ email?: string; redirect?: string }>();
   const { language, updateLanguage } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const {
@@ -167,6 +168,11 @@ export default function SignInScreen() {
   const [profileEmail, setProfileEmail] = useState("");
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const isExpoGo = Constants.appOwnership === "expo";
+  const redirectPath = useMemo(() => {
+    const raw = typeof params.redirect === "string" ? params.redirect.trim() : "";
+    if (!raw.startsWith("/")) return "/";
+    return raw;
+  }, [params.redirect]);
 
   useEffect(() => {
     const emailParam = typeof params.email === "string" ? params.email.trim() : "";
@@ -238,8 +244,8 @@ export default function SignInScreen() {
       return;
     }
     setShowProfileSetup(false);
-    router.replace("/");
-  }, [isHydrated, router, user]);
+    router.replace(redirectPath as never);
+  }, [isHydrated, redirectPath, router, user]);
 
   useEffect(() => {
     if (!googleResponse || googleResponse.type !== "success") return;
@@ -486,7 +492,12 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
-      <ScrollView testID="auth-sign-in-scroll" contentContainerStyle={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+      >
+        <ScrollView testID="auth-sign-in-scroll" contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.brandCard}>
           <View style={styles.logoCircle}>
             <Ionicons name="planet" size={24} color="#15803d" />
@@ -722,7 +733,8 @@ export default function SignInScreen() {
             <Text style={styles.secondaryBtnText}>{tr("游客模式继续", "Continue as Guest")}</Text>
           </Pressable>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -731,6 +743,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#eff6ff",
+  },
+  keyboardAvoid: {
+    flex: 1,
   },
   container: {
     paddingHorizontal: 16,

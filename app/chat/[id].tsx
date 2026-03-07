@@ -550,13 +550,13 @@ export default function ChatDetailScreen() {
   useEffect(() => {
     if (!shouldRouteToAiChat || !chatId) return;
     router.replace({
-      pathname: "/ai-chat/[id]",
+      pathname: "/ai-chat/[id]" as never,
       params: {
         id: chatId,
         name: params.name || "",
         avatar: params.avatar || "",
         isGroup: "false",
-      },
+      } as never,
     });
   }, [chatId, params.avatar, params.name, router, shouldRouteToAiChat]);
 
@@ -2037,9 +2037,9 @@ export default function ChatDetailScreen() {
           failedKeys.add(item.key);
         }
       }
-      await listMembers(chatId);
-      setMemberPoolNonce((n) => n + 1);
       if (failedKeys.size > 0) {
+        await listMembers(chatId).catch(() => undefined);
+        setMemberPoolNonce((n) => n + 1);
         setPendingMemberAdds((prev) => prev.filter((entry) => failedKeys.has(entry.key)));
         setMemberPoolError(
           tr(
@@ -2051,6 +2051,8 @@ export default function ChatDetailScreen() {
       }
       setPendingMemberAdds([]);
       setMemberModal(false);
+      await listMembers(chatId).catch(() => undefined);
+      setMemberPoolNonce((n) => n + 1);
     } finally {
       setMemberApplyBusy(false);
     }
@@ -2209,11 +2211,11 @@ export default function ChatDetailScreen() {
             if (nextSessionId) {
               if (nextSessionId !== chatId) {
                 router.replace({
-                  pathname: "/ai-chat/[id]",
+                  pathname: "/ai-chat/[id]" as never,
                   params: {
                     id: nextSessionId,
                     isGroup: "false",
-                  },
+                  } as never,
                 });
               } else {
                 void refreshThreadMessages(nextSessionId);

@@ -56,7 +56,7 @@ interface AuthContextValue {
   }>;
   verifyPasswordResetCode: (email: string, code: string) => Promise<{ resetToken: string; resetTokenExpiresAt?: string }>;
   resetPassword: (input: { email: string; resetToken: string; password: string }) => Promise<{ ok?: boolean; message?: string }>;
-  completeProfile: (input: { displayName: string; email: string }) => Promise<void>;
+  completeProfile: (input: { displayName: string; email: string; avatar?: string | null }) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -114,6 +114,7 @@ function mapBackendUser(input: {
   provider: string;
   displayName: string;
   email?: string;
+  avatar?: string;
   requireProfileSetup?: boolean;
   role?: "admin" | "member" | "guest";
   createdAt: string;
@@ -124,6 +125,7 @@ function mapBackendUser(input: {
     provider: (input.provider as AuthMethod) || "guest",
     displayName: input.displayName,
     email: input.email,
+    avatar: input.avatar,
     requireProfileSetup: Boolean(input.requireProfileSetup),
     role: input.role || "guest",
     createdAt: input.createdAt,
@@ -304,6 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         idToken: input.idToken || undefined,
         email: input.email || undefined,
         displayName: normalizedName,
+        avatar: input.avatar || undefined,
       });
       const mapped = mapBackendUser(session.user);
       mapped.avatar = input.avatar || undefined;
@@ -328,8 +331,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const completeProfile = useCallback<AuthContextValue["completeProfile"]>(
-    async ({ displayName, email }) => {
-      const session = await authUpdateProfile({ displayName, email });
+    async ({ displayName, email, avatar }) => {
+      const session = await authUpdateProfile({ displayName, email, avatar: avatar?.trim() || undefined });
       await applySession({
         token: session.token,
         user: mapBackendUser(session.user),

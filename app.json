@@ -21,7 +21,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "Allow AgentTown to use the microphone for voice input.",
         "NSSpeechRecognitionUsageDescription": "Allow AgentTown to use speech recognition for voice input.",
-        "NSCameraUsageDescription": "Allow AgentTown to access the camera for sharing photos.",
+        "NSCameraUsageDescription": "Allow AgentTown to access the camera for scanning friend QR codes and sharing photos.",
         "NSPhotoLibraryUsageDescription": "Allow AgentTown to access your photo library to share images.",
         "NSPhotoLibraryAddUsageDescription": "Allow AgentTown to save images to your photo library."
       }
@@ -37,6 +37,7 @@
       "permissions": [
         "RECORD_AUDIO",
         "POST_NOTIFICATIONS",
+        "CAMERA",
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
         "READ_EXTERNAL_STORAGE"

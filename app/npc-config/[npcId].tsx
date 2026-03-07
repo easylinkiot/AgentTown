@@ -305,8 +305,8 @@ export default function NPCConfigScreen() {
                 onPress={() =>
                   npc
                     ? router.push({
-                        pathname: "/npc-chat/[npcId]",
-                        params: { npcId: npc.id, name: npc.name },
+                        pathname: "/npc-chat/[npcId]" as never,
+                        params: { npcId: npc.id, name: npc.name } as never,
                       })
                     : null
                 }

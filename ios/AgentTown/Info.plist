@@ -52,7 +52,7 @@
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Allow AgentTown to use speech recognition for voice input.</string>
     <key>NSCameraUsageDescription</key>
-    <string>Allow AgentTown to access the camera for sharing photos.</string>
+    <string>Allow AgentTown to access the camera for scanning friend QR codes and sharing photos.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Allow AgentTown to access your photo library to share images.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>

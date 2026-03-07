@@ -94,8 +94,11 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("AgentTown friend regression", () => {
+  let realtimeCallback: ((event: any) => void) | null = null;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    realtimeCallback = null;
 
     mockedUseAuth.mockReturnValue({
       isSignedIn: true,
@@ -105,7 +108,10 @@ describe("AgentTown friend regression", () => {
       },
     });
 
-    mockedSubscribeRealtime.mockImplementation(() => () => {});
+    mockedSubscribeRealtime.mockImplementation((callback: (event: any) => void) => {
+      realtimeCallback = callback;
+      return () => {};
+    });
     mockedFetchBootstrap.mockResolvedValue({
       chatThreads: [],
       tasks: [],
@@ -254,5 +260,138 @@ describe("AgentTown friend regression", () => {
     await waitFor(() =>
       expect(result.current.chatThreads.some((t) => t.id === "sess_u_1" && t.targetType === "user")).toBe(true)
     );
+  });
+
+  it("keeps group memberCount in sync when realtime member events arrive", async () => {
+    const groupThread = {
+      id: "thread_group_1",
+      name: "Group One",
+      avatar: "https://example.com/group.png",
+      message: "",
+      time: "Now",
+      isGroup: true,
+      memberCount: 1,
+    };
+
+    mockedFetchBootstrap.mockResolvedValue({
+      chatThreads: [groupThread],
+      tasks: [],
+      messages: {},
+      friends: [],
+      threadMembers: {
+        thread_group_1: [
+          {
+            id: "member_owner",
+            threadId: "thread_group_1",
+            name: "Owner",
+            avatar: "https://example.com/owner.png",
+            memberType: "human",
+            friendId: "u_owner",
+          },
+        ],
+      },
+      agents: [],
+      skillCatalog: [],
+      customSkills: [],
+      miniApps: [],
+      miniAppTemplates: [],
+    });
+    mockedListChatThreads.mockResolvedValue([groupThread]);
+
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+
+    await act(async () => {
+      realtimeCallback?.({
+        type: "thread.member.added",
+        threadId: "thread_group_1",
+        sentAt: "2026-03-06T00:00:00Z",
+        payload: {
+          id: "member_friend",
+          threadId: "thread_group_1",
+          name: "Friend",
+          avatar: "https://example.com/friend.png",
+          memberType: "human",
+          friendId: "u_friend",
+        },
+      });
+    });
+
+    expect(result.current.chatThreads.find((item) => item.id === "thread_group_1")?.memberCount).toBe(2);
+
+    await act(async () => {
+      realtimeCallback?.({
+        type: "thread.member.removed",
+        threadId: "thread_group_1",
+        sentAt: "2026-03-06T00:01:00Z",
+        payload: {
+          id: "member_friend",
+          threadId: "thread_group_1",
+        },
+      });
+    });
+
+    expect(result.current.chatThreads.find((item) => item.id === "thread_group_1")?.memberCount).toBe(1);
+  });
+
+  it("personalizes direct threads when realtime friend.created arrives", async () => {
+    mockedFetchBootstrap.mockResolvedValue({
+      chatThreads: [
+        {
+          id: "thread_direct_1",
+          name: "Unknown",
+          avatar: "",
+          message: "",
+          time: "Now",
+          isGroup: false,
+        },
+      ],
+      tasks: [],
+      messages: {},
+      friends: [],
+      threadMembers: {},
+      agents: [],
+      skillCatalog: [],
+      customSkills: [],
+      miniApps: [],
+      miniAppTemplates: [],
+    });
+    mockedListChatThreads.mockResolvedValue([
+      {
+        id: "thread_direct_1",
+        name: "Unknown",
+        avatar: "",
+        message: "",
+        time: "Now",
+        isGroup: false,
+      },
+    ]);
+
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+
+    await act(async () => {
+      realtimeCallback?.({
+        type: "friend.created",
+        sentAt: "2026-03-06T00:02:00Z",
+        payload: {
+          id: "friend_direct_1",
+          ownerId: "u_owner",
+          userId: "u_friend",
+          name: "Friend Name",
+          avatar: "https://example.com/friend.png",
+          kind: "human",
+          threadId: "thread_direct_1",
+        },
+      });
+    });
+
+    expect(result.current.chatThreads.find((item) => item.id === "thread_direct_1")).toMatchObject({
+      id: "thread_direct_1",
+      name: "Friend Name",
+      avatar: "https://example.com/friend.png",
+      targetType: "user",
+      targetId: "u_friend",
+    });
   });
 });

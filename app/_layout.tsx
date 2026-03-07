@@ -19,15 +19,20 @@ function RootStack() {
   useEffect(() => {
     if (!isHydrated) return;
     const firstSegment = String(segments[0] || "");
-    const inAuthRoute =
+    const inPublicRoute =
+      firstSegment === "sign-in" ||
+      firstSegment === "sign-up" ||
+      firstSegment === "forgot-password" ||
+      firstSegment === "friend-qr";
+    const inAuthOnlyRoute =
       firstSegment === "sign-in" ||
       firstSegment === "sign-up" ||
       firstSegment === "forgot-password";
-    if (!isSignedIn && !inAuthRoute) {
+    if (!isSignedIn && !inPublicRoute) {
       router.replace("/sign-in");
       return;
     }
-    if (isSignedIn && inAuthRoute) {
+    if (isSignedIn && inAuthOnlyRoute) {
       router.replace("/");
     }
   }, [isHydrated, isSignedIn, router, segments]);
@@ -51,6 +56,7 @@ function RootStack() {
       <Stack.Screen name="sign-in" options={{ animation: "fade" }} />
       <Stack.Screen name="sign-up" options={{ animation: "fade" }} />
       <Stack.Screen name="forgot-password" options={{ animation: "fade" }} />
+      <Stack.Screen name="friend-qr" options={{ animation: "fade" }} />
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[id]" />
       <Stack.Screen name="ai-chat" />

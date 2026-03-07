@@ -92,10 +92,10 @@ function AiSessionDrawerContent(props: DrawerContentComponentProps) {
           onPress={() => {
             props.navigation.closeDrawer();
             router.replace({
-              pathname: "/ai-chat/[id]",
+              pathname: "/ai-chat/[id]" as never,
               params: {
                 id: `new_${Date.now()}`,
-              },
+              } as never,
             });
           }}
         >
@@ -126,10 +126,10 @@ function AiSessionDrawerContent(props: DrawerContentComponentProps) {
               onPress={() => {
                 props.navigation.closeDrawer();
                 router.replace({
-                  pathname: "/ai-chat/[id]",
+                  pathname: "/ai-chat/[id]" as never,
                   params: {
                     id: item.id,
-                  },
+                  } as never,
                 });
               }}
             >

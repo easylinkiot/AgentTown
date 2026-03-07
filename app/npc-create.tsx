@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -56,11 +58,11 @@ export default function NPCCreateScreen() {
         system_prompt: systemPrompt.trim(),
       });
       router.replace({
-        pathname: "/npc-config/[npcId]",
+        pathname: "/npc-config/[npcId]" as never,
         params: {
           npcId: created.id,
           entrySource: "create",
-        },
+        } as never,
       });
     } catch (err) {
       setSubmitError(formatApiError(err));
@@ -91,8 +93,13 @@ export default function NPCCreateScreen() {
             />
           ) : null}
 
-          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
-            <View style={styles.formCard}>
+          <KeyboardAvoidingView
+            style={styles.body}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+          >
+            <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
+              <View style={styles.formCard}>
               <Text style={styles.formLabel}>{tr("Name", "Name")}</Text>
               <TextInput
                 value={name}
@@ -115,8 +122,9 @@ export default function NPCCreateScreen() {
                 placeholderTextColor="rgba(148,163,184,0.88)"
                 style={[styles.input, styles.textarea]}
               />
-            </View>
-          </ScrollView>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
 
           <Pressable style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]} disabled={!canSubmit} onPress={handleSubmit}>
             {submitting ? (
