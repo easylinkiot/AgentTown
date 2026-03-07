@@ -225,6 +225,7 @@ export interface ThreadMember {
   memberType: ThreadMemberType;
   friendId?: string;
   agentId?: string;
+  npcId?: string;
   status?: string;
   createdAt?: string;
 }

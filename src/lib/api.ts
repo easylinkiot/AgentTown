@@ -333,6 +333,7 @@ export interface DiscoverUser {
 export interface AddThreadMemberInput {
   friendId?: string;
   agentId?: string;
+  npcId?: string;
   memberType?: ThreadMemberType;
   name?: string;
   avatar?: string;

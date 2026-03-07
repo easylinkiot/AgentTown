@@ -26,6 +26,7 @@ import {
   installBotSkill as installBotSkillApi,
   installMiniApp as installMiniAppApi,
   installPresetMiniApp as installPresetMiniAppApi,
+  listNPCs as listNPCsApi,
   listThreadMembers as listThreadMembersApi,
   listThreadMessages as listThreadMessagesApi,
   listChatThreads as listChatThreadsApi,
@@ -62,6 +63,7 @@ import {
   Friend,
   MiniApp,
   MiniAppTemplate,
+  NPC,
   RealtimeEvent,
   SkillCatalogItem,
   TaskItem,
@@ -335,6 +337,19 @@ function upsertById<T extends { id: string }>(
 
 function removeById<T extends { id: string }>(list: T[], id: string): T[] {
   return list.filter((entry) => entry.id !== id);
+}
+
+function normalizeLabel(value?: string | null) {
+  return (value || "").trim().toLowerCase();
+}
+
+function findMatchingGroupNpc(npcs: NPC[], currentUserId: string, groupNpcName: string) {
+  const normalizedName = normalizeLabel(groupNpcName);
+  if (!normalizedName) return null;
+  const matches = npcs.filter((npc) => normalizeLabel(npc.name) === normalizedName);
+  if (matches.length === 0) return null;
+  const owned = matches.find((npc) => (npc.ownerUserId || "").trim() === currentUserId);
+  return owned || matches[0] || null;
 }
 
 export function isMyBotThreadId(threadId: string): boolean {
@@ -1011,14 +1026,47 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     if (!threadId) return;
     try {
       const members = await listThreadMembersApi(threadId);
+      const thread = chatThreadsRef.current.find((item) => item.id === threadId);
+      let nextMembers = members;
+      const groupNpcName = (thread?.groupNpcName || "").trim();
+
+      if (thread?.isGroup && groupNpcName) {
+        try {
+          const npcPool = await listNPCsApi();
+          const matchedNpc = findMatchingGroupNpc(npcPool, userID, groupNpcName);
+          if (matchedNpc?.id) {
+            const normalizedGroupNpc = normalizeLabel(groupNpcName);
+            const matchedNpcId = (matchedNpc.id || "").trim();
+            const hasGroupNpcMember = members.some((member) => {
+              if (member.memberType !== "role") return false;
+              if ((member.npcId || "").trim() === matchedNpcId) return true;
+              return normalizeLabel(member.name) === normalizedGroupNpc;
+            });
+
+            if (!hasGroupNpcMember) {
+              const addedMember = await addThreadMemberApi(threadId, {
+                npcId: matchedNpc.id,
+                memberType: "role",
+              });
+              const alreadyPresent = members.some((member) => member.id === addedMember.id);
+              if (!alreadyPresent) {
+                nextMembers = [...members, addedMember];
+              }
+            }
+          }
+        } catch {
+          // Keep current members when default NPC backfill fails.
+        }
+      }
+
       setThreadMembers((prev) => ({
         ...prev,
-        [threadId]: members,
+        [threadId]: nextMembers,
       }));
     } catch {
       // Ignore loading failure.
     }
-  }, []);
+  }, [userID]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1696,7 +1744,14 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const member = await addThreadMemberApi(threadId, input);
           setThreadMembers((prev) => {
             const members = prev[threadId] || [];
-            if (members.some((item) => item.id === member.id)) {
+            const alreadyExists = members.some((item) => {
+              if (item.id === member.id) return true;
+              if (member.memberType === "human" && member.friendId && item.friendId === member.friendId) return true;
+              if (member.memberType === "agent" && member.agentId && item.agentId === member.agentId) return true;
+              if (member.memberType === "role" && member.npcId && item.npcId === member.npcId) return true;
+              return false;
+            });
+            if (alreadyExists) {
               return prev;
             }
             setChatThreads((threads) =>

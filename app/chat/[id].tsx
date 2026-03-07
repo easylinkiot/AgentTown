@@ -52,11 +52,10 @@ import {
   agentChat as agentChatApi,
   aiText,
   createTask as createTaskApi,
-  type DiscoverUser,
-  discoverUsers as discoverUsersApi,
   formatApiError,
   listAgents as listAgentsApi,
   listFriends as listFriendsApi,
+  listNPCs as listNPCsApi,
   uploadFileV2,
 } from "@/src/lib/api";
 import {
@@ -77,6 +76,7 @@ import {
   ChatThread,
   ConversationMessage,
   Friend,
+  NPC,
   ThreadDisplayLanguage,
   ThreadMember,
 } from "@/src/types";
@@ -87,8 +87,8 @@ type GroupReplyMode = "all" | "mention";
 type TranslationMode = "off" | ThreadDisplayLanguage;
 type MemberCandidate = {
   key: string;
-  type: "human" | "agent";
-  group: "humans" | "agents";
+  type: "human" | "agent" | "role";
+  group: "humans" | "agents" | "roles";
   label: string;
   desc: string;
   onAdd: () => Promise<void>;
@@ -507,7 +507,6 @@ export default function ChatDetailScreen() {
     refreshThreadMessages,
     loadOlderMessages,
     sendMessage,
-    createFriend,
     listMembers,
     addMember,
     removeMember,
@@ -1762,7 +1761,7 @@ export default function ChatDetailScreen() {
   const [memberFilter, setMemberFilter] = useState<MemberFilter>("all");
   const [memberPoolFriends, setMemberPoolFriends] = useState<Friend[]>([]);
   const [memberPoolAgents, setMemberPoolAgents] = useState<Agent[]>([]);
-  const [memberPoolDiscover, setMemberPoolDiscover] = useState<DiscoverUser[]>([]);
+  const [memberPoolNpcs, setMemberPoolNpcs] = useState<NPC[]>([]);
   const [memberPoolBusy, setMemberPoolBusy] = useState(false);
   const [memberPoolError, setMemberPoolError] = useState<string | null>(null);
   const [memberPoolNonce, setMemberPoolNonce] = useState(0);
@@ -1849,13 +1848,13 @@ export default function ChatDetailScreen() {
     Promise.all([
       listFriendsApi(),
       listAgentsApi(),
-      discoverUsersApi(memberQuery.trim() ? memberQuery : undefined),
+      listNPCsApi(),
     ])
-      .then(([nextFriends, nextAgents, nextDiscover]) => {
+      .then(([nextFriends, nextAgents, nextNpcs]) => {
         if (!alive) return;
         setMemberPoolFriends(Array.isArray(nextFriends) ? nextFriends : []);
         setMemberPoolAgents(Array.isArray(nextAgents) ? nextAgents : []);
-        setMemberPoolDiscover(Array.isArray(nextDiscover) ? nextDiscover : []);
+        setMemberPoolNpcs(Array.isArray(nextNpcs) ? nextNpcs : []);
       })
       .catch((err) => {
         if (!alive) return;
@@ -1869,11 +1868,12 @@ export default function ChatDetailScreen() {
     return () => {
       alive = false;
     };
-  }, [chatId, listMembers, memberModal, memberPoolNonce, memberQuery]);
+  }, [chatId, listMembers, memberModal, memberPoolNonce]);
 
   const candidates = useMemo<MemberCandidate[]>(() => {
     const friendPool = memberPoolFriends.length ? memberPoolFriends : friends;
     const agentPool = memberPoolAgents.length ? memberPoolAgents : agents;
+    const npcPool = memberPoolNpcs;
     const usedFriendIds = new Set(
       members
         .map((m) => (m.friendId || "").trim())
@@ -1885,11 +1885,17 @@ export default function ChatDetailScreen() {
         .map((m) => (m.friendId || "").trim())
         .filter(Boolean)
     );
-    const usedAgentIds = new Set(members.map((m) => m.agentId).filter(Boolean));
+    const usedAgentIds = new Set(members.map((m) => (m.agentId || "").trim()).filter(Boolean));
+    const usedNpcIds = new Set(members.map((m) => (m.npcId || "").trim()).filter(Boolean));
+    const usedRoleNames = new Set(
+      members
+        .filter((m) => m.memberType === "role")
+        .map((m) => (m.name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const groupNpcName = (thread.groupNpcName || "").trim().toLowerCase();
 
     const friendItems = friendPool
-      // Hide personal/member bots from group add-member candidates.
-      // Group should add real users (friends) or explicit Agent/NPC entries.
       .filter((f) => f.kind === "human")
       .filter((f) => {
         const uid = (f.userId || "").trim();
@@ -1920,54 +1926,35 @@ export default function ChatDetailScreen() {
         },
       }));
 
-    const friendUserIDs = new Set(
-      friendPool
-        .map((f) => (f.userId || "").trim())
-        .filter(Boolean)
-    );
-    const discoverItems = memberPoolDiscover
-      .filter((u) => {
-        const uid = (u.id || "").trim();
-        if (!uid) return false;
-        if (friendUserIDs.has(uid)) return false;
-        if (usedHumanUserIDs.has(uid)) return false;
+    const roleItems = npcPool
+      .filter((npc) => {
+        const npcId = (npc.id || "").trim();
+        const npcName = (npc.name || "").trim().toLowerCase();
+        if (!npcId || !npcName) return false;
+        const ownerId = (npc.ownerUserId || "").trim();
+        const isOwnedNpc = currentUserId !== "" && ownerId !== "" && ownerId === currentUserId;
+        const isThreadNpc = groupNpcName !== "" && npcName === groupNpcName;
+        if (!isOwnedNpc) return false;
+        if (isThreadNpc) return false;
+        if (usedNpcIds.has(npcId)) return false;
+        if (usedRoleNames.has(npcName)) return false;
         return true;
       })
-      .map((u) => ({
-        key: `discover:${u.id}`,
-        type: "human" as const,
-        group: "humans" as const,
-        label: u.displayName || tr("用户", "User"),
-        desc: [u.email, u.provider].filter(Boolean).join(" · ") || tr("用户", "User"),
+      .map((npc) => ({
+        key: `npc:${npc.id}`,
+        type: "role" as const,
+        group: "roles" as const,
+        label: npc.name,
+        desc: npc.intro || tr("虚拟 NPC", "NPC"),
         onAdd: async () => {
-          setMemberPoolError(null);
-          try {
-            let friend: Friend | null | undefined = friendPool.find((f) => (f.userId || "").trim() === u.id);
-            if (!friend) {
-              friend = await createFriend({
-                userId: u.id,
-                name: u.displayName,
-                kind: "human",
-              });
-            }
-            if (!friend) {
-              setMemberPoolError(
-                tr(
-                  "好友邀请已发送。请等待对方接受后再加入群聊。",
-                  "Friend invite sent. Add them to the group after they accept."
-                )
-              );
-              return;
-            }
-            await addMember(chatId, { friendId: friend.id, memberType: "human" });
-          } catch (err) {
-            setMemberPoolError(formatApiError(err));
-            throw err;
-          }
+          await addMember(chatId, {
+            npcId: npc.id,
+            memberType: "role",
+          });
         },
       }));
 
-    const all = [...friendItems, ...agentItems, ...discoverItems];
+    const all = [...friendItems, ...agentItems, ...roleItems];
     const keyword = memberQuery.trim().toLowerCase();
 
     return all.filter((item) => {
@@ -1979,15 +1966,15 @@ export default function ChatDetailScreen() {
     addMember,
     agents,
     chatId,
-    createFriend,
+    currentUserId,
     friends,
-    listMembers,
     memberFilter,
     memberPoolAgents,
-    memberPoolDiscover,
     memberPoolFriends,
+    memberPoolNpcs,
     memberQuery,
     members,
+    thread.groupNpcName,
     tr,
   ]);
 
@@ -2007,6 +1994,11 @@ export default function ChatDetailScreen() {
           key: "humans",
           title: tr("联系人", "Contacts"),
           items: candidates.filter((item) => item.group === "humans"),
+        },
+        {
+          key: "roles",
+          title: tr("NPC", "NPCs"),
+          items: candidates.filter((item) => item.group === "roles"),
         },
       ].filter((section) => section.items.length > 0),
     [candidates, tr]
@@ -4016,7 +4008,10 @@ export default function ChatDetailScreen() {
                               const memberTag = inferAvatarTagFromMember(m);
                               openEntityConfig({
                                 entityType: memberTag === "Bot" ? "bot" : memberTag === "NPC" ? "npc" : "human",
-                                entityId: m.memberType === "human" ? m.friendId || m.id : m.agentId || m.id,
+                                entityId:
+                                  m.memberType === "human"
+                                    ? m.friendId || m.id
+                                    : m.npcId || m.agentId || m.id,
                                 name: m.name,
                                 avatar: m.avatar,
                               });
@@ -4053,7 +4048,7 @@ export default function ChatDetailScreen() {
                                 ? tr("真人", "Human")
                                 : m.memberType === "agent"
                                   ? tr("智能体", "Agent")
-                                  : tr("角色", "Role")}
+                                  : tr("NPC", "NPC")}
                             </Text>
                           </View>
                         </View>
@@ -4095,7 +4090,7 @@ export default function ChatDetailScreen() {
                   { key: "all", zh: "全部", en: "All" },
                   { key: "human", zh: "真人", en: "Human" },
                   { key: "agent", zh: "智能体", en: "Agent" },
-                  { key: "role", zh: "角色", en: "Role" },
+                  { key: "role", zh: "NPC", en: "NPC" },
                 ] as const).map((item) => (
                   <Pressable
                     key={item.key}

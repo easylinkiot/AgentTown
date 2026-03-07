@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { AgentTownProvider, useAgentTown } from "../agenttown-context";
 import { useAuth } from "../auth-context";
 import {
+  addThreadMember,
   atCreateSession,
   createFriend as createFriendApi,
   fetchBootstrap,
@@ -15,8 +16,10 @@ import {
   listFriends,
   listMiniApps,
   listMiniAppTemplates,
+  listNPCs,
   listSkillCatalog,
   listTasks,
+  listThreadMembers,
   mapATSessionToThread,
   subscribeRealtime,
 } from "@/src/lib/api";
@@ -57,6 +60,7 @@ jest.mock("@/src/lib/api", () => ({
   listFriends: jest.fn(),
   listMiniApps: jest.fn(),
   listMiniAppTemplates: jest.fn(),
+  listNPCs: jest.fn(),
   listSkillCatalog: jest.fn(),
   listTasks: jest.fn(),
   listThreadMembers: jest.fn(),
@@ -75,6 +79,7 @@ jest.mock("@/src/lib/api", () => ({
 
 const mockedUseAuth = useAuth as jest.Mock;
 const mockedCreateFriendApi = createFriendApi as jest.Mock;
+const mockedAddThreadMember = addThreadMember as jest.Mock;
 const mockedAtCreateSession = atCreateSession as jest.Mock;
 const mockedMapATSessionToThread = mapATSessionToThread as jest.Mock;
 const mockedSubscribeRealtime = subscribeRealtime as jest.Mock;
@@ -87,7 +92,9 @@ const mockedListSkillCatalog = listSkillCatalog as jest.Mock;
 const mockedListCustomSkills = listCustomSkills as jest.Mock;
 const mockedListMiniApps = listMiniApps as jest.Mock;
 const mockedListMiniAppTemplates = listMiniAppTemplates as jest.Mock;
+const mockedListNPCs = listNPCs as jest.Mock;
 const mockedFetchBootstrap = fetchBootstrap as jest.Mock;
+const mockedListThreadMembers = listThreadMembers as jest.Mock;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <AgentTownProvider>{children}</AgentTownProvider>;
@@ -133,6 +140,9 @@ describe("AgentTown friend regression", () => {
     mockedListCustomSkills.mockResolvedValue([]);
     mockedListMiniApps.mockResolvedValue([]);
     mockedListMiniAppTemplates.mockResolvedValue([]);
+    mockedListNPCs.mockResolvedValue([]);
+    mockedListThreadMembers.mockResolvedValue([]);
+    mockedAddThreadMember.mockReset();
   });
 
   it("adds friend thread immediately when backend returns friend.threadId", async () => {
@@ -332,6 +342,83 @@ describe("AgentTown friend regression", () => {
     });
 
     expect(result.current.chatThreads.find((item) => item.id === "thread_group_1")?.memberCount).toBe(1);
+  });
+
+  it("backfills the configured group NPC even when another npc is already present", async () => {
+    const groupThread = {
+      id: "thread_group_2",
+      name: "Founders",
+      avatar: "",
+      message: "",
+      time: "Now",
+      isGroup: true,
+      groupNpcName: "Elon Musk",
+      memberCount: 2,
+    };
+
+    mockedFetchBootstrap.mockResolvedValue({
+      chatThreads: [groupThread],
+      tasks: [],
+      messages: {},
+      friends: [],
+      threadMembers: {},
+      agents: [],
+      skillCatalog: [],
+      customSkills: [],
+      miniApps: [],
+      miniAppTemplates: [],
+    });
+    mockedListChatThreads.mockResolvedValue([groupThread]);
+    mockedListThreadMembers.mockResolvedValue([
+      {
+        id: "member_other_npc",
+        threadId: "thread_group_2",
+        name: "Coach NPC",
+        avatar: "",
+        memberType: "role",
+        npcId: "npc_other",
+      },
+    ]);
+    mockedListNPCs.mockResolvedValue([
+      {
+        id: "npc_other",
+        ownerUserId: "u_owner",
+        name: "Coach NPC",
+      },
+      {
+        id: "npc_group",
+        ownerUserId: "u_owner",
+        name: "Elon Musk",
+      },
+    ]);
+    mockedAddThreadMember.mockResolvedValue({
+      id: "member_group_npc",
+      threadId: "thread_group_2",
+      name: "Elon Musk",
+      avatar: "",
+      memberType: "role",
+      npcId: "npc_group",
+    });
+
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+
+    await act(async () => {
+      await result.current.listMembers("thread_group_2");
+    });
+
+    await waitFor(() =>
+      expect(result.current.threadMembers.thread_group_2).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "member_other_npc", npcId: "npc_other" }),
+          expect.objectContaining({ id: "member_group_npc", npcId: "npc_group" }),
+        ])
+      )
+    );
+    expect(mockedAddThreadMember).toHaveBeenCalledWith("thread_group_2", {
+      npcId: "npc_group",
+      memberType: "role",
+    });
   });
 
   it("personalizes direct threads when realtime friend.created arrives", async () => {

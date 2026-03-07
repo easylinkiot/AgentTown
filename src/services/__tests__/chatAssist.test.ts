@@ -391,9 +391,9 @@ describe("chatAssist helpers", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer access-token");
     expect(list).toHaveLength(5);
     expect(list).toMatchObject([
-      { id: "professional-reply", action: "auto_reply", name: "Reply Pro", userInputRequired: false },
+      { id: "professional-reply", action: "auto_reply", name: "Reply Pro", userInputRequired: true },
       { id: "action-needs", action: "add_task", name: "Task Extractor", userInputRequired: false },
-      { id: "translate", action: "translate", name: "Translate", userInputRequired: false },
+      { id: "translate", action: "translate", name: "Translate", userInputRequired: true },
       { id: "generate-idea", action: "follow_up", name: "Follow-up", userInputRequired: false },
       { id: "unknown-skill", action: null, name: "Skip me", userInputRequired: false },
     ]);
@@ -439,7 +439,7 @@ describe("chatAssist helpers", () => {
     const list = await listChatAssistSkills();
     expect(list).toHaveLength(3);
     expect(list).toMatchObject([
-      { id: "professional_reply", action: "auto_reply", name: "Professional Reply", userInputRequired: false },
+      { id: "professional_reply", action: "auto_reply", name: "Professional Reply", userInputRequired: true },
       { id: "action_needs", action: "add_task", name: "Action Needs", userInputRequired: false },
       { id: "generate_idea", action: "follow_up", name: "Generate Idea", userInputRequired: false },
     ]);

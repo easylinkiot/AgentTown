@@ -17,10 +17,10 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
-import { formatApiError } from "@/src/lib/api";
+import { formatApiError, listNPCs as listNPCsApi } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
-import { ChatThread, ThreadMember } from "@/src/types";
+import { ChatThread, NPC, ThreadMember } from "@/src/types";
 
 type InviteFilter = "all" | "human" | "agent" | "role";
 
@@ -68,6 +68,7 @@ export default function GroupsScreen() {
   const [candidateQuery, setCandidateQuery] = useState("");
   const [inviteFilter, setInviteFilter] = useState<InviteFilter>("all");
   const [error, setError] = useState<string | null>(null);
+  const [npcList, setNpcList] = useState<NPC[]>([]);
 
   useEffect(() => {
     if (!groups.length) {
@@ -83,6 +84,23 @@ export default function GroupsScreen() {
     if (!selectedGroupId) return;
     void listMembers(selectedGroupId).catch((err) => setError(formatApiError(err)));
   }, [listMembers, selectedGroupId]);
+
+  useEffect(() => {
+    if (!memberModal) return;
+    let alive = true;
+    void listNPCsApi()
+      .then((rows) => {
+        if (!alive) return;
+        setNpcList(Array.isArray(rows) ? rows : []);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(formatApiError(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [memberModal]);
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
   const members = selectedGroupId ? threadMembers[selectedGroupId] || [] : [];
@@ -138,22 +156,28 @@ export default function GroupsScreen() {
   );
 
   const candidates = useMemo(() => {
-    const usedFriendIds = new Set(members.map((m) => m.friendId).filter(Boolean));
-    const usedAgentIds = new Set(members.map((m) => m.agentId).filter(Boolean));
+    const usedFriendIds = new Set(members.map((m) => (m.friendId || "").trim()).filter(Boolean));
+    const usedAgentIds = new Set(members.map((m) => (m.agentId || "").trim()).filter(Boolean));
+    const usedNpcIds = new Set(members.map((m) => (m.npcId || "").trim()).filter(Boolean));
+    const usedRoleNames = new Set(
+      members
+        .filter((m) => m.memberType === "role")
+        .map((m) => (m.name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const groupNpcName = (selectedGroup?.groupNpcName || "").trim().toLowerCase();
 
     const friendItems = friends
+      .filter((f) => f.kind === "human")
       .filter((f) => !usedFriendIds.has(f.id))
       .map((f) => ({
         key: `friend:${f.id}`,
-        type: f.kind === "bot" ? ("role" as const) : ("human" as const),
+        type: "human" as const,
         label: f.name,
-        desc:
-          f.role ||
-          f.company ||
-          (f.kind === "bot" ? tr("角色", "Role") : tr("真人", "Human")),
+        desc: f.role || f.company || tr("真人", "Human"),
         onAdd: async () => {
           if (!selectedGroupId) return;
-          await addMember(selectedGroupId, { friendId: f.id, memberType: f.kind === "bot" ? "role" : "human" });
+          await addMember(selectedGroupId, { friendId: f.id, memberType: "human" });
           await listMembers(selectedGroupId);
           setMemberModal(false);
         },
@@ -174,7 +198,34 @@ export default function GroupsScreen() {
         },
       }));
 
-    const all = [...friendItems, ...agentItems];
+    const roleItems = npcList
+      .filter((npc) => {
+        const npcId = (npc.id || "").trim();
+        const npcName = (npc.name || "").trim().toLowerCase();
+        if (!npcId || !npcName) return false;
+        const ownerId = (npc.ownerUserId || "").trim();
+        const isOwnedNpc = currentUserId !== "" && ownerId !== "" && ownerId === currentUserId;
+        const isGroupNpc = groupNpcName !== "" && npcName === groupNpcName;
+        if (!isOwnedNpc) return false;
+        if (isGroupNpc) return false;
+        if (usedNpcIds.has(npcId)) return false;
+        if (usedRoleNames.has(npcName)) return false;
+        return true;
+      })
+      .map((npc) => ({
+        key: `npc:${npc.id}`,
+        type: "role" as const,
+        label: npc.name,
+        desc: npc.intro || tr("虚拟 NPC", "NPC"),
+        onAdd: async () => {
+          if (!selectedGroupId) return;
+          await addMember(selectedGroupId, { npcId: npc.id, memberType: "role" });
+          await listMembers(selectedGroupId);
+          setMemberModal(false);
+        },
+      }));
+
+    const all = [...friendItems, ...agentItems, ...roleItems];
     const keyword = candidateQuery.trim().toLowerCase();
 
     return all.filter((item) => {
@@ -182,7 +233,7 @@ export default function GroupsScreen() {
       if (!keyword) return true;
       return item.label.toLowerCase().includes(keyword) || item.desc.toLowerCase().includes(keyword);
     });
-  }, [addMember, agents, candidateQuery, friends, inviteFilter, listMembers, members, selectedGroupId, tr]);
+  }, [addMember, agents, candidateQuery, currentUserId, friends, inviteFilter, listMembers, members, npcList, selectedGroup?.groupNpcName, selectedGroupId, tr]);
 
   const confirmRemoveMember = (groupId: string, member: ThreadMember) => {
     const canOperate = canOperateGroupMember(member);
@@ -340,7 +391,7 @@ export default function GroupsScreen() {
                   { key: "all", zh: "全部", en: "All" },
                   { key: "human", zh: "真人", en: "Human" },
                   { key: "agent", zh: "Agent", en: "Agent" },
-                  { key: "role", zh: "角色", en: "Role" },
+                  { key: "role", zh: "NPC", en: "NPC" },
                 ] as const).map((item) => (
                   <Pressable
                     key={item.key}
