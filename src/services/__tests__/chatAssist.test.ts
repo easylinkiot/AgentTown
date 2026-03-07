@@ -373,10 +373,10 @@ describe("chatAssist helpers", () => {
       text: async () =>
         JSON.stringify({
           skills: [
-            { id: "professional-reply", name: "Reply Pro" },
-            { id: "action-needs", title: "Task Extractor" },
-            { id: "translate", label: "Translate" },
-            { id: "generate-idea", display_name: "Follow-up" },
+            { id: "professional-reply", name: "Reply Pro", user_input_required: true },
+            { id: "action-needs", title: "Task Extractor", user_input_required: false },
+            { id: "translate", label: "Translate", user_input_required: true },
+            { id: "generate-idea", display_name: "Follow-up", user_input_required: false },
             { id: "unknown-skill", name: "Skip me" },
           ],
         }),
@@ -390,10 +390,11 @@ describe("chatAssist helpers", () => {
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer access-token");
     expect(list).toEqual([
-      { id: "professional-reply", action: "auto_reply", name: "Reply Pro" },
-      { id: "action-needs", action: "add_task", name: "Task Extractor" },
-      { id: "translate", action: "translate", name: "Translate" },
-      { id: "generate-idea", action: "follow_up", name: "Follow-up" },
+      { id: "professional-reply", action: "auto_reply", name: "Reply Pro", userInputRequired: true },
+      { id: "action-needs", action: "add_task", name: "Task Extractor", userInputRequired: false },
+      { id: "translate", action: "translate", name: "Translate", userInputRequired: true },
+      { id: "generate-idea", action: "follow_up", name: "Follow-up", userInputRequired: false },
+      { id: "unknown-skill", action: null, name: "Skip me", userInputRequired: false },
     ]);
   });
 
@@ -427,18 +428,18 @@ describe("chatAssist helpers", () => {
       text: async () =>
         JSON.stringify({
           skills: [
-            { id: "professional_reply", name: "Professional Reply" },
-            { id: "action_needs", name: "Action Needs" },
-            { id: "generate_idea", name: "Generate Idea" },
+            { id: "professional_reply", name: "Professional Reply", userInputRequired: true },
+            { id: "action_needs", name: "Action Needs", userInputRequired: false },
+            { id: "generate_idea", name: "Generate Idea", userInputRequired: false },
           ],
         }),
     } as Response);
 
     const list = await listChatAssistSkills();
     expect(list).toEqual([
-      { id: "professional_reply", action: "auto_reply", name: "Professional Reply" },
-      { id: "action_needs", action: "add_task", name: "Action Needs" },
-      { id: "generate_idea", action: "follow_up", name: "Generate Idea" },
+      { id: "professional_reply", action: "auto_reply", name: "Professional Reply", userInputRequired: true },
+      { id: "action_needs", action: "add_task", name: "Action Needs", userInputRequired: false },
+      { id: "generate_idea", action: "follow_up", name: "Generate Idea", userInputRequired: false },
     ]);
   });
 });
