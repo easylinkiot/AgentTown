@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Modal,
@@ -19,8 +21,18 @@ import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { tx } from "@/src/i18n/translate";
-import { formatApiError } from "@/src/lib/api";
+import { formatApiError, uploadFileV2 } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
+
+function inferImageMimeType(fileName?: string | null, fallbackMimeType?: string | null) {
+  if (fallbackMimeType && fallbackMimeType.startsWith("image/")) return fallbackMimeType;
+  const safeName = (fileName || "").toLowerCase();
+  if (safeName.endsWith(".png")) return "image/png";
+  if (safeName.endsWith(".webp")) return "image/webp";
+  if (safeName.endsWith(".gif")) return "image/gif";
+  if (safeName.endsWith(".heic") || safeName.endsWith(".heif")) return "image/heic";
+  return "image/jpeg";
+}
 
 export default function AgentsScreen() {
   const router = useRouter();
@@ -46,6 +58,7 @@ export default function AgentsScreen() {
   const [rolePrompt, setRolePrompt] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarInputVisible, setAvatarInputVisible] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [creatingAgent, setCreatingAgent] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +89,7 @@ export default function AgentsScreen() {
 
   const handleCreate = async () => {
     const safeName = name.trim();
-    if (!safeName || creatingAgent) return;
+    if (!safeName || creatingAgent || uploadingAvatar) return;
     setError(null);
     setCreatingAgent(true);
 
@@ -105,6 +118,52 @@ export default function AgentsScreen() {
       setError(formatApiError(err));
     } finally {
       setCreatingAgent(false);
+    }
+  };
+
+  const handlePickAvatar = async () => {
+    if (uploadingAvatar || creatingAgent) return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          tr("需要相册权限", "Media library permission required"),
+          tr("请允许访问相册后再选择头像。", "Allow photo-library access before choosing an avatar.")
+        );
+        return;
+      }
+
+      const picker = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+        selectionLimit: 1,
+      });
+      if (picker.canceled || picker.assets.length === 0) return;
+
+      const asset = picker.assets[0];
+      setUploadingAvatar(true);
+      const uploaded = await uploadFileV2({
+        uri: asset.uri,
+        name: asset.fileName || `bot-avatar-${Date.now()}.jpg`,
+        mimeType: inferImageMimeType(asset.fileName, asset.mimeType),
+      });
+      const nextUrl = (uploaded.url || "").trim();
+      if (!nextUrl) {
+        throw new Error(
+          tr("头像上传成功，但未返回可用地址。", "Avatar uploaded but no usable URL was returned.")
+        );
+      }
+      setAvatarUrl(nextUrl);
+      setAvatarInputVisible(false);
+    } catch (err) {
+      Alert.alert(
+        tr("头像上传失败", "Avatar upload failed"),
+        err instanceof Error ? err.message : tr("请稍后重试", "Please try again")
+      );
+    } finally {
+      setUploadingAvatar(false);
     }
   };
 
@@ -382,14 +441,33 @@ export default function AgentsScreen() {
                         <Ionicons name="person" size={32} color="rgba(226,232,240,0.55)" />
                       )}
                     </View>
-                    <Pressable style={styles.avatarUploadBtn} onPress={() => setAvatarInputVisible((v) => !v)}>
-                      <Ionicons name="cloud-upload-outline" size={16} color="#ffffff" />
+                    <Pressable
+                      style={[styles.avatarUploadBtn, uploadingAvatar && styles.avatarUploadBtnDisabled]}
+                      onPress={() => {
+                        void handlePickAvatar();
+                      }}
+                      disabled={uploadingAvatar}
+                    >
+                      {uploadingAvatar ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <Ionicons name="image-outline" size={16} color="#ffffff" />
+                      )}
                     </Pressable>
                   </View>
                   <Text style={styles.avatarLabel}>{tr("上传头像", "Upload Avatar")}</Text>
                   <Text style={styles.avatarHint}>
-                    {avatarUrl.trim() ? tr("已选择", "Selected") : tr("未选择文件", "No file chosen")}
+                    {uploadingAvatar
+                      ? tr("上传中...", "Uploading...")
+                      : avatarUrl.trim()
+                        ? tr("已选择", "Selected")
+                        : tr("未选择文件", "No file chosen")}
                   </Text>
+                  <Pressable style={styles.avatarLinkBtn} onPress={() => setAvatarInputVisible((v) => !v)}>
+                    <Text style={styles.avatarLinkBtnText}>
+                      {avatarInputVisible ? tr("隐藏图片链接", "Hide image URL") : tr("使用图片链接", "Use image URL")}
+                    </Text>
+                  </Pressable>
                 </View>
 
                 {avatarInputVisible ? (
@@ -467,17 +545,22 @@ export default function AgentsScreen() {
                 <Pressable
                   style={[
                     styles.createBtn,
-                    (!name.trim() || creatingAgent) && styles.createBtnDisabled,
+                    (!name.trim() || creatingAgent || uploadingAvatar) && styles.createBtnDisabled,
                   ]}
-                  disabled={!name.trim() || creatingAgent}
+                  disabled={!name.trim() || creatingAgent || uploadingAvatar}
                   onPress={handleCreate}
                 >
                   <Ionicons
                     name="checkmark"
                     size={16}
-                    color={!name.trim() || creatingAgent ? "rgba(226,232,240,0.40)" : "#ffffff"}
+                    color={!name.trim() || creatingAgent || uploadingAvatar ? "rgba(226,232,240,0.40)" : "#ffffff"}
                   />
-                  <Text style={[styles.createBtnText, (!name.trim() || creatingAgent) && styles.createBtnTextDisabled]}>
+                  <Text
+                    style={[
+                      styles.createBtnText,
+                      (!name.trim() || creatingAgent || uploadingAvatar) && styles.createBtnTextDisabled,
+                    ]}
+                  >
                     {creatingAgent ? tr("创建中...", "Creating...") : tr("创建成员", "Create Member")}
                   </Text>
                 </Pressable>
@@ -883,6 +966,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  avatarUploadBtnDisabled: {
+    opacity: 0.72,
+  },
   avatarLabel: {
     color: "rgba(226,232,240,0.9)",
     fontSize: 12,
@@ -893,6 +979,20 @@ const styles = StyleSheet.create({
     color: "rgba(148,163,184,0.95)",
     fontSize: 11,
     fontWeight: "700",
+  },
+  avatarLinkBtn: {
+    marginTop: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.24)",
+    backgroundColor: "rgba(15,23,42,0.38)",
+  },
+  avatarLinkBtnText: {
+    color: "#93c5fd",
+    fontSize: 11,
+    fontWeight: "800",
   },
   inlineBox: {
     gap: 8,
