@@ -52,6 +52,10 @@ import {
   extractActiveMention,
   replaceActiveMention,
 } from "@/src/features/chat/mention-helpers";
+import {
+  inferUploadFilename,
+  normalizeMediaAssetForUpload,
+} from "@/src/features/chat/media-upload";
 import { tx } from "@/src/i18n/translate";
 import {
   agentChat as agentChatApi,
@@ -237,31 +241,6 @@ function normalizeRenderableImageUri(primary?: string, fallback?: string) {
   const second = (fallback || "").trim();
   if (second && !isIOSPhotoLibraryUri(second)) return second;
   return "";
-}
-
-function inferMediaMimeType(asset: MediaPickerAsset) {
-  const lowerName = (asset.filename || "").trim().toLowerCase();
-  const ext = lowerName.includes(".") ? lowerName.split(".").pop() || "" : "";
-  if (asset.type === "video") {
-    if (ext === "mov") return "video/quicktime";
-    if (ext === "webm") return "video/webm";
-    if (ext === "mkv") return "video/x-matroska";
-    return "video/mp4";
-  }
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  if (ext === "heic" || ext === "heif") return "image/heic";
-  if (ext === "gif") return "image/gif";
-  return "image/jpeg";
-}
-
-function inferUploadFilename(asset: MediaPickerAsset, index: number) {
-  const safe = (asset.filename || "").trim();
-  if (safe) return safe;
-  const fromUri = decodeURIComponent((asset.uri || "").split("/").pop() || "").split("?")[0].trim();
-  if (fromUri && fromUri.includes(".")) return fromUri;
-  const suffix = asset.type === "video" ? "mp4" : "jpg";
-  return `${asset.type}_${Date.now()}_${index + 1}.${suffix}`;
 }
 
 function buildRecentAssistContextMessages(messages: ConversationMessage[], limit = 100) {
@@ -1276,9 +1255,7 @@ export default function ChatDetailScreen() {
               url: entry.asset.uri,
             }
           : await uploadFileV2({
-              uri: entry.asset.uri,
-              name: inferUploadFilename(entry.asset, index),
-              mimeType: inferMediaMimeType(entry.asset),
+              ...(await normalizeMediaAssetForUpload(entry.asset, index)),
             });
         setUploadingMediaByMessageId((prev) => {
           if (!(entry.localId in prev)) return prev;
