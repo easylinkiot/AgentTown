@@ -3,7 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import {
   ActivityIndicator,
@@ -25,6 +25,7 @@ import { SvgXml } from "react-native-svg";
 import { AVATAR_PRESETS } from "@/src/constants/avatars";
 import { MARKET_DATA } from "@/src/constants/marketplace";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
+import { buildProfileAvatarUploadInput } from "@/src/features/profile-avatar";
 import { tx } from "@/src/i18n/translate";
 import { buildFriendQrDeepLink, createFriendQR, uploadFileV2 } from "@/src/lib/api";
 import { generateGeminiJson } from "@/src/lib/gemini";
@@ -144,19 +145,6 @@ async function buildFriendQrSvg(shareLink: string) {
   });
 }
 
-function inferImageMimeType(fileName?: string | null, fallbackMimeType?: string | null) {
-  const safeFallback = (fallbackMimeType || "").trim();
-  if (safeFallback) return safeFallback;
-
-  const lowerName = (fileName || "").trim().toLowerCase();
-  if (lowerName.endsWith(".png")) return "image/png";
-  if (lowerName.endsWith(".webp")) return "image/webp";
-  if (lowerName.endsWith(".gif")) return "image/gif";
-  if (lowerName.endsWith(".heic")) return "image/heic";
-  if (lowerName.endsWith(".heif")) return "image/heif";
-  return "image/jpeg";
-}
-
 export default function ConfigScreen() {
   const router = useRouter();
   const {
@@ -197,6 +185,7 @@ export default function ConfigScreen() {
   const [myQrExpiresAt, setMyQrExpiresAt] = useState("");
   const [generatingMyQr, setGeneratingMyQr] = useState(false);
   const [friendQrSvg, setFriendQrSvg] = useState("");
+  const hasRequestedProfileCameraPermissionRef = useRef(false);
 
   const profileAvatar = profileAvatarInput.trim() || user?.avatar || botConfig.avatar || AVATAR_PRESETS[0];
   const profileProvider = user?.provider || "unknown";
@@ -303,12 +292,51 @@ export default function ConfigScreen() {
     setAvatar(next);
   };
 
-  const randomizeProfileAvatar = () => {
-    const next = AVATAR_PRESETS[Math.floor(Math.random() * AVATAR_PRESETS.length)];
-    setProfileAvatarInput(next);
+  const uploadProfileAvatarAsset = async (
+    asset: { uri: string; fileName?: string | null; mimeType?: string | null },
+    source: "library" | "camera"
+  ) => {
+    setUploadingProfileAvatar(true);
+    try {
+      const uploaded = await uploadFileV2(buildProfileAvatarUploadInput(asset, source));
+      const nextUrl = (uploaded.url || "").trim();
+      if (!nextUrl) {
+        throw new Error(tr("头像上传成功，但未返回可用地址。", "Avatar uploaded but no usable URL was returned."));
+      }
+      setProfileAvatarInput(nextUrl);
+      Alert.alert(
+        tr("头像已上传", "Avatar uploaded"),
+        tr("点击“保存资料”后将更新你的个人头像。", "Tap Save Profile to apply the new avatar.")
+      );
+    } finally {
+      setUploadingProfileAvatar(false);
+    }
   };
 
-  const handlePickProfileAvatar = async () => {
+  const ensureProfileCameraPermission = async () => {
+    let permission = await ImagePicker.getCameraPermissionsAsync();
+    if (permission.granted) return true;
+
+    if (hasRequestedProfileCameraPermissionRef.current) {
+      Alert.alert(
+        tr("需要相机权限", "Camera permission required"),
+        tr("请在系统设置中允许相机访问后再试。", "Enable camera access in system settings and try again.")
+      );
+      return false;
+    }
+
+    hasRequestedProfileCameraPermissionRef.current = true;
+    permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (permission.granted) return true;
+
+    Alert.alert(
+      tr("需要相机权限", "Camera permission required"),
+      tr("未获得相机权限，暂时无法拍照。", "Camera access was not granted, unable to take photos right now.")
+    );
+    return false;
+  };
+
+  const openProfileAvatarLibrary = async () => {
     if (uploadingProfileAvatar || savingProfile) return;
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -329,30 +357,62 @@ export default function ConfigScreen() {
       });
       if (picker.canceled || picker.assets.length === 0) return;
 
-      const asset = picker.assets[0];
-      setUploadingProfileAvatar(true);
-      const uploaded = await uploadFileV2({
-        uri: asset.uri,
-        name: asset.fileName || `profile-avatar-${Date.now()}.jpg`,
-        mimeType: inferImageMimeType(asset.fileName, asset.mimeType),
-      });
-      const nextUrl = (uploaded.url || "").trim();
-      if (!nextUrl) {
-        throw new Error(tr("头像上传成功，但未返回可用地址。", "Avatar uploaded but no usable URL was returned."));
-      }
-      setProfileAvatarInput(nextUrl);
-      Alert.alert(
-        tr("头像已上传", "Avatar uploaded"),
-        tr("点击“保存资料”后将更新你的个人头像。", "Tap Save Profile to apply the new avatar.")
-      );
+      await uploadProfileAvatarAsset(picker.assets[0], "library");
     } catch (err) {
       Alert.alert(
         tr("头像上传失败", "Avatar upload failed"),
         err instanceof Error ? err.message : tr("请稍后重试", "Please try again")
       );
-    } finally {
-      setUploadingProfileAvatar(false);
     }
+  };
+
+  const openProfileAvatarCamera = async () => {
+    if (uploadingProfileAvatar || savingProfile) return;
+    try {
+      const granted = await ensureProfileCameraPermission();
+      if (!granted) return;
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (result.canceled || result.assets.length === 0) return;
+
+      await uploadProfileAvatarAsset(result.assets[0], "camera");
+    } catch (err) {
+      Alert.alert(
+        tr("头像更新失败", "Avatar update failed"),
+        err instanceof Error ? err.message : tr("请稍后重试", "Please try again")
+      );
+    }
+  };
+
+  const promptProfileAvatarUpdate = () => {
+    if (uploadingProfileAvatar || savingProfile) return;
+    Alert.alert(
+      tr("更新头像", "Update Avatar"),
+      tr("请选择头像来源。", "Choose where to get your avatar image."),
+      [
+        {
+          text: tr("相册", "Photo Library"),
+          onPress: () => {
+            void openProfileAvatarLibrary();
+          },
+        },
+        {
+          text: tr("相机", "Camera"),
+          onPress: () => {
+            void openProfileAvatarCamera();
+          },
+        },
+        {
+          text: tr("取消", "Cancel"),
+          style: "cancel",
+        },
+      ]
+    );
   };
 
   const save = () => {
@@ -612,20 +672,17 @@ export default function ConfigScreen() {
             textContentType="oneTimeCode"
             importantForAutofill="no"
             />
-            <TextInput
-              style={styles.neoAccountField}
-              value={profileAvatarInput}
-              onChangeText={setProfileAvatarInput}
-              placeholder={tr("头像地址", "Avatar URL")}
-              placeholderTextColor="rgba(148,163,184,0.85)"
-              autoCapitalize="none"
-              autoComplete="off"
-              textContentType="oneTimeCode"
-              importantForAutofill="no"
-            />
-            <Pressable style={styles.neoAvatarPresetBtn} onPress={randomizeProfileAvatar}>
-              <Ionicons name="images-outline" size={14} color="#dbeafe" />
-              <Text style={styles.neoAvatarPresetBtnText}>{tr("随机头像", "Random Avatar")}</Text>
+            <Pressable
+              style={[styles.neoAvatarPresetBtn, (uploadingProfileAvatar || savingProfile) && styles.accountActionBtnDisabled]}
+              onPress={promptProfileAvatarUpdate}
+              disabled={uploadingProfileAvatar || savingProfile}
+            >
+              {uploadingProfileAvatar ? (
+                <ActivityIndicator size="small" color="#dbeafe" />
+              ) : (
+                <Ionicons name="cloud-upload-outline" size={14} color="#dbeafe" />
+              )}
+              <Text style={styles.neoAvatarPresetBtnText}>{tr("更新头像", "Update Avatar")}</Text>
             </Pressable>
             <View style={styles.neoReadonlyRow}>
               <Ionicons name="call-outline" size={14} color="rgba(148,163,184,0.9)" />
@@ -1023,36 +1080,18 @@ export default function ConfigScreen() {
           textContentType="oneTimeCode"
           importantForAutofill="no"
           />
-          <TextInput
-            style={styles.accountInput}
-            value={profileAvatarInput}
-            onChangeText={setProfileAvatarInput}
-            placeholder={tr("头像地址", "Avatar URL")}
-            autoCapitalize="none"
-            autoComplete="off"
-            textContentType="oneTimeCode"
-            importantForAutofill="no"
-          />
           <View style={styles.accountAvatarActionsRow}>
             <Pressable
               style={[styles.accountAvatarPresetBtn, (uploadingProfileAvatar || savingProfile) && styles.accountActionBtnDisabled]}
-              onPress={() => void handlePickProfileAvatar()}
+              onPress={promptProfileAvatarUpdate}
               disabled={uploadingProfileAvatar || savingProfile}
             >
               {uploadingProfileAvatar ? (
                 <ActivityIndicator size="small" color="#1d4ed8" />
               ) : (
-                <Ionicons name="image-outline" size={14} color="#1d4ed8" />
+                <Ionicons name="cloud-upload-outline" size={14} color="#1d4ed8" />
               )}
-              <Text style={styles.accountAvatarPresetBtnText}>{tr("从相册选择", "Choose Photo")}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.accountAvatarPresetBtn, (uploadingProfileAvatar || savingProfile) && styles.accountActionBtnDisabled]}
-              onPress={randomizeProfileAvatar}
-              disabled={uploadingProfileAvatar || savingProfile}
-            >
-              <Ionicons name="images-outline" size={14} color="#1d4ed8" />
-              <Text style={styles.accountAvatarPresetBtnText}>{tr("随机头像", "Random Avatar")}</Text>
+              <Text style={styles.accountAvatarPresetBtnText}>{tr("更新头像", "Update Avatar")}</Text>
             </Pressable>
           </View>
           <Pressable
