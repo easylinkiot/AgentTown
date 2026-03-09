@@ -312,7 +312,7 @@ export default function ConfigScreen() {
       return;
     }
     const content = [
-      tr("AgentTown 好友二维码", "AgentTown Friend QR"),
+      tr("Team Chat 好友二维码", "Team Chat Friend QR"),
       friendQrDeepLink || myQrToken,
       `${tr("备用原始码", "Fallback token")}: ${myQrToken}`,
       `${tr("有效期", "Expires")}: ${myQrExpiresAt || "-"}`,

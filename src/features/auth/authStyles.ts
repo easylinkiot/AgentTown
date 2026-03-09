@@ -49,8 +49,13 @@ export const authStyles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
   },
+  heroTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
   heroBadge: {
-    alignSelf: "flex-start",
     minHeight: 28,
     borderRadius: 999,
     paddingHorizontal: 10,
@@ -122,9 +127,9 @@ export const authStyles = StyleSheet.create({
     gap: 8,
   },
   langBtn: {
-    minHeight: 34,
+    minHeight: 30,
     borderRadius: 999,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: AUTH_COLORS.border,
     backgroundColor: AUTH_COLORS.surfaceSoft,
@@ -137,7 +142,7 @@ export const authStyles = StyleSheet.create({
   },
   langBtnText: {
     color: AUTH_COLORS.textSoft,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
   },
   langBtnTextActive: {

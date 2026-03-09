@@ -609,8 +609,28 @@ export default function SignInScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={authStyles.heroCard}>
-              <View style={authStyles.heroBadge}>
-                <Text style={authStyles.heroBadgeText}>{tr("安全登录", "Secure Access")}</Text>
+              <View style={authStyles.heroTopRow}>
+                <View style={authStyles.heroBadge}>
+                  <Text style={authStyles.heroBadgeText}>{tr("安全登录", "Secure Access")}</Text>
+                </View>
+                <View style={authStyles.langRow}>
+                  <Pressable
+                    style={[authStyles.langBtn, language === "zh" && authStyles.langBtnActive]}
+                    onPress={() => updateLanguage("zh")}
+                  >
+                    <Text style={[authStyles.langBtnText, language === "zh" && authStyles.langBtnTextActive]}>
+                      {tr("中文", "Chinese")}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[authStyles.langBtn, language === "en" && authStyles.langBtnActive]}
+                    onPress={() => updateLanguage("en")}
+                  >
+                    <Text style={[authStyles.langBtnText, language === "en" && authStyles.langBtnTextActive]}>
+                      {tr("英文", "English")}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
               <View style={authStyles.heroHeader}>
                 <View style={authStyles.logoCircle}>
@@ -620,40 +640,11 @@ export default function SignInScreen() {
                   <Text style={authStyles.title}>{tr("欢迎回来", "Welcome back")}</Text>
                   <Text style={authStyles.subtitle}>
                     {tr(
-                      "延续你的 AgentTown 会话、好友关系和跨端同步。",
-                      "Resume your AgentTown sessions, contacts, and cross-platform sync."
+                      "延续你的 Team Chat 会话、好友关系和跨端同步。",
+                      "Resume your Team Chat sessions, contacts, and cross-platform sync."
                     )}
                   </Text>
                 </View>
-              </View>
-              <View style={authStyles.heroPillRow}>
-                <View style={authStyles.heroPill}>
-                  <Text style={authStyles.heroPillText}>{tr("Apple / Google", "Apple / Google")}</Text>
-                </View>
-                <View style={authStyles.heroPill}>
-                  <Text style={authStyles.heroPillText}>{tr("邮箱 / 短信", "Email / SMS")}</Text>
-                </View>
-                <View style={authStyles.heroPill}>
-                  <Text style={authStyles.heroPillText}>{tr("iOS / Android / Web", "iOS / Android / Web")}</Text>
-                </View>
-              </View>
-              <View style={authStyles.langRow}>
-                <Pressable
-                  style={[authStyles.langBtn, language === "zh" && authStyles.langBtnActive]}
-                  onPress={() => updateLanguage("zh")}
-                >
-                  <Text style={[authStyles.langBtnText, language === "zh" && authStyles.langBtnTextActive]}>
-                    {tr("中文", "Chinese")}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[authStyles.langBtn, language === "en" && authStyles.langBtnActive]}
-                  onPress={() => updateLanguage("en")}
-                >
-                  <Text style={[authStyles.langBtnText, language === "en" && authStyles.langBtnTextActive]}>
-                    {tr("英文", "English")}
-                  </Text>
-                </Pressable>
               </View>
             </View>
             <View style={styles.modeTabs}>

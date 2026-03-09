@@ -41,7 +41,7 @@ export default function FriendQrScreen() {
     }
     if (!isSignedIn) {
       setStatus("error");
-      setMessage(tr("请先登录 AgentTown，再重新扫码添加好友。", "Please sign in to AgentTown and scan again."));
+      setMessage(tr("请先登录 Team Chat，再重新扫码添加好友。", "Please sign in to Team Chat and scan again."));
       return;
     }
     if (status !== "idle") return;

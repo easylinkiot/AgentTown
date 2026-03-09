@@ -322,7 +322,7 @@ const defaultBotConfig: BotConfig = {
   name: "MyBot",
   avatar: DEFAULT_MYBOT_AVATAR,
   systemInstruction:
-    "You are a helpful and friendly digital assistant living in AgentTown.",
+    "You are a helpful and friendly digital assistant living in Team Chat.",
   documents: [],
   installedSkillIds: ["skill_task_decomposer", "skill_code_assistant"],
   knowledgeKeywords: ["startup", "product", "execution"],
