@@ -529,6 +529,7 @@ export default function ChatDetailScreen() {
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const threadDisplayLanguage: ThreadDisplayLanguage = threadLanguageById[chatId] || language || "en";
   const [translationMode, setTranslationMode] = useState<TranslationMode>("off");
+  const [translationControlsVisible, setTranslationControlsVisible] = useState(false);
   const translationEnabled = translationMode !== "off";
 
   const openEntityConfig = useCallback(
@@ -553,6 +554,7 @@ export default function ChatDetailScreen() {
 
   useEffect(() => {
     setTranslationMode("off");
+    setTranslationControlsVisible(false);
   }, [chatId]);
 
   useEffect(() => {
@@ -611,7 +613,7 @@ export default function ChatDetailScreen() {
         kind: "mybot",
         token: botConfig.name?.trim() || "MyBot",
         label: `@${botConfig.name?.trim() || "MyBot"}`,
-        desc: tr("只让 MyBot 回复", "Ask MyBot to reply"),
+        desc: tr("仅自己可见，触发 MyBot 私有建议", "Private to you. Trigger a private MyBot suggestion."),
         avatar: thread.avatar || botConfig.avatar,
       },
     ];
@@ -2161,7 +2163,7 @@ export default function ChatDetailScreen() {
     (content: string) => {
       const matched = collectMentionMatches(content, mentionCandidates);
       const mentionedAll = matched.some((candidate) => candidate.kind === "all");
-      const includeMyBot = mentionedAll || matched.some((candidate) => candidate.kind === "mybot");
+      const mentionedMyBot = matched.some((candidate) => candidate.kind === "mybot");
       const mentionedMemberIds = matched
         .filter((candidate): candidate is MentionCandidate & { memberId: string } => candidate.kind === "member" && Boolean(candidate.memberId))
         .map((candidate) => candidate.memberId);
@@ -2177,7 +2179,7 @@ export default function ChatDetailScreen() {
         mentionedAll,
         mentionedMemberIds,
         roleReplyMemberIds,
-        includeMyBot,
+        mentionedMyBot,
       };
     },
     [mentionCandidates]
@@ -2199,6 +2201,94 @@ export default function ChatDetailScreen() {
         mentionedAll: options?.mentionedAll,
       }),
     [botConfig.avatar, botConfig.systemInstruction, chatId, sendMessage, tr, user?.displayName, user?.id]
+  );
+
+  const requestPrivateMyBotReply = useCallback(
+    async (questionText: string) => {
+      const question = questionText.trim();
+      if (!question || myBotBusy) return;
+      setMyBotBusy(true);
+      setMyBotError(null);
+      setMyBotAnswer(null);
+      try {
+        const transcript = messages
+          .slice(-40)
+          .map((m) => {
+            const sender = (m.senderName || (m.isMe ? tr("我", "Me") : tr("成员", "Member"))).trim();
+            const content = normalizeDisplayedContent(m.content || "", m.senderName);
+            const text = (content || "").trim();
+            if (!text) return "";
+            return `${sender}: ${text}`;
+          })
+          .filter(Boolean)
+          .join("\n");
+
+        const prompt = [
+          `${tr("群聊", "Group")}: ${thread.name}`,
+          "",
+          tr("最新上下文：", "Latest context:"),
+          transcript || tr("(空)", "(empty)"),
+          "",
+          `${tr("用户问题", "User question")}: ${question}`,
+          "",
+          tr(
+            "请以用户的私人助手身份回答，保持简洁并可执行。",
+            "Answer as the user's private assistant. Keep concise and actionable."
+          ),
+        ].join("\n");
+
+        const history = messages
+          .slice(-20)
+          .map((m) => {
+            const text = normalizeDisplayedContent(m.content || "", m.senderName).trim();
+            if (!text) return null;
+            return {
+              role: m.isMe ? ("user" as const) : ("model" as const),
+              text,
+            };
+          })
+          .filter((item): item is { role: "user" | "model"; text: string } => Boolean(item));
+
+        const primaryAgentId = (thread.id || "").startsWith("agent_") ? thread.id : "agent_mybot";
+        let answered = false;
+        try {
+          const agentResult = await agentChatApi(primaryAgentId, {
+            threadId: chatId,
+            message: question,
+            history,
+          });
+          const reply = (agentResult.reply || "").trim();
+          if (reply) {
+            setMyBotAnswer(reply);
+            answered = true;
+          }
+        } catch {
+          // Fallback to aiText below.
+        }
+
+        if (!answered) {
+          const result = await aiText({
+            prompt,
+            systemInstruction:
+              (botConfig.systemInstruction || tr("你是 MyBot。", "You are MyBot.")) +
+              `\n${tr(
+                "你仅对当前用户私有，不要把私人建议伪装成群聊消息。",
+                "You are private to the current user. Never reveal private guidance as if it were a group message."
+              )}`,
+            fallback: tr(
+              "收到。我建议一个可执行的下一步：先总结最新结论并指定负责人。",
+              "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner."
+            ),
+          });
+          setMyBotAnswer((result.text || "").trim() || tr("收到。", "Noted."));
+        }
+      } catch (err) {
+        setMyBotError(formatApiError(err));
+      } finally {
+        setMyBotBusy(false);
+      }
+    },
+    [botConfig.systemInstruction, chatId, messages, myBotBusy, thread.id, thread.name, tr]
   );
 
   const requestOlder = async () => {
@@ -2243,7 +2333,7 @@ export default function ChatDetailScreen() {
     try {
       if (thread.isGroup) {
         const mentionState = resolveOutgoingMentions(content);
-        if (groupReplyMode === "mention" && !mentionState.mentionedAll && mentionState.roleReplyMemberIds.length === 0 && !mentionState.includeMyBot) {
+        if (groupReplyMode === "mention" && !mentionState.mentionedAll && mentionState.roleReplyMemberIds.length === 0) {
           const result = await sendUserOnlyMessage(content, {
             mentionedMemberIds: mentionState.mentionedMemberIds,
             mentionedAll: mentionState.mentionedAll,
@@ -2252,14 +2342,28 @@ export default function ChatDetailScreen() {
             setFailedDraft(content);
           } else {
             ok = true;
+            if (mentionState.mentionedMyBot) {
+              setMyBotQuestion(content);
+              setMyBotAnswer(null);
+              setMyBotError(null);
+              setMyBotPanel(true);
+              void requestPrivateMyBotReply(content);
+            }
           }
         } else {
           await generateRoleReplies(chatId, content, {
             memberIds: mentionState.roleReplyMemberIds,
             mentionedAll: mentionState.mentionedAll,
-            includeMyBot: mentionState.includeMyBot,
+            includeMyBot: false,
           });
           ok = true;
+          if (mentionState.mentionedMyBot) {
+            setMyBotQuestion(content);
+            setMyBotAnswer(null);
+            setMyBotError(null);
+            setMyBotPanel(true);
+            void requestPrivateMyBotReply(content);
+          }
         }
       } else if (isMyBotChatThreadId(chatId) || aiAgentMode) {
         let resolvedAgentSessionId = "";
@@ -2655,85 +2759,7 @@ export default function ChatDetailScreen() {
   const runGroupMyBot = async () => {
     const question = myBotQuestion.trim();
     if (!question || myBotBusy) return;
-    setMyBotBusy(true);
-    setMyBotError(null);
-    try {
-      const transcript = messages
-        .slice(-40)
-        .map((m) => {
-          const sender = (m.senderName || (m.isMe ? tr("我", "Me") : tr("成员", "Member"))).trim();
-          const content = normalizeDisplayedContent(m.content || "", m.senderName);
-          const text = (content || "").trim();
-          if (!text) return "";
-          return `${sender}: ${text}`;
-        })
-        .filter(Boolean)
-        .join("\n");
-
-      const prompt = [
-        `${tr("群聊", "Group")}: ${thread.name}`,
-        "",
-        tr("最新上下文：", "Latest context:"),
-        transcript || tr("(空)", "(empty)"),
-        "",
-        `${tr("用户问题", "User question")}: ${question}`,
-        "",
-        tr(
-          "请以用户的私人助手身份回答，保持简洁并可执行。",
-          "Answer as the user's private assistant. Keep concise and actionable."
-        ),
-      ].join("\n");
-
-      const history = messages
-        .slice(-20)
-        .map((m) => {
-          const text = normalizeDisplayedContent(m.content || "", m.senderName).trim();
-          if (!text) return null;
-          return {
-            role: m.isMe ? ("user" as const) : ("model" as const),
-            text,
-          };
-        })
-        .filter((item): item is { role: "user" | "model"; text: string } => Boolean(item));
-
-      const primaryAgentId = (thread.id || "").startsWith("agent_") ? thread.id : "agent_mybot";
-      let answered = false;
-      try {
-        const agentResult = await agentChatApi(primaryAgentId, {
-          threadId: chatId,
-          message: question,
-          history,
-        });
-        const reply = (agentResult.reply || "").trim();
-        if (reply) {
-          setMyBotAnswer(reply);
-          answered = true;
-        }
-      } catch {
-        // Fallback to aiText below.
-      }
-
-      if (!answered) {
-        const result = await aiText({
-          prompt,
-          systemInstruction:
-            (botConfig.systemInstruction || tr("你是 MyBot。", "You are MyBot.")) +
-            `\n${tr(
-              "你仅对当前用户私有，不要把私人建议伪装成群聊消息。",
-              "You are private to the current user. Never reveal private guidance as if it were a group message."
-            )}`,
-          fallback: tr(
-            "收到。我建议一个可执行的下一步：先总结最新结论并指定负责人。",
-            "Noted. I recommend one concrete next step: summarize the latest decision and assign an owner."
-          ),
-        });
-        setMyBotAnswer((result.text || "").trim() || tr("收到。", "Noted."));
-      }
-    } catch (err) {
-      setMyBotError(formatApiError(err));
-    } finally {
-      setMyBotBusy(false);
-    }
+    await requestPrivateMyBotReply(question);
   };
 
   useEffect(() => {
@@ -3381,6 +3407,7 @@ export default function ChatDetailScreen() {
         <View style={styles.inputBox}>
           <Composer
             {...props}
+            multiline
             textInputStyle={styles.input}
             placeholderTextColor="rgba(148,163,184,0.9)"
             textInputProps={{
@@ -3391,6 +3418,9 @@ export default function ChatDetailScreen() {
               showSoftInputOnFocus: true,
               editable: !isStreaming,
               maxLength: 4000,
+              multiline: true,
+              scrollEnabled: true,
+              underlineColorAndroid: "transparent",
               onChangeText: (value: string) => {
                 // Keep GiftedChat pipeline, but also force local draft sync as fallback.
                 props.onTextChanged?.(value);
@@ -3582,6 +3612,7 @@ export default function ChatDetailScreen() {
             </View>
           </View>
 
+          {translationControlsVisible ? (
           <View style={styles.threadLanguageRow}>
             {THREAD_LANGUAGE_OPTIONS.map((item) => {
               const active = item.key === "off" ? !translationEnabled : translationEnabled && threadDisplayLanguage === item.key;
@@ -3592,10 +3623,12 @@ export default function ChatDetailScreen() {
                   onPress={() => {
                     if (item.key === "off") {
                       setTranslationMode("off");
+                      setTranslationControlsVisible(false);
                       return;
                     }
                     setTranslationMode(item.key);
                     setTranslationRefreshToken((prev) => prev + 1);
+                    setTranslationControlsVisible(false);
                     void updateThreadLanguage(chatId, item.key);
                   }}
                 >
@@ -3606,6 +3639,7 @@ export default function ChatDetailScreen() {
               );
             })}
           </View>
+          ) : null}
 
           {failedDraft ? (
             <StateBanner
@@ -3649,6 +3683,8 @@ export default function ChatDetailScreen() {
                 }
                 renderInputToolbar={renderChatInputToolbar}
                 minInputToolbarHeight={56}
+                minComposerHeight={50}
+                maxComposerHeight={120}
                 isKeyboardInternallyHandled={false}
                 renderMessage={renderMessage}
                 renderSystemMessage={renderSystemMessage}
@@ -4084,11 +4120,16 @@ export default function ChatDetailScreen() {
                       <Ionicons name="sparkles-outline" size={18} color="rgba(191,219,254,0.98)" />
                     </View>
                     <View style={styles.myBotHeroCopy}>
-                      <Text style={styles.myBotTitle}>MyBot</Text>
+                      <View style={styles.myBotTitleRow}>
+                        <Text style={styles.myBotTitle}>MyBot</Text>
+                        <View style={styles.myBotPrivatePill}>
+                          <Text style={styles.myBotPrivatePillText}>{tr("仅自己可见", "Private")}</Text>
+                        </View>
+                      </View>
                       <Text style={styles.myBotSubtitle}>
                         {tr(
-                          "只对你可见。MyBot 会基于当前群聊内容给你一个私有回答。",
-                          "Private to you. MyBot answers with the current group context."
+                          "MyBot 只为你自己服务，会基于当前群聊内容给你一个私有回答。",
+                          "MyBot only serves you and answers privately using the current group context."
                         )}
                       </Text>
                     </View>
@@ -4114,7 +4155,10 @@ export default function ChatDetailScreen() {
                 </View>
                 {myBotError ? <Text style={styles.aiError}>{myBotError}</Text> : null}
                 <View style={styles.myBotSection}>
-                  <Text style={styles.myBotLabel}>{tr("回答", "Answer")}</Text>
+                  <View style={styles.myBotAnswerHeader}>
+                    <Text style={styles.myBotLabel}>{tr("回答", "Answer")}</Text>
+                    <Text style={styles.myBotPrivateHint}>{tr("仅自己可见", "Only visible to you")}</Text>
+                  </View>
                   {myBotAnswer ? (
                     <ScrollView style={styles.myBotAnswerScroll} contentContainerStyle={styles.myBotAnswerScrollContent}>
                       <View style={styles.aiAnswerBox}>
@@ -4496,6 +4540,24 @@ export default function ChatDetailScreen() {
                   <Text style={styles.menuText}>{tr("NPC参与：仅@时回复", "NPC: Mention only")}</Text>
                 </Pressable>
               ) : null}
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => {
+                  setTranslationControlsVisible((prev) => !prev);
+                  setThreadMenuModal(false);
+                }}
+              >
+                <Ionicons
+                  name={translationControlsVisible ? "language" : "language-outline"}
+                  size={16}
+                  color={translationControlsVisible ? "rgba(147,197,253,0.95)" : "rgba(148,163,184,0.9)"}
+                />
+                <Text style={styles.menuText}>
+                  {translationControlsVisible
+                    ? tr("隐藏翻译栏", "Hide translation bar")
+                    : tr("显示翻译栏", "Show translation bar")}
+                </Text>
+              </Pressable>
               {linkedFriend ? (
                 <Pressable style={styles.menuItem} onPress={confirmDeleteFriend}>
                   <Ionicons name="person-remove-outline" size={16} color="rgba(248,113,113,0.95)" />
@@ -5141,22 +5203,25 @@ const styles = StyleSheet.create({
   },
   inputBox: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 50,
     justifyContent: "center",
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     backgroundColor: "rgba(15,23,42,0.55)",
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 2,
   },
   input: {
     color: "#e2e8f0",
     fontSize: 17,
-    lineHeight: 22,
-    paddingTop: 9,
-    paddingBottom: 9,
-    includeFontPadding: false,
-    textAlignVertical: "center",
+    lineHeight: 24,
+    minHeight: 46,
+    paddingTop: 10,
+    paddingBottom: 12,
+    includeFontPadding: Platform.OS === "android",
+    textAlignVertical: "top",
+    margin: 0,
     maxHeight: 120,
   },
   sendBtn: {
@@ -5522,9 +5587,28 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingTop: 2,
   },
+  myBotTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
   myBotTitle: {
     color: "#f8fafc",
     fontSize: 18,
+    fontWeight: "900",
+  },
+  myBotPrivatePill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.3)",
+    backgroundColor: "rgba(30,64,175,0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  myBotPrivatePillText: {
+    color: "rgba(219,234,254,0.98)",
+    fontSize: 10,
     fontWeight: "900",
   },
   myBotSubtitle: {
@@ -5534,6 +5618,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   myBotSection: {
+    gap: 8,
+  },
+  myBotAnswerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 8,
   },
   myBotLabel: {
@@ -5555,6 +5645,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
     textAlignVertical: "top",
+  },
+  myBotPrivateHint: {
+    color: "rgba(148,163,184,0.9)",
+    fontSize: 11,
+    fontWeight: "800",
   },
   myBotAnswerScroll: {
     maxHeight: 240,
