@@ -1,4 +1,4 @@
-import { createChatThread, sendThreadMessage, setAuthToken } from "../api";
+import { createChatThread, markThreadRead, sendThreadMessage, setAuthToken } from "../api";
 import type { ChatThread } from "@/src/types";
 
 function mockResponse(payload: unknown, status = 200) {
@@ -90,6 +90,49 @@ describe("chat thread api", () => {
       type: "image",
       imageUri: "https://cdn.example.com/a.jpg",
       imageName: "a.jpg",
+    });
+  });
+
+  it("sends mention metadata and supports mark-read", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        mockResponse({
+          threadId: "thread_1",
+          userMessage: { id: "msg_1", content: "@All hello", senderAvatar: "", type: "text", isMe: true },
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          ok: true,
+          threadId: "thread_1",
+          lastReadSeqNo: 12,
+          unreadCount: 0,
+          mentionUnreadCount: 0,
+        })
+      );
+
+    await sendThreadMessage("thread_1", {
+      content: "@All hello",
+      type: "text",
+      mentionedMemberIds: ["member_1", "member_2"],
+      mentionedAll: true,
+    });
+    await markThreadRead("thread_1", { lastReadSeqNo: 12 });
+
+    const [messageUrl, messageInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(messageUrl).toBe("https://api.example.com/v1/chat/threads/thread_1/messages");
+    expect(JSON.parse((messageInit.body as string) || "{}")).toEqual({
+      content: "@All hello",
+      type: "text",
+      mentionedMemberIds: ["member_1", "member_2"],
+      mentionedAll: true,
+    });
+
+    const [readUrl, readInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(readUrl).toBe("https://api.example.com/v1/chat/threads/thread_1/read");
+    expect(readInit.method).toBe("POST");
+    expect(JSON.parse((readInit.body as string) || "{}")).toEqual({
+      lastReadSeqNo: 12,
     });
   });
 });

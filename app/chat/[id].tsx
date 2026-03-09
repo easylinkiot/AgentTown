@@ -47,6 +47,11 @@ import {
   assistCandidateSelectionKey,
   buildTaskItemFromCandidate,
 } from "@/src/features/chat/ask-ai-helpers";
+import {
+  collectMentionMatches,
+  extractActiveMention,
+  replaceActiveMention,
+} from "@/src/features/chat/mention-helpers";
 import { tx } from "@/src/i18n/translate";
 import {
   agentChat as agentChatApi,
@@ -92,6 +97,16 @@ type MemberCandidate = {
   label: string;
   desc: string;
   onAdd: () => Promise<void>;
+};
+type MentionCandidate = {
+  key: string;
+  kind: "all" | "mybot" | "member";
+  token: string;
+  label: string;
+  desc: string;
+  memberId?: string;
+  memberType?: ThreadMember["memberType"];
+  avatar?: string;
 };
 type GiftedMessage = IMessage & { raw: ConversationMessage };
 type SystemMessageRenderProps = { currentMessage?: GiftedMessage | null };
@@ -247,21 +262,6 @@ function inferUploadFilename(asset: MediaPickerAsset, index: number) {
   if (fromUri && fromUri.includes(".")) return fromUri;
   const suffix = asset.type === "video" ? "mp4" : "jpg";
   return `${asset.type}_${Date.now()}_${index + 1}.${suffix}`;
-}
-
-function mentionMemberIDs(text: string, members: ThreadMember[]) {
-  const safe = text.trim();
-  if (!safe) return [] as string[];
-
-  const ids: string[] = [];
-  for (const member of members) {
-    const name = member.name?.trim();
-    if (!name) continue;
-    if (safe.includes(`@${name}`)) {
-      ids.push(member.id);
-    }
-  }
-  return ids;
 }
 
 function buildRecentAssistContextMessages(messages: ConversationMessage[], limit = 100) {
@@ -515,6 +515,7 @@ export default function ChatDetailScreen() {
     refreshThreadMessages,
     loadOlderMessages,
     sendMessage,
+    markThreadRead,
     listMembers,
     addMember,
     removeMember,
@@ -594,6 +595,55 @@ export default function ChatDetailScreen() {
     },
     [friends, resolveFriendDisplayName, tr]
   );
+
+  const mentionCandidates = useMemo(() => {
+    if (!thread.isGroup) return [] as MentionCandidate[];
+    const out: MentionCandidate[] = [
+      {
+        key: "mention-all",
+        kind: "all",
+        token: "All",
+        label: "@All",
+        desc: tr("通知所有人，并触发群内 NPC 回复", "Notify everyone and trigger group NPC replies"),
+      },
+      {
+        key: "mention-mybot",
+        kind: "mybot",
+        token: botConfig.name?.trim() || "MyBot",
+        label: `@${botConfig.name?.trim() || "MyBot"}`,
+        desc: tr("只让 MyBot 回复", "Ask MyBot to reply"),
+        avatar: thread.avatar || botConfig.avatar,
+      },
+    ];
+    const seenTokens = new Set(out.map((item) => item.token.toLowerCase()));
+    for (const member of members) {
+      if (member.memberType === "human" && currentUserId && (member.friendId || "").trim() === currentUserId) continue;
+      const baseLabel = getMemberDisplayName(member).trim() || member.name?.trim() || tr("未命名成员", "Unnamed member");
+      let token = baseLabel;
+      let suffix = 2;
+      while (seenTokens.has(token.toLowerCase())) {
+        token = `${baseLabel} ${suffix}`;
+        suffix += 1;
+      }
+      seenTokens.add(token.toLowerCase());
+      out.push({
+        key: `mention-${member.id}`,
+        kind: "member",
+        token,
+        label: `@${token}`,
+        desc:
+          member.memberType === "role"
+            ? tr("虚拟角色", "NPC")
+            : member.memberType === "agent"
+              ? tr("机器人", "Bot")
+              : tr("群成员", "Member"),
+        memberId: member.id,
+        memberType: member.memberType,
+        avatar: member.avatar,
+      });
+    }
+    return out;
+  }, [botConfig.avatar, botConfig.name, currentUserId, getMemberDisplayName, members, thread.avatar, thread.isGroup, tr]);
 
   const isSelfThreadMember = useCallback(
     (member: ThreadMember) => {
@@ -1620,11 +1670,22 @@ export default function ChatDetailScreen() {
   const [loading, setLoading] = useState(() => messages.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [mentionPickerVisible, setMentionPickerVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [failedDraft, setFailedDraft] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [hasUserScrolled, setHasUserScrolled] = useState(false);
+
+  const activeMention = useMemo(() => extractActiveMention(input), [input]);
+  const filteredMentionCandidates = useMemo(() => {
+    if (!thread.isGroup || !activeMention) return [] as MentionCandidate[];
+    const keyword = activeMention.query;
+    if (!keyword) return mentionCandidates;
+    return mentionCandidates.filter((candidate) =>
+      candidate.token.toLowerCase().includes(keyword) || candidate.desc.toLowerCase().includes(keyword)
+    );
+  }, [activeMention, mentionCandidates, thread.isGroup]);
 
   useEffect(() => {
     setHasMore(true);
@@ -1823,6 +1884,25 @@ export default function ChatDetailScreen() {
       mounted = false;
     };
   }, [chatId, listMembers, refreshThreadMessages, shouldRouteToAiChat, thread.isGroup]);
+
+  useEffect(() => {
+    setMentionPickerVisible(Boolean(thread.isGroup && activeMention && filteredMentionCandidates.length > 0));
+  }, [activeMention, filteredMentionCandidates.length, thread.isGroup]);
+
+  const latestMessageSeqNo = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const value = messages[index]?.seqNo;
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+    return undefined;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!chatId || shouldRouteToAiChat) return;
+    void markThreadRead(chatId, latestMessageSeqNo);
+  }, [chatId, latestMessageSeqNo, markThreadRead, shouldRouteToAiChat]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2077,8 +2157,34 @@ export default function ChatDetailScreen() {
     }
   }, [chatId, listMembers, memberApplyBusy, pendingMemberAdds, tr]);
 
+  const resolveOutgoingMentions = useCallback(
+    (content: string) => {
+      const matched = collectMentionMatches(content, mentionCandidates);
+      const mentionedAll = matched.some((candidate) => candidate.kind === "all");
+      const includeMyBot = mentionedAll || matched.some((candidate) => candidate.kind === "mybot");
+      const mentionedMemberIds = matched
+        .filter((candidate): candidate is MentionCandidate & { memberId: string } => candidate.kind === "member" && Boolean(candidate.memberId))
+        .map((candidate) => candidate.memberId);
+      const roleReplyMemberIds = matched
+        .filter(
+          (candidate): candidate is MentionCandidate & { memberId: string } =>
+            candidate.kind === "member" &&
+            Boolean(candidate.memberId) &&
+            (candidate.memberType === "agent" || candidate.memberType === "role")
+        )
+        .map((candidate) => candidate.memberId);
+      return {
+        mentionedAll,
+        mentionedMemberIds,
+        roleReplyMemberIds,
+        includeMyBot,
+      };
+    },
+    [mentionCandidates]
+  );
+
   const sendUserOnlyMessage = useCallback(
-    async (content: string) =>
+    async (content: string, options?: { mentionedMemberIds?: string[]; mentionedAll?: boolean }) =>
       sendMessage(chatId, {
         content,
         type: "text",
@@ -2089,6 +2195,8 @@ export default function ChatDetailScreen() {
         isMe: true,
         requestAI: false,
         systemInstruction: botConfig.systemInstruction,
+        mentionedMemberIds: options?.mentionedMemberIds,
+        mentionedAll: options?.mentionedAll,
       }),
     [botConfig.avatar, botConfig.systemInstruction, chatId, sendMessage, tr, user?.displayName, user?.id]
   );
@@ -2134,16 +2242,23 @@ export default function ChatDetailScreen() {
     let botLocalId = "";
     try {
       if (thread.isGroup) {
-        const ids = mentionMemberIDs(content, members);
-        if (groupReplyMode === "mention" && ids.length === 0) {
-          const result = await sendUserOnlyMessage(content);
+        const mentionState = resolveOutgoingMentions(content);
+        if (groupReplyMode === "mention" && !mentionState.mentionedAll && mentionState.roleReplyMemberIds.length === 0 && !mentionState.includeMyBot) {
+          const result = await sendUserOnlyMessage(content, {
+            mentionedMemberIds: mentionState.mentionedMemberIds,
+            mentionedAll: mentionState.mentionedAll,
+          });
           if (!result) {
             setFailedDraft(content);
           } else {
             ok = true;
           }
         } else {
-          await generateRoleReplies(chatId, content, ids.length ? ids : undefined);
+          await generateRoleReplies(chatId, content, {
+            memberIds: mentionState.roleReplyMemberIds,
+            mentionedAll: mentionState.mentionedAll,
+            includeMyBot: mentionState.includeMyBot,
+          });
           ok = true;
         }
       } else if (isMyBotChatThreadId(chatId) || aiAgentMode) {
@@ -2852,14 +2967,24 @@ export default function ChatDetailScreen() {
     if (!safeName) return;
     const mention = `@${safeName}`;
     const current = (input || "").trim();
+    if (current.toLowerCase().includes(mention.toLowerCase())) return;
+    if (extractActiveMention(input)) {
+      setInput(replaceActiveMention(input, safeName));
+      setMentionPickerVisible(false);
+      return;
+    }
     if (!current) {
       setInput(`${mention} `);
       return;
     }
-    if (current.toLowerCase().includes(mention.toLowerCase())) return;
     const spacer = input.endsWith(" ") ? "" : " ";
     setInput(`${input}${spacer}${mention} `);
   };
+
+  const handleSelectMentionCandidate = useCallback((candidate: MentionCandidate) => {
+    setInput((previous) => replaceActiveMention(previous, candidate.token));
+    setMentionPickerVisible(false);
+  }, []);
 
   const confirmDeleteFriend = () => {
     if (!linkedFriend) return;
@@ -3278,6 +3403,7 @@ export default function ChatDetailScreen() {
               },
               onBlur: (event) => {
                 upstreamOnBlur?.(event);
+                setMentionPickerVisible(false);
                 handleChatInputBlur();
               },
             }}
@@ -3309,16 +3435,39 @@ export default function ChatDetailScreen() {
 
   const renderChatInputToolbar = useCallback(
     (props: InputToolbarProps<IMessage>) => (
-      <InputToolbar
-        {...props}
-        containerStyle={styles.toolbarContainer}
-        primaryStyle={styles.toolbarPrimary}
-        renderActions={renderToolbarActions}
-        renderComposer={renderToolbarComposer}
-        renderSend={renderToolbarSend}
-      />
+      <View style={styles.toolbarStack}>
+        {mentionPickerVisible ? (
+          <View style={styles.mentionPanel}>
+            <ScrollView keyboardShouldPersistTaps="handled" style={styles.mentionScroll}>
+              {filteredMentionCandidates.map((candidate) => (
+                <Pressable
+                  key={candidate.key}
+                  style={({ pressed }) => [styles.mentionItem, pressed && styles.mentionItemPressed]}
+                  onPress={() => handleSelectMentionCandidate(candidate)}
+                >
+                  <View style={styles.mentionItemBody}>
+                    <Text style={styles.mentionItemTitle}>{candidate.label}</Text>
+                    <Text style={styles.mentionItemDesc} numberOfLines={1}>
+                      {candidate.desc}
+                    </Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={14} color="rgba(148,163,184,0.9)" />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+        <InputToolbar
+          {...props}
+          containerStyle={styles.toolbarContainer}
+          primaryStyle={styles.toolbarPrimary}
+          renderActions={renderToolbarActions}
+          renderComposer={renderToolbarComposer}
+          renderSend={renderToolbarSend}
+        />
+      </View>
     ),
-    [renderToolbarActions, renderToolbarComposer, renderToolbarSend]
+    [filteredMentionCandidates, handleSelectMentionCandidate, mentionPickerVisible, renderToolbarActions, renderToolbarComposer, renderToolbarSend]
   );
 
   if (shouldRouteToAiChat) return null;
@@ -4700,10 +4849,51 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     paddingHorizontal: 0,
   },
+  toolbarStack: {
+    gap: 8,
+  },
   toolbarPrimary: {
     alignItems: "stretch",
     gap: 10,
     paddingTop: 0,
+  },
+  mentionPanel: {
+    maxHeight: 208,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    backgroundColor: "rgba(9,16,30,0.96)",
+    overflow: "hidden",
+  },
+  mentionScroll: {
+    maxHeight: 208,
+  },
+  mentionItem: {
+    minHeight: 54,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(148,163,184,0.18)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  mentionItemPressed: {
+    backgroundColor: "rgba(30,41,59,0.75)",
+  },
+  mentionItemBody: {
+    flex: 1,
+    gap: 2,
+  },
+  mentionItemTitle: {
+    color: "rgba(241,245,249,0.98)",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  mentionItemDesc: {
+    color: "rgba(148,163,184,0.92)",
+    fontSize: 12,
+    fontWeight: "600",
   },
   toolbarActionGroup: {
     flexDirection: "row",

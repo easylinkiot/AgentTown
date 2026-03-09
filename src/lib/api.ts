@@ -19,6 +19,7 @@ import {
   ThreadMember,
   ThreadMemberType,
 } from "@/src/types";
+import { getE2ELaunchArgs, isE2ETestMode } from "@/src/utils/e2e";
 import { Platform } from "react-native";
 
 export interface BootstrapPayload extends AppBootstrapState {}
@@ -62,6 +63,8 @@ export interface SendThreadMessageInput {
   requestAI?: boolean;
   systemInstruction?: string;
   history?: Array<{ role: "user" | "model"; text: string }>;
+  mentionedMemberIds?: string[];
+  mentionedAll?: boolean;
 }
 
 export interface SendThreadMessageOutput {
@@ -454,7 +457,21 @@ type V2KnowledgeDataset = {
 export interface RoleRepliesInput {
   prompt: string;
   memberIds?: string[];
+  mentionedAll?: boolean;
+  includeMyBot?: boolean;
   appendUserMessage?: boolean;
+}
+
+export interface MarkThreadReadInput {
+  lastReadSeqNo?: number;
+}
+
+export interface MarkThreadReadOutput {
+  ok?: boolean;
+  threadId: string;
+  lastReadSeqNo?: number;
+  unreadCount?: number;
+  mentionUnreadCount?: number;
 }
 
 export interface RoleRepliesOutput {
@@ -699,7 +716,14 @@ export function getAuthToken() {
 }
 
 function getApiBaseUrl() {
-  const raw = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL;
+  const e2eArgs = getE2ELaunchArgs();
+  const e2eApiBaseUrl =
+    typeof e2eArgs?.e2eApiBaseUrl === "string" ? e2eArgs.e2eApiBaseUrl.trim() : "";
+  const raw =
+    e2eApiBaseUrl ||
+    process.env.EXPO_PUBLIC_E2E_API_BASE_URL ||
+    process.env.EXPO_PUBLIC_API_BASE_URL ||
+    DEFAULT_API_BASE_URL;
   const trimmed = raw.replace(/\/+$/, "");
   const normalized =
     Platform.OS !== "android"
@@ -708,7 +732,13 @@ function getApiBaseUrl() {
     .replace(/^http:\/\/localhost(?=[:/]|$)/i, "http://10.0.2.2")
     .replace(/^http:\/\/127\.0\.0\.1(?=[:/]|$)/i, "http://10.0.2.2");
   const isReleaseBuild = typeof __DEV__ === "undefined" ? true : !__DEV__;
-  if (isReleaseBuild && /^http:\/\/(?:localhost|127\.0\.0\.1|10\.0\.2\.2)(?=[:/]|$)/i.test(normalized)) {
+  if (
+    isReleaseBuild &&
+    !isE2ETestMode() &&
+    !e2eApiBaseUrl &&
+    !process.env.EXPO_PUBLIC_E2E_API_BASE_URL &&
+    /^http:\/\/(?:localhost|127\.0\.0\.1|10\.0\.2\.2)(?=[:/]|$)/i.test(normalized)
+  ) {
     return DEFAULT_API_BASE_URL;
   }
   return normalized;
@@ -1260,6 +1290,8 @@ export async function sendThreadMessage(threadId: string, payload: SendThreadMes
     replyContext?: string;
     imageUri?: string;
     imageName?: string;
+    mentionedMemberIds?: string[];
+    mentionedAll?: boolean;
   } = {
     content: payload.content,
   };
@@ -1268,6 +1300,8 @@ export async function sendThreadMessage(threadId: string, payload: SendThreadMes
   if (payload.replyContext?.trim()) requestBody.replyContext = payload.replyContext;
   if (payload.imageUri?.trim()) requestBody.imageUri = payload.imageUri;
   if (payload.imageName?.trim()) requestBody.imageName = payload.imageName;
+  if (payload.mentionedMemberIds?.length) requestBody.mentionedMemberIds = payload.mentionedMemberIds;
+  if (payload.mentionedAll) requestBody.mentionedAll = true;
 
   return apiFetch<SendThreadMessageOutput>(
     `/v1/chat/threads/${encodeURIComponent(threadId)}/messages`,
@@ -1508,6 +1542,13 @@ export async function listThreadMembers(threadId: string) {
 
 export async function addThreadMember(threadId: string, payload: AddThreadMemberInput) {
   return apiFetch<ThreadMember>(`/v1/chat/threads/${encodeURIComponent(threadId)}/members`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function markThreadRead(threadId: string, payload: MarkThreadReadInput = {}) {
+  return apiFetch<MarkThreadReadOutput>(`/v1/chat/threads/${encodeURIComponent(threadId)}/read`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

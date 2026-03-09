@@ -37,6 +37,10 @@ function extractDetoxFlags(source: Record<string, unknown> | null | undefined) {
       picked.e2eAuthPassword = typeof rawValue === "string" ? rawValue : String(rawValue ?? "");
       continue;
     }
+    if (canonical === "e2eapibaseurl") {
+      picked.e2eApiBaseUrl = typeof rawValue === "string" ? rawValue : String(rawValue ?? "");
+      continue;
+    }
     if (canonical === "detoxdebugvisibility") {
       picked.detoxDebugVisibility = normalizeLaunchArgValue(rawValue);
       continue;

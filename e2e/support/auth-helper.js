@@ -1,6 +1,10 @@
 /* global __dirname, waitFor, element, by, device */
 const fs = require("node:fs");
 const path = require("node:path");
+const E2E_PASSWORD_SHORTCUT_ENABLED = process.env.EXPO_PUBLIC_E2E_MODE === "1";
+const E2E_API_BASE_URL = String(
+  process.env.E2E_API_BASE_URL || process.env.EXPO_PUBLIC_E2E_API_BASE_URL || "http://127.0.0.1:8080"
+).trim();
 
 function loadManifestAccount() {
   try {
@@ -121,6 +125,52 @@ async function safeReplaceText(id, value, scrollId = "auth-sign-in-scroll") {
   throw new Error(`failed to fill input: ${id}`);
 }
 
+async function safeTypePassword(id, value, scrollId = "auth-sign-in-scroll") {
+  const input = element(by.id(id));
+  for (let i = 0; i < 8; i += 1) {
+    try {
+      await waitFor(input).toBeVisible().withTimeout(4000);
+      await input.tap();
+      try {
+        await input.clearText();
+      } catch {
+        // continue with typed overwrite fallback
+      }
+      await input.typeText(value);
+      return;
+    } catch {
+      // keep trying with scroll + replace fallback
+    }
+
+    try {
+      await waitFor(input).toBeVisible().whileElement(by.id(scrollId)).scroll(140, "down");
+    } catch {
+      // ignore and continue fallback
+    }
+
+    try {
+      await input.tap();
+      try {
+        await input.clearText();
+      } catch {
+        // ignore clear failures
+      }
+      await input.typeText(value);
+      return;
+    } catch {
+      // continue retry
+    }
+
+    try {
+      await input.replaceText(value);
+      return;
+    } catch {
+      // continue retry
+    }
+  }
+  throw new Error(`failed to type secure input: ${id}`);
+}
+
 async function tapVisibleById(id, options = {}) {
   const { scrollId = "auth-sign-in-scroll", timeout = 8000 } = options;
   const target = element(by.id(id));
@@ -186,11 +236,32 @@ async function signInWithPassword(email, password) {
   }
 
   await waitFor(element(by.id("auth-sign-in-scroll"))).toBeVisible().withTimeout(30000);
+  if (await existsById("auth-mode-sign-in", 800)) {
+    try {
+      await element(by.id("auth-mode-sign-in")).tap();
+    } catch {
+      // no-op
+    }
+  }
+  if (await existsById("auth-method-email", 800)) {
+    try {
+      await element(by.id("auth-method-email")).tap();
+    } catch {
+      // no-op
+    }
+  }
   await waitFor(element(by.id("auth-email-input"))).toBeVisible().withTimeout(30000);
   await safeReplaceText("auth-email-input", email);
-  await safeReplaceText("auth-password-input", password);
+  if (!E2E_PASSWORD_SHORTCUT_ENABLED) {
+    await safeTypePassword("auth-password-input", password);
+  }
   try {
+    await element(by.id("auth-password-input")).tap();
     await element(by.id("auth-password-input")).tapReturnKey();
+    if (E2E_PASSWORD_SHORTCUT_ENABLED) {
+      await waitForHome(10000);
+      return;
+    }
   } catch {
     // keyboard action is not always available
   }
@@ -279,6 +350,7 @@ async function signInWithPasswordIfNeeded(email, password) {
 }
 
 module.exports = {
+  E2E_API_BASE_URL,
   resolveE2ECredentials,
   waitForHome,
   signInWithPassword,

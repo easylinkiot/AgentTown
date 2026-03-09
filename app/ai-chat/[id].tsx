@@ -612,7 +612,11 @@ export default function ChatDetailScreen() {
     []
   );
   const generateRoleReplies = useCallback(
-    async (_threadId: string, _prompt: string, _memberIds?: string[]) => [] as ConversationMessage[],
+    async (
+      _threadId: string,
+      _prompt: string,
+      _options?: { memberIds?: string[]; mentionedAll?: boolean; includeMyBot?: boolean }
+    ) => [] as ConversationMessage[],
     []
   );
   const currentUserId = (user?.id || "").trim();
@@ -2355,7 +2359,9 @@ export default function ChatDetailScreen() {
             ok = true;
           }
         } else {
-          await generateRoleReplies(chatId, content, ids.length ? ids : undefined);
+          await generateRoleReplies(chatId, content, {
+            memberIds: ids.length ? ids : undefined,
+          });
           ok = true;
         }
       } else {

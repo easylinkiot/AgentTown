@@ -74,6 +74,9 @@ export interface ConversationMessage {
   replyContext?: string;
   imageUri?: string;
   imageName?: string;
+  mentionedAll?: boolean;
+  mentionedMemberIds?: string[];
+  mentionedUserIds?: string[];
 }
 
 export type FriendKind = "human" | "bot";

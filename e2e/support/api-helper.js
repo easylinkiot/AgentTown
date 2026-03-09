@@ -181,6 +181,10 @@ async function createThread(token, payload) {
   });
 }
 
+async function listThreads(token) {
+  return apiRequest("/v1/chat/threads", { token });
+}
+
 async function addThreadMember(token, threadId, payload) {
   return apiRequest(`/v1/chat/threads/${encodeURIComponent(threadId)}/members`, {
     method: "POST",
@@ -215,6 +219,14 @@ async function listThreadMessages(token, threadId, limit = 100) {
   const qs = params.toString();
   return apiRequest(`/v1/chat/threads/${encodeURIComponent(threadId)}/messages${qs ? `?${qs}` : ""}`, {
     token,
+  });
+}
+
+async function markThreadRead(token, threadId, lastReadSeqNo) {
+  return apiRequest(`/v1/chat/threads/${encodeURIComponent(threadId)}/read`, {
+    method: "POST",
+    token,
+    body: lastReadSeqNo ? { lastReadSeqNo } : {},
   });
 }
 
@@ -280,10 +292,12 @@ module.exports = {
   ensureAccount,
   ensureFriendship,
   createThread,
+  listThreads,
   addThreadMember,
   listThreadMembers,
   sendThreadMessage,
   listThreadMessages,
+  markThreadRead,
   listNPCs,
   createNPC,
   deleteNPC,

@@ -51,6 +51,7 @@ import {
   updateThreadDisplayLanguage as updateThreadDisplayLanguageApi,
   uninstallBotSkill as uninstallBotSkillApi,
   mapATMessageToConversation,
+  markThreadRead as markThreadReadApi,
   mapATSessionToThread,
   type AddThreadMemberInput,
   type CreateAgentInput,
@@ -80,6 +81,7 @@ import {
 
 import { useAuth } from "@/src/state/auth-context";
 import { isE2ETestMode } from "@/src/utils/e2e";
+import { notifyMentionReceived } from "@/src/services/chat-notifications";
 import {
   clearTaskReminderNotifications,
   ensureTaskReminderPermission,
@@ -174,7 +176,12 @@ interface AgentTownContextValue {
     threadId?: string,
     variables?: Record<string, unknown>
   ) => Promise<string | null>;
-  generateRoleReplies: (threadId: string, prompt: string, memberIds?: string[]) => Promise<ConversationMessage[]>;
+  generateRoleReplies: (
+    threadId: string,
+    prompt: string,
+    options?: { memberIds?: string[]; mentionedAll?: boolean; includeMyBot?: boolean }
+  ) => Promise<ConversationMessage[]>;
+  markThreadRead: (threadId: string, lastReadSeqNo?: number) => Promise<void>;
   generateMiniApp: (query: string, sources: string[]) => Promise<MiniApp | null>;
   installMiniApp: (appId: string, install?: boolean) => Promise<void>;
   installPresetMiniApp: (presetKey: "news" | "price" | "words") => Promise<MiniApp>;
@@ -406,6 +413,26 @@ function updateThreadPreview(threads: ChatThread[], threadId: string, preview: s
   next.splice(index, 1);
   next.unshift(updated);
   return next;
+}
+
+function updateThreadUnreadState(
+  threads: ChatThread[],
+  threadId: string,
+  patch: { unreadCount?: number; incrementBy?: number; highlight?: boolean }
+) {
+  return threads.map((thread) => {
+    if (thread.id !== threadId) return thread;
+    const baseUnread = typeof thread.unreadCount === "number" ? thread.unreadCount : 0;
+    const nextUnread =
+      typeof patch.unreadCount === "number"
+        ? Math.max(0, patch.unreadCount)
+        : Math.max(0, baseUnread + (patch.incrementBy || 0));
+    return {
+      ...thread,
+      unreadCount: nextUnread,
+      highlight: typeof patch.highlight === "boolean" ? patch.highlight : thread.highlight,
+    };
+  });
 }
 
 function syncDirectThreadFromFriend(threads: ChatThread[], friend: Friend): ChatThread[] {
@@ -1145,26 +1172,22 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    if (isE2E) {
-      setBootstrapReady(true);
-    } else {
-      (async () => {
-        try {
-          await refreshAll();
-        } catch {
-          // Keep local fallback state when backend is unavailable.
-        } finally {
-          if (!cancelled) {
-            setBootstrapReady(true);
-          }
+    (async () => {
+      try {
+        await refreshAll();
+      } catch {
+        // Keep local fallback state when backend is unavailable.
+      } finally {
+        if (!cancelled) {
+          setBootstrapReady(true);
         }
-      })();
-    }
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [isE2E, isSignedIn, refreshAll, userID]);
+  }, [isSignedIn, refreshAll, userID]);
 
   useEffect(() => {
     if (!isSignedIn || isE2E) {
@@ -1193,7 +1216,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   }, [bootstrapReady, isE2E, isSignedIn, language, tasks]);
 
   useEffect(() => {
-    if (!isSignedIn || isE2E) return;
+    if (!isSignedIn) return;
 
     const unsubscribe = subscribeRealtime((event: RealtimeEvent) => {
       if (!event?.type) return;
@@ -1251,6 +1274,54 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             void upsertThreadCache(userID, threadId, [normalizedPayload]);
           }
           setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(normalizedPayload)));
+          if (!normalizedPayload.isMe) {
+            setChatThreads((prev) =>
+              updateThreadUnreadState(prev, threadId, {
+                incrementBy: 1,
+                highlight: Boolean(normalizedPayload.mentionedUserIds?.includes(userID || "")),
+              })
+            );
+          }
+          break;
+        }
+        case "chat.unread.updated": {
+          const payload = event.payload as {
+            ownerId?: string;
+            threadId?: string;
+            unreadCount?: number;
+            mentionUnreadCount?: number;
+          };
+          const ownerId = (payload?.ownerId || "").trim();
+          if (ownerId && ownerId !== (userID || "").trim()) break;
+          const threadId = (payload?.threadId || "").trim();
+          if (!threadId) break;
+          setChatThreads((prev) =>
+            updateThreadUnreadState(prev, threadId, {
+              unreadCount: typeof payload?.unreadCount === "number" ? payload.unreadCount : 0,
+              highlight: Boolean((payload?.mentionUnreadCount || 0) > 0),
+            })
+          );
+          break;
+        }
+        case "chat.mention.created": {
+          const payload = event.payload as {
+            ownerId?: string;
+            threadId?: string;
+            unreadCount?: number;
+            mentionUnreadCount?: number;
+          };
+          const ownerId = (payload?.ownerId || "").trim();
+          if (ownerId && ownerId !== (userID || "").trim()) break;
+          const threadId = (payload?.threadId || "").trim();
+          if (!threadId) break;
+          setChatThreads((prev) =>
+            updateThreadUnreadState(prev, threadId, {
+              unreadCount: typeof payload?.unreadCount === "number" ? payload.unreadCount : undefined,
+              highlight: true,
+            })
+          );
+          const thread = chatThreadsRef.current.find((item) => item.id === threadId);
+          void notifyMentionReceived(thread?.name || "Team Chat", thread?.message || "", language);
           break;
         }
         case "task.created":
@@ -1455,7 +1526,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unsubscribe();
     };
-  }, [isE2E, isSignedIn, patchThreadLanguageMap, shouldUseThreadMessageCache, userID]);
+  }, [isSignedIn, language, patchThreadLanguageMap, shouldUseThreadMessageCache, userID]);
 
   const value = useMemo<AgentTownContextValue>(() => {
     return {
@@ -1593,6 +1664,22 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           return result;
         } catch {
           return null;
+        }
+      },
+      markThreadRead: async (threadId, lastReadSeqNo) => {
+        if (!threadId) return;
+        try {
+          const response = await markThreadReadApi(threadId, {
+            lastReadSeqNo,
+          });
+          setChatThreads((prev) =>
+            updateThreadUnreadState(prev, threadId, {
+              unreadCount: typeof response.unreadCount === "number" ? response.unreadCount : 0,
+              highlight: Boolean((response.mentionUnreadCount || 0) > 0),
+            })
+          );
+        } catch {
+          // Ignore read sync failure.
         }
       },
       createFriend: async (input) => {
@@ -1982,12 +2069,14 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           return null;
         }
       },
-      generateRoleReplies: async (threadId, prompt, memberIds) => {
+      generateRoleReplies: async (threadId, prompt, options) => {
         if (!threadId || !prompt.trim()) return [];
         try {
           const result = await generateRoleRepliesApi(threadId, {
             prompt,
-            memberIds,
+            memberIds: options?.memberIds,
+            mentionedAll: options?.mentionedAll,
+            includeMyBot: options?.includeMyBot,
             appendUserMessage: true,
           });
 

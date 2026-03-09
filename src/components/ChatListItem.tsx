@@ -92,7 +92,7 @@ export function ChatListItem({
             />
           </View>
           {!!chat.unreadCount && (
-            <View style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
+            <View testID={`chat-list-item-unread-${chat.id}`} style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
               <Text style={styles.unreadText}>{chat.unreadCount}</Text>
             </View>
           )}
@@ -123,7 +123,7 @@ export function ChatListItem({
             />
           </View>
           {!!chat.unreadCount && (
-            <View style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
+            <View testID={`chat-list-item-unread-${chat.id}`} style={[styles.unreadBadge, isNeo && styles.unreadBadgeNeo]}>
               <Text style={styles.unreadText}>{chat.unreadCount}</Text>
             </View>
           )}
@@ -151,6 +151,7 @@ export function ChatListItem({
           <Text style={[styles.time, isNeo && styles.timeNeo]}>{chat.time}</Text>
         </View>
         <Text
+          testID={`chat-list-item-preview-${chat.id}`}
           style={[
             styles.message,
             chat.highlight && styles.highlight,

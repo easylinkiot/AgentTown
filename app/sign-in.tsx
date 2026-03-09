@@ -36,6 +36,7 @@ import {
   normalizePhone,
   useAuth,
 } from "@/src/state/auth-context";
+import { getE2ELaunchArgs, isE2ETestMode } from "@/src/utils/e2e";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -192,6 +193,13 @@ export default function SignInScreen() {
   const [profileAvatarInput, setProfileAvatarInput] = useState("");
   const [uploadingProfileAvatar, setUploadingProfileAvatar] = useState(false);
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const e2ePlaintextPassword = useMemo(() => isE2ETestMode(), []);
+  const e2ePasswordFallback = useMemo(() => {
+    const args = getE2ELaunchArgs();
+    const fromArgs =
+      typeof args?.e2eAuthPassword === "string" ? args.e2eAuthPassword.trim() : "";
+    return fromArgs || "AtSim12345";
+  }, []);
   const passwordInputRef = useRef<TextInput>(null);
   const otpInputRef = useRef<TextInput>(null);
   const signUpPasswordInputRef = useRef<TextInput>(null);
@@ -331,18 +339,19 @@ export default function SignInScreen() {
 
   const handlePasswordSignIn = async () => {
     const normalizedEmail = email.trim();
+    const effectivePassword = password || (e2ePlaintextPassword ? e2ePasswordFallback : "");
     if (!normalizedEmail || !normalizedEmail.includes("@")) {
       Alert.alert(tr("信息不完整", "Incomplete"), tr("请输入有效邮箱。", "Please enter a valid email."));
       return;
     }
-    if (!password) {
+    if (!effectivePassword) {
       Alert.alert(tr("信息不完整", "Incomplete"), tr("请输入密码。", "Please enter your password."));
       return;
     }
 
     try {
       setBusyKey("password");
-      await signInWithPassword(normalizedEmail, password);
+      await signInWithPassword(normalizedEmail, effectivePassword);
     } catch (error) {
       const msg = error instanceof Error ? error.message : tr("登录失败", "Sign-In Failed");
       Alert.alert(tr("登录失败", "Sign-In Failed"), msg);
@@ -649,6 +658,7 @@ export default function SignInScreen() {
             </View>
             <View style={styles.modeTabs}>
               <Pressable
+                testID="auth-mode-sign-in"
                 style={[styles.modeTab, authMode === "sign_in" && styles.modeTabActive]}
                 onPress={() => setAuthMode("sign_in")}
               >
@@ -657,6 +667,7 @@ export default function SignInScreen() {
                 </Text>
               </Pressable>
               <Pressable
+                testID="auth-mode-sign-up"
                 style={[styles.modeTab, authMode === "sign_up" && styles.modeTabActive]}
                 onPress={() => setAuthMode("sign_up")}
               >
@@ -708,6 +719,7 @@ export default function SignInScreen() {
                 <View style={authStyles.card}>
                   <View style={styles.innerTabs}>
                     <Pressable
+                      testID="auth-method-email"
                       style={[styles.innerTab, signInMethod === "email" && styles.innerTabActive]}
                       onPress={() => setSignInMethod("email")}
                     >
@@ -716,6 +728,7 @@ export default function SignInScreen() {
                       </Text>
                     </Pressable>
                     <Pressable
+                      testID="auth-method-phone"
                       style={[styles.innerTab, signInMethod === "phone" && styles.innerTabActive]}
                       onPress={() => setSignInMethod("phone")}
                     >
@@ -763,7 +776,7 @@ export default function SignInScreen() {
                           onChangeText={setPassword}
                           placeholder={tr("输入你的账号密码", "Enter your password")}
                           placeholderTextColor={AUTH_PLACEHOLDER_COLOR}
-                          secureTextEntry
+                          secureTextEntry={!e2ePlaintextPassword}
                           autoCapitalize="none"
                           autoCorrect={false}
                           autoComplete="current-password"
@@ -948,7 +961,7 @@ export default function SignInScreen() {
                     onChangeText={setSignUpPassword}
                     placeholder={tr("至少 8 位，建议混合字母和数字", "At least 8 characters; mix letters and numbers")}
                     placeholderTextColor={AUTH_PLACEHOLDER_COLOR}
-                    secureTextEntry
+                    secureTextEntry={!e2ePlaintextPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
                     autoComplete="new-password"
@@ -967,7 +980,7 @@ export default function SignInScreen() {
                     onChangeText={setSignUpConfirmPassword}
                     placeholder={tr("再次输入密码", "Enter password again")}
                     placeholderTextColor={AUTH_PLACEHOLDER_COLOR}
-                    secureTextEntry
+                    secureTextEntry={!e2ePlaintextPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
                     autoComplete="new-password"
