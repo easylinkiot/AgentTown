@@ -43,7 +43,12 @@
     "check": "npm run typecheck && npm run lint && npm run test:ci",
     "fastlane:prepare:ios": "fastlane ios prepare --env fastlane",
     "fastlane:build:ios": "fastlane ios build_release --env fastlane",
-    "fastlane:deploy:ios": "fastlane ios deploy_testflight --env fastlane"
+    "fastlane:deploy:ios": "fastlane ios deploy_testflight --env fastlane",
+    "desktop:dev:web": "expo start --web --port 19008",
+    "desktop:dev": "concurrently -k -n WEB,ELECTRON -c cyan,magenta \"npm:desktop:dev:web\" \"wait-on tcp:19008 && cross-env USCHAT_DESKTOP_DEV=1 DESKTOP_START_URL=http://127.0.0.1:19008 electron desktop/main.cjs\"",
+    "desktop:build:web": "expo export --platform web",
+    "desktop:pack:mac": "npm run desktop:build:web && electron-builder --dir --mac --publish never",
+    "desktop:dist:mac": "npm run desktop:build:web && electron-builder --mac zip --publish never"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -92,7 +97,11 @@
     "@types/jest": "^29.5.14",
     "@types/qrcode": "^1.5.6",
     "@types/react": "~19.1.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "detox": "^20.42.3",
+    "electron": "^40.8.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.39.2",
     "eslint-config-expo": "^10.0.0",
     "jest": "^29.7.0",
@@ -100,7 +109,8 @@
     "jest-html-reporters": "^3.1.7",
     "jest-junit": "^16.0.0",
     "react-test-renderer": "19.1.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "wait-on": "^9.0.4"
   },
   "private": true,
   "engines": {
@@ -113,6 +123,30 @@
       "appConfigFieldsNotSyncedCheck": {
         "enabled": false
       }
+    }
+  },
+  "build": {
+    "appId": "com.biceek.uschat.desktop",
+    "productName": "UsChat",
+    "directories": {
+      "output": "desktop-dist"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "desktop/main.cjs"
+    },
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "target": [
+        "dir",
+        "zip"
+      ],
+      "artifactName": "UsChat-${version}-${arch}.${ext}"
     }
   }
 }

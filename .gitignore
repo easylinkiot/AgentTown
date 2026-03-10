@@ -41,6 +41,7 @@ yarn-error.*
 /artifacts
 /reports/
 /test-results/
+/desktop-dist/
 
 # python cache
 __pycache__/

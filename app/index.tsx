@@ -16,6 +16,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,6 +30,8 @@ import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { subscribePendingFriendQrPayload } from "@/src/features/friends/friend-qr-scanner-bridge";
 import { getCachedAgentSessions, preloadAgentSessions } from "@/src/features/chat/agent-sessions-cache";
 import { parseConversationTimestamp } from "@/src/features/chat/chat-helpers";
+import { DesktopHome } from "@/src/features/desktop/DesktopHome";
+import { isElectronDesktopShell } from "@/src/features/desktop/runtime";
 import { tx } from "@/src/i18n/translate";
 import {
   acceptFriendRequest,
@@ -93,6 +96,7 @@ function presenceRoleIcon(role: PresenceRole): React.ComponentProps<typeof Ionic
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { isSignedIn, user } = useAuth();
   const {
     chatThreads,
@@ -110,6 +114,7 @@ export default function HomeScreen() {
   } = useAgentTown();
   const tr = useCallback((zh: string, en: string) => tx(language, zh, en), [language]);
   const profileAvatar = user?.avatar || botConfig.avatar;
+  const isDesktopHome = isElectronDesktopShell() && windowWidth >= 1180;
 
   const [peopleModal, setPeopleModal] = useState(false);
   const [friendModal, setFriendModal] = useState(false);
@@ -809,178 +814,205 @@ export default function HomeScreen() {
   return (
     <KeyframeBackground>
       <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
-        <View style={styles.container}>
-          <View style={styles.topBar}>
-            <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>
-              <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
-              <View style={styles.onlineDot} />
-            </Pressable>
-
-            <Pressable style={styles.worldMapPill} onPress={() => router.push("/town-map" as never)}>
-              <Ionicons name="globe-outline" size={14} color="rgba(226,232,240,0.92)" />
-              <Text style={styles.worldMapText}>{tr("世界地图", "WORLD MAP")}</Text>
-            </Pressable>
-
-            <View style={styles.topActions}>
-              <Pressable style={styles.topIcon} onPress={() => router.push("/town-map" as never)}>
-                <Ionicons name="locate-outline" size={16} color="rgba(226,232,240,0.92)" />
+        {isDesktopHome ? (
+          <DesktopHome
+            profileAvatar={profileAvatar}
+            language={language}
+            bootstrapReady={bootstrapReady}
+            openingAskAnything={openingAskAnything}
+            refreshingChats={refreshingChats}
+            uiError={uiError}
+            chats={list}
+            npcList={npcList}
+            presence={presence}
+            tr={tr}
+            onRefreshChats={handleRefreshChats}
+            onOpenAskAnything={handleOpenAskAnything}
+            onOpenThread={handleOpenThread}
+            onOpenNpc={handleOpenNpc}
+            onOpenConfig={() => router.push("/config" as never)}
+            onOpenTownMap={() => router.push("/town-map" as never)}
+            onOpenPeopleModal={() => setPeopleModal(true)}
+            onOpenFriendModal={() => setFriendModal(true)}
+            onOpenGroupModal={() => setGroupModal(true)}
+            onOpenAgents={() => router.push("/agents" as never)}
+            onOpenThreadAvatarConfig={openThreadAvatarConfig}
+            onOpenEntityConfig={openEntityConfig}
+          />
+        ) : (
+          <View style={styles.container}>
+            <View style={styles.topBar}>
+              <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>
+                <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
+                <View style={styles.onlineDot} />
               </Pressable>
-              <Pressable style={styles.topIcon} testID="home-quick-actions-open" onPress={() => setPeopleModal(true)}>
-                <Ionicons name="people-outline" size={16} color="rgba(226,232,240,0.92)" />
+
+              <Pressable style={styles.worldMapPill} onPress={() => router.push("/town-map" as never)}>
+                <Ionicons name="globe-outline" size={14} color="rgba(226,232,240,0.92)" />
+                <Text style={styles.worldMapText}>{tr("世界地图", "WORLD MAP")}</Text>
               </Pressable>
+
+              <View style={styles.topActions}>
+                <Pressable style={styles.topIcon} onPress={() => router.push("/town-map" as never)}>
+                  <Ionicons name="locate-outline" size={16} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+                <Pressable style={styles.topIcon} testID="home-quick-actions-open" onPress={() => setPeopleModal(true)}>
+                  <Ionicons name="people-outline" size={16} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+              </View>
             </View>
-          </View>
 
-          <MiniAppDock />
+            <MiniAppDock />
 
-          <Pressable
-            testID="home-mybot-entry"
-            style={styles.askBar}
-            onPress={() => {
-              void handleOpenAskAnything();
-            }}
-          >
-            <View style={styles.askPlus}>
-              <Ionicons name="add" size={16} color="rgba(226,232,240,0.92)" />
-            </View>
-            <Text style={styles.askPlaceholder}>{tr("Ask anything", "Ask anything")}</Text>
-            <View style={styles.askRight}>
-              {openingAskAnything ? (
-                <ActivityIndicator size="small" color="rgba(226,232,240,0.75)" />
-              ) : (
-                <>
-                  <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.75)" />
-                  <Ionicons name="send" size={16} color="rgba(226,232,240,0.75)" />
-                </>
-              )}
-            </View>
-          </Pressable>
-
-          {uiError ? (
-            <StateBanner
-              variant="error"
-              title={tr("加载失败", "Something went wrong")}
-              message={uiError}
-              actionLabel={tr("关闭", "Dismiss")}
-              onAction={() => setUiError(null)}
-            />
-          ) : null}
-          {refreshingChats ? (
-            <View style={styles.refreshHint}>
-              <ActivityIndicator size="small" color="#93c5fd" />
-              <Text style={styles.refreshHintText}>{tr("刷新会话中...", "Refreshing chats...")}</Text>
-            </View>
-          ) : null}
-
-          {!bootstrapReady ? (
-            <LoadingSkeleton kind="chat_list" />
-          ) : (
-            <FlatList
-              testID="home-chat-list"
-              data={list}
-              keyExtractor={(item) => item.id}
-              style={styles.chatList}
-              alwaysBounceVertical
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshingChats}
-                  onRefresh={handleRefreshChats}
-                  tintColor="rgba(226,232,240,0.92)"
-                  colors={["#60a5fa"]}
-                  progressBackgroundColor="rgba(15,23,42,0.92)"
-                  progressViewOffset={10}
-                />
-              }
-              renderItem={({ item }) => (
-                <ChatListItem
-                  chat={item}
-                  language={language}
-                  theme="neo"
-                  onPress={() => handleOpenThread(item)}
-                  onAvatarPress={openThreadAvatarConfig}
-                />
-              )}
-              contentContainerStyle={styles.listContent}
-              ListHeaderComponent={
-                npcList.length > 0 ? (
-                  <View style={styles.npcListWrap}>
-                    {npcList.map((npc) => (
-                      <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
-                    ))}
-                  </View>
-                ) : null
-              }
-            />
-          )}
-
-          <View style={[styles.presenceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.presenceScroll}
-              contentContainerStyle={styles.presenceRow}
+            <Pressable
+              testID="home-mybot-entry"
+              style={styles.askBar}
+              onPress={() => {
+                void handleOpenAskAnything();
+              }}
             >
-              <Pressable style={styles.presenceAddInline} onPress={() => setPeopleModal(true)}>
-                <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
-              </Pressable>
-              {presence.length
-                ? presence.map((item, index) => {
-                  const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
-                  const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
-                  const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
-                  return (
-                    <Pressable
-                      key={item.id}
-                      testID={`home-presence-item-${index}`}
-                      style={styles.presenceItem}
-                      onLongPress={() => handleRemovePresence(item)}
-                      delayLongPress={280}
-                      onPress={() =>
-                        openEntityConfig({
-                          entityType: item.entityType,
-                          entityId: item.entityId,
-                          name: item.name,
-                          avatar: item.avatar,
-                        })
-                      }
-                    >
-                      <View style={styles.presenceAvatarWrap}>
-                        {item.avatar ? (
-                          <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
-                        ) : (
-                          <View style={[styles.presenceAvatar, styles.presenceAvatarFallback]}>
-                            <Ionicons name="person-outline" size={18} color="rgba(226,232,240,0.82)" />
+              <View style={styles.askPlus}>
+                <Ionicons name="add" size={16} color="rgba(226,232,240,0.92)" />
+              </View>
+              <Text style={styles.askPlaceholder}>{tr("Ask anything", "Ask anything")}</Text>
+              <View style={styles.askRight}>
+                {openingAskAnything ? (
+                  <ActivityIndicator size="small" color="rgba(226,232,240,0.75)" />
+                ) : (
+                  <>
+                    <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.75)" />
+                    <Ionicons name="send" size={16} color="rgba(226,232,240,0.75)" />
+                  </>
+                )}
+              </View>
+            </Pressable>
+
+            {uiError ? (
+              <StateBanner
+                variant="error"
+                title={tr("加载失败", "Something went wrong")}
+                message={uiError}
+                actionLabel={tr("关闭", "Dismiss")}
+                onAction={() => setUiError(null)}
+              />
+            ) : null}
+            {refreshingChats ? (
+              <View style={styles.refreshHint}>
+                <ActivityIndicator size="small" color="#93c5fd" />
+                <Text style={styles.refreshHintText}>{tr("刷新会话中...", "Refreshing chats...")}</Text>
+              </View>
+            ) : null}
+
+            {!bootstrapReady ? (
+              <LoadingSkeleton kind="chat_list" />
+            ) : (
+              <FlatList
+                testID="home-chat-list"
+                data={list}
+                keyExtractor={(item) => item.id}
+                style={styles.chatList}
+                alwaysBounceVertical
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshingChats}
+                    onRefresh={handleRefreshChats}
+                    tintColor="rgba(226,232,240,0.92)"
+                    colors={["#60a5fa"]}
+                    progressBackgroundColor="rgba(15,23,42,0.92)"
+                    progressViewOffset={10}
+                  />
+                }
+                renderItem={({ item }) => (
+                  <ChatListItem
+                    chat={item}
+                    language={language}
+                    theme="neo"
+                    onPress={() => handleOpenThread(item)}
+                    onAvatarPress={openThreadAvatarConfig}
+                  />
+                )}
+                contentContainerStyle={styles.listContent}
+                ListHeaderComponent={
+                  npcList.length > 0 ? (
+                    <View style={styles.npcListWrap}>
+                      {npcList.map((npc) => (
+                        <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
+                      ))}
+                    </View>
+                  ) : null
+                }
+              />
+            )}
+
+            <View style={[styles.presenceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.presenceScroll}
+                contentContainerStyle={styles.presenceRow}
+              >
+                <Pressable style={styles.presenceAddInline} onPress={() => setPeopleModal(true)}>
+                  <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+                {presence.length
+                  ? presence.map((item, index) => {
+                    const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
+                    const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
+                    const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
+                    return (
+                      <Pressable
+                        key={item.id}
+                        testID={`home-presence-item-${index}`}
+                        style={styles.presenceItem}
+                        onLongPress={() => handleRemovePresence(item)}
+                        delayLongPress={280}
+                        onPress={() =>
+                          openEntityConfig({
+                            entityType: item.entityType,
+                            entityId: item.entityId,
+                            name: item.name,
+                            avatar: item.avatar,
+                          })
+                        }
+                      >
+                        <View style={styles.presenceAvatarWrap}>
+                          {item.avatar ? (
+                            <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
+                          ) : (
+                            <View style={[styles.presenceAvatar, styles.presenceAvatarFallback]}>
+                              <Ionicons name="person-outline" size={18} color="rgba(226,232,240,0.82)" />
+                            </View>
+                          )}
+                          <View
+                            testID={`home-presence-role-badge-${index}-${item.role}`}
+                            style={[
+                              styles.presenceRoleBadge,
+                              item.role === "npc"
+                                ? styles.presenceRoleBadgeNpc
+                                : item.role === "bot"
+                                  ? styles.presenceRoleBadgeBot
+                                  : styles.presenceRoleBadgeHuman,
+                            ]}
+                          >
+                            <Ionicons
+                              name={presenceRoleIcon(item.role)}
+                              size={9}
+                              color={item.role === "human" ? "rgba(12,18,32,0.95)" : "rgba(248,250,252,0.95)"}
+                            />
                           </View>
-                        )}
-                        <View
-                          testID={`home-presence-role-badge-${index}-${item.role}`}
-                          style={[
-                            styles.presenceRoleBadge,
-                            item.role === "npc"
-                              ? styles.presenceRoleBadgeNpc
-                              : item.role === "bot"
-                                ? styles.presenceRoleBadgeBot
-                                : styles.presenceRoleBadgeHuman,
-                          ]}
-                        >
-                          <Ionicons
-                            name={presenceRoleIcon(item.role)}
-                            size={9}
-                            color={item.role === "human" ? "rgba(12,18,32,0.95)" : "rgba(248,250,252,0.95)"}
-                          />
+                          <View style={styles.presenceDot} />
                         </View>
-                        <View style={styles.presenceDot} />
-                      </View>
-                      <Text testID={`home-presence-name-${index}`} style={styles.presenceName} numberOfLines={1}>
-                        {displayName}
-                      </Text>
-                    </Pressable>
-                  );
-                })
-                : null}
-            </ScrollView>
+                        <Text testID={`home-presence-name-${index}`} style={styles.presenceName} numberOfLines={1}>
+                          {displayName}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
+                  : null}
+              </ScrollView>
+            </View>
           </View>
-        </View>
+        )}
 
         <Modal
           visible={peopleModal}
