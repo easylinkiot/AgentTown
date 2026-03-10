@@ -48,14 +48,22 @@ import {
   buildTaskItemFromCandidate,
 } from "@/src/features/chat/ask-ai-helpers";
 import {
+  inferUploadFilename,
+  normalizeMediaAssetForUpload,
+} from "@/src/features/chat/media-upload";
+import {
   collectMentionMatches,
   extractActiveMention,
   replaceActiveMention,
 } from "@/src/features/chat/mention-helpers";
 import {
-  inferUploadFilename,
-  normalizeMediaAssetForUpload,
-} from "@/src/features/chat/media-upload";
+  applyMentionSelection,
+  buildMentionPickerItems,
+  filterMentionPickerItems,
+  type MentionPickerItem,
+  shouldOpenMentionPicker,
+} from "@/src/features/chat/mention-picker";
+import { MentionPickerModal } from "@/src/features/chat/MentionPickerModal";
 import { tx } from "@/src/i18n/translate";
 import {
   agentChat as agentChatApi,
@@ -68,11 +76,11 @@ import {
   uploadFileV2,
 } from "@/src/lib/api";
 import {
-  type AssistSkillAction,
-  DEFAULT_ASSIST_SKILL_ACTIONS,
   type AssistCandidate,
+  type AssistSkillAction,
   type ChatAssistRequest,
   type ChatCompletionsRequest,
+  DEFAULT_ASSIST_SKILL_ACTIONS,
   getDefaultAssistSkillId,
   listChatAssistSkills,
   runChatAssist,
@@ -1649,7 +1657,6 @@ export default function ChatDetailScreen() {
   const [loading, setLoading] = useState(() => messages.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [mentionPickerVisible, setMentionPickerVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [failedDraft, setFailedDraft] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -1807,6 +1814,16 @@ export default function ChatDetailScreen() {
   const autoTranslatePendingRef = useRef<Set<string>>(new Set());
   const [myBotPanel, setMyBotPanel] = useState(false);
   const [memberNameListModal, setMemberNameListModal] = useState(false);
+  const [mentionPickerVisible, setMentionPickerVisible] = useState(false);
+  const [mentionPoolFriends, setMentionPoolFriends] = useState<Friend[]>([]);
+  const [mentionPoolNpcs, setMentionPoolNpcs] = useState<NPC[]>([]);
+  const [mentionPickerLoading, setMentionPickerLoading] = useState(false);
+  const [mentionPickerError, setMentionPickerError] = useState<string | null>(null);
+  const [mentionPickerNonce, setMentionPickerNonce] = useState(0);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<MentionPickerItem[]>([]);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const mentionPickerTriggerArmedRef = useRef(true);
   const [myBotQuestion, setMyBotQuestion] = useState("");
   const [myBotAnswer, setMyBotAnswer] = useState<string | null>(null);
   const [myBotError, setMyBotError] = useState<string | null>(null);
@@ -1910,6 +1927,30 @@ export default function ChatDetailScreen() {
     };
   }, [groupReplyModeKey, thread.isGroup]);
 
+  const resetMentionPickerState = useCallback(() => {
+    setIsMultiSelectMode(false);
+    setSelectedItems([]);
+    setSearchKeyword("");
+  }, []);
+
+  const closeMentionPicker = useCallback(() => {
+    setMentionPickerVisible(false);
+    resetMentionPickerState();
+  }, [resetMentionPickerState]);
+
+  useEffect(() => {
+    if (!shouldOpenMentionPicker(input)) {
+      mentionPickerTriggerArmedRef.current = true;
+      if (mentionPickerVisible) {
+        closeMentionPicker();
+      }
+      return;
+    }
+
+    if (!mentionPickerTriggerArmedRef.current || mentionPickerVisible) return;
+    setMentionPickerVisible(true);
+  }, [closeMentionPicker, input, mentionPickerVisible]);
+
   useEffect(() => {
     if (!memberModal) return;
     if (!chatId) return;
@@ -1945,6 +1986,42 @@ export default function ChatDetailScreen() {
       alive = false;
     };
   }, [chatId, listMembers, memberModal, memberPoolNonce]);
+
+  useEffect(() => {
+    if (!mentionPickerVisible) return;
+
+    let alive = true;
+    setMentionPickerLoading(true);
+    setMentionPickerError(null);
+
+    Promise.all([listFriendsApi(), listNPCsApi()])
+      .then(([nextFriends, nextNpcs]) => {
+        if (!alive) return;
+        setMentionPoolFriends(Array.isArray(nextFriends) ? nextFriends : []);
+        setMentionPoolNpcs(Array.isArray(nextNpcs) ? nextNpcs : []);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setMentionPickerError(formatApiError(err));
+      })
+      .finally(() => {
+        if (!alive) return;
+        setMentionPickerLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [mentionPickerNonce, mentionPickerVisible]);
+
+  const mentionItems = useMemo(
+    () => buildMentionPickerItems(mentionPoolFriends, mentionPoolNpcs),
+    [mentionPoolFriends, mentionPoolNpcs]
+  );
+  const filteredMentionItems = useMemo(
+    () => filterMentionPickerItems(mentionItems, searchKeyword),
+    [mentionItems, searchKeyword]
+  );
 
   const candidates = useMemo<MemberCandidate[]>(() => {
     const friendPool = memberPoolFriends.length ? memberPoolFriends : friends;
@@ -2989,6 +3066,47 @@ export default function ChatDetailScreen() {
     setInput((previous) => replaceActiveMention(previous, candidate.token));
     setMentionPickerVisible(false);
   }, []);
+  const commitMentionItems = useCallback(
+    (items: MentionPickerItem[]) => {
+      if (items.length === 0) {
+        mentionPickerTriggerArmedRef.current = false;
+        closeMentionPicker();
+        return;
+      }
+      mentionPickerTriggerArmedRef.current = false;
+      setInput(applyMentionSelection(input, items));
+      closeMentionPicker();
+    },
+    [closeMentionPicker, input]
+  );
+
+  const handleMentionPickerClose = useCallback(() => {
+    mentionPickerTriggerArmedRef.current = false;
+    closeMentionPicker();
+  }, [closeMentionPicker]);
+
+  const handleMentionPickerSelect = useCallback(
+    (item: MentionPickerItem) => {
+      setMentionPickerError(null);
+      if (!isMultiSelectMode) {
+        commitMentionItems([item]);
+        return;
+      }
+
+      setSelectedItems((prev) => {
+        const exists = prev.some((entry) => entry.key === item.key);
+        if (exists) {
+          return prev.filter((entry) => entry.key !== item.key);
+        }
+        return [...prev, item];
+      });
+    },
+    [commitMentionItems, isMultiSelectMode]
+  );
+
+  const handleMentionPickerDone = useCallback(() => {
+    commitMentionItems(selectedItems);
+  }, [commitMentionItems, selectedItems]);
 
   const confirmDeleteFriend = () => {
     if (!linkedFriend) return;
@@ -4178,6 +4296,23 @@ export default function ChatDetailScreen() {
             </Pressable>
           </Pressable>
         </Modal>
+
+        <MentionPickerModal
+          visible={mentionPickerVisible}
+          items={filteredMentionItems}
+          loading={mentionPickerLoading}
+          error={mentionPickerError}
+          isMultiSelectMode={isMultiSelectMode}
+          selectedItems={selectedItems}
+          searchKeyword={searchKeyword}
+          translate={tr}
+          onClose={handleMentionPickerClose}
+          onRetry={() => setMentionPickerNonce((nonce) => nonce + 1)}
+          onToggleMultiSelectMode={() => setIsMultiSelectMode(true)}
+          onSelectItem={handleMentionPickerSelect}
+          onDone={handleMentionPickerDone}
+          onSearchKeywordChange={setSearchKeyword}
+        />
 
         <Modal
           visible={memberNameListModal}
