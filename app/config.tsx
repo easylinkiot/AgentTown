@@ -805,7 +805,9 @@ export default function ConfigScreen() {
                     <View style={styles.listHeaderMain}>
                       <Text style={[styles.listTitle, isNeo && styles.listTitleNeo]}>{skill.name}</Text>
                       <Text style={[styles.listMeta, isNeo && styles.listMetaNeo]}>
-                        {skill.source === "system" ? tr("系统技能", "System") : tr("我的技能", "Mine")} · {skill.version}
+                        {skill.source === "system"
+                          ? tr("系统技能", "System")
+                          : `${tr("我的技能", "Mine")} · ${skill.version}`}
                       </Text>
                     </View>
                     {skill.source === "system" ? (
