@@ -24,6 +24,17 @@ describe("mention helpers", () => {
     });
   });
 
+  it("extracts an active mention after CJK text without requiring a space", () => {
+    expect(extractActiveMention("请找@小爱")).toEqual({
+      query: "小爱",
+      start: 2,
+    });
+  });
+
+  it("does not treat email addresses as mentions", () => {
+    expect(extractActiveMention("test@example.com")).toBeNull();
+  });
+
   it("replaces only the active mention token", () => {
     expect(replaceActiveMention("hello @jo", "John 2")).toBe("hello @John 2 ");
   });

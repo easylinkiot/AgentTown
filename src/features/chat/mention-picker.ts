@@ -1,3 +1,4 @@
+import { extractActiveMention } from "@/src/features/chat/mention-helpers";
 import type { Friend, NPC } from "@/src/types";
 
 export type MentionPickerEntityType = "user" | "npc";
@@ -16,7 +17,8 @@ function normalizeText(value: string) {
 }
 
 export function shouldOpenMentionPicker(value: string) {
-  return value.startsWith("@");
+  const activeMention = extractActiveMention(value);
+  return Boolean(activeMention);
 }
 
 export function buildMentionPickerItems(friends: Friend[], npcs: NPC[]): MentionPickerItem[] {

@@ -1,6 +1,9 @@
 import {
   formatConversationDisplayTime,
+  formatConversationMessageDisplayTime,
+  normalizeConversationMessageTimestamps,
   parseConversationTimestamp,
+  resolveConversationSortTimestamp,
   sortConversationMessagesChronologically,
 } from "../chat-helpers";
 import type { ConversationMessage } from "@/src/types";
@@ -25,10 +28,38 @@ describe("chat helpers", () => {
     expect(Number.isFinite(parsed)).toBe(true);
   });
 
-  it("sorts messages by seq number before fallback time", () => {
+  it("normalizes backend timestamps onto the message model", () => {
+    const message = normalizeConversationMessageTimestamps({
+      ...createMessage(),
+      time: "18:32",
+      createdAt: "",
+      updatedAt: "",
+      receivedAt: "",
+      // emulate raw API aliases
+      created_at: "2026-03-10T18:32:10.123Z",
+      updated_at: "2026-03-10T18:32:10.123Z",
+    } as ConversationMessage & { created_at: string; updated_at: string });
+
+    expect(message.createdAt).toBe("2026-03-10T18:32:10.123Z");
+    expect(message.receivedAt).toBe("2026-03-10T18:32:10.123Z");
+  });
+
+  it("sorts messages by received timestamp before seq number", () => {
     const messages = sortConversationMessagesChronologically([
-      createMessage({ id: "reply", seqNo: 12, time: "02:10", content: "reply" }),
-      createMessage({ id: "question", seqNo: 11, time: "02:10", content: "question" }),
+      createMessage({
+        id: "reply",
+        seqNo: 12,
+        time: "02:10",
+        content: "reply",
+        receivedAt: "2026-03-10T18:32:10.456Z",
+      }),
+      createMessage({
+        id: "question",
+        seqNo: 11,
+        time: "02:10",
+        content: "question",
+        receivedAt: "2026-03-10T18:32:10.123Z",
+      }),
     ]);
 
     expect(messages.map((item) => item.id)).toEqual(["question", "reply"]);
@@ -53,5 +84,31 @@ describe("chat helpers", () => {
         minute: "2-digit",
       })
     );
+  });
+
+  it("formats conversation message time from absolute timestamps instead of display-only time", () => {
+    const message = createMessage({
+      time: "18:32",
+      createdAt: "2026-03-10T18:32:10.123Z",
+    });
+
+    expect(formatConversationMessageDisplayTime(message)).toBe(
+      new Date("2026-03-10T18:32:10.123Z").toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    );
+  });
+
+  it("uses receivedAt for millisecond sorting precision", () => {
+    const timestamp = resolveConversationSortTimestamp(
+      createMessage({
+        time: "18:32",
+        createdAt: "2026-03-10T18:32:10Z",
+        receivedAt: "2026-03-10T18:32:10.321Z",
+      })
+    );
+
+    expect(timestamp).toBe(Date.parse("2026-03-10T18:32:10.321Z"));
   });
 });

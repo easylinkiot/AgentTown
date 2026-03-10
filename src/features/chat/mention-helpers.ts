@@ -9,12 +9,11 @@ export type MentionDraftCandidate = {
 };
 
 export function extractActiveMention(text: string) {
-  const match = text.match(/(?:^|\s)@([^\s@]*)$/);
+  const match = text.match(/(^|[^A-Za-z0-9_.+-])@([^\s@]*)$/);
   if (!match || typeof match.index !== "number") return null;
-  const raw = match[1] || "";
-  const prefix = match[0].startsWith("@") ? "" : " ";
+  const prefix = match[0].startsWith("@") ? "" : match[1];
   return {
-    query: raw.trim().toLowerCase(),
+    query: (match[2] || "").trim().toLowerCase(),
     start: match.index + prefix.length,
   };
 }

@@ -5,7 +5,11 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Platform } from "react-native";
 
 import { DEFAULT_MYBOT_AVATAR } from "@/src/constants/chat";
-import { sortConversationMessagesChronologically } from "@/src/features/chat/chat-helpers";
+import {
+  normalizeConversationDateTime,
+  normalizeConversationMessageTimestamps,
+  sortConversationMessagesChronologically,
+} from "@/src/features/chat/chat-helpers";
 import {
   friendAliasKeys,
   friendAliasStorageKey,
@@ -55,6 +59,7 @@ import {
   markThreadRead as markThreadReadApi,
   mapATSessionToThread,
   type AddThreadMemberInput,
+  type ATChatMessage,
   type CreateAgentInput,
   type CreateCustomSkillInput,
   type SendThreadMessageInput,
@@ -299,6 +304,19 @@ function mergeAppendUnique(base: ConversationMessage[], incoming: ConversationMe
     next.push(msg);
   }
   return next;
+}
+
+function mergeMessagesPreferIncoming(base: ConversationMessage[], incoming: ConversationMessage[]) {
+  const byId = new Map<string, ConversationMessage>();
+  for (const message of base) {
+    if (!message?.id) continue;
+    byId.set(message.id, message);
+  }
+  for (const message of incoming) {
+    if (!message?.id) continue;
+    byId.set(message.id, message);
+  }
+  return Array.from(byId.values());
 }
 
 function mergePrependUnique(base: ConversationMessage[], incoming: ConversationMessage[]) {
@@ -566,7 +584,9 @@ function mapV2SessionMessageToConversation(
   const isUserRole = role === "user";
   const senderName = isUserRole ? "Me" : role === "assistant" ? "Assistant" : "System";
   const senderType = isUserRole ? "human" : role === "assistant" ? "agent" : "system";
-  const timestamp = normalizeLooseDateTime(row.updated_at ?? row.created_at) || new Date().toISOString();
+  const createdAt = normalizeLooseDateTime(row.created_at);
+  const updatedAt = normalizeLooseDateTime(row.updated_at);
+  const timestamp = updatedAt || createdAt || new Date().toISOString();
   const fallbackId = `${threadId}_v2_${index}_${Date.now()}`;
   return {
     id: (row.id || "").trim() || fallbackId,
@@ -579,6 +599,9 @@ function mapV2SessionMessageToConversation(
     type: (row.message_type || "text").trim() || "text",
     isMe: isUserRole && Boolean(currentUserId),
     time: timestamp,
+    createdAt: createdAt || undefined,
+    updatedAt: updatedAt || undefined,
+    receivedAt: timestamp,
   };
 }
 
@@ -593,13 +616,62 @@ function previewMessage(message: ConversationMessage): string {
 }
 
 function normalizeMessageForUser(message: ConversationMessage, userID: string): ConversationMessage {
+  const normalized = normalizeConversationMessageTimestamps(message);
   const senderID = (message.senderId || "").trim();
   const current = (userID || "").trim();
   const isMe = senderID !== "" && current !== "" ? senderID === current : Boolean(message.isMe);
   return {
-    ...message,
+    ...normalized,
     isMe,
   };
+}
+
+function normalizeMessagesForUser(messages: ConversationMessage[], userID: string) {
+  return messages.map((message) => normalizeMessageForUser(message, userID));
+}
+
+function normalizeMessagesByThreadForUser(
+  messagesByThread: Record<string, ConversationMessage[]>,
+  userID: string
+) {
+  const nextEntries: Record<string, ConversationMessage[]> = {};
+  for (const [threadId, messages] of Object.entries(messagesByThread || {})) {
+    nextEntries[threadId] = sortConversationMessagesChronologically(normalizeMessagesForUser(messages, userID));
+  }
+  return nextEntries;
+}
+
+function pickMessagesForThreadFromTargetHistory(rows: ATChatMessage[], threadId: string) {
+  const matching = rows.filter((row) => {
+    const sessionId = (row.session_id || "").trim();
+    return !sessionId || sessionId === threadId;
+  });
+  if (matching.length > 0) return matching;
+  const hasForeignSession = rows.some((row) => {
+    const sessionId = (row.session_id || "").trim();
+    return sessionId && sessionId !== threadId;
+  });
+  return hasForeignSession ? [] : rows;
+}
+
+function stampMissingReceivedAt(
+  messages: ConversationMessage[],
+  knownMessageIds: Set<string>,
+  baseTimestamp = Date.now()
+) {
+  let offset = 0;
+  return messages.map((message) => {
+    const normalized = normalizeConversationMessageTimestamps(message);
+    if (normalized.receivedAt || normalized.createdAt || normalized.updatedAt || knownMessageIds.has(normalized.id)) {
+      return normalized;
+    }
+    const receivedAt = new Date(baseTimestamp + offset).toISOString();
+    offset += 1;
+    return {
+      ...normalized,
+      receivedAt,
+    };
+  });
 }
 
 function syncCurrentUserProfileInMessages(
@@ -746,7 +818,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     threadReadSyncStateRef.current = {};
-  }, [userID]);
+  }, []);
 
   const persistThreadLanguageMap = useCallback(
     async (next: Record<string, ThreadDisplayLanguage>) => {
@@ -886,7 +958,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       );
     }
     if (payload?.messages && typeof payload.messages === "object") {
-      setMessagesByThread(payload.messages);
+      setMessagesByThread(normalizeMessagesByThreadForUser(payload.messages, userID));
     }
     if (Array.isArray(payload?.friends)) {
       setFriends(payload.friends);
@@ -928,7 +1000,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     ) {
       throw bootstrapResult.reason;
     }
-  }, []);
+  }, [userID]);
 
   const updateThreadLanguage = useCallback(
     async (threadId: string, next: ThreadDisplayLanguage) => {
@@ -1090,13 +1162,17 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!threadId) return;
     const useThreadCache = shouldUseThreadMessageCache(threadId);
+    const thread = chatThreadsRef.current.find((item) => item.id === threadId);
+    const targetType = (thread?.targetType || "").trim();
+    const targetId = (thread?.targetId || "").trim();
 
     // Load from local cache first for instant paint.
     const cached = useThreadCache ? await readThreadCache(userID, threadId) : null;
     if (cached && cached.length > 0) {
+      const normalizedCached = sortConversationMessagesChronologically(normalizeMessagesForUser(cached, userID));
       setMessagesByThread((prev) => ({
         ...prev,
-        [threadId]: cached.slice(-MESSAGE_RENDER_WINDOW),
+        [threadId]: normalizedCached.slice(-MESSAGE_RENDER_WINDOW),
       }));
     }
 
@@ -1115,8 +1191,8 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     }
     if (loadedViaV2SessionApi) {
       latest = sortConversationMessagesChronologically(latest);
-      const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
-      const safeMerged = Array.isArray(merged) ? merged : [];
+      const merged = cached && cached.length > 0 ? mergeMessagesPreferIncoming(cached, latest) : latest;
+      const safeMerged = Array.isArray(merged) ? sortConversationMessagesChronologically(merged) : [];
       if (useThreadCache) {
         void writeThreadCache(userID, threadId, safeMerged);
       }
@@ -1126,28 +1202,33 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       }));
       return;
     }
-    try {
-      const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
-      latest = Array.isArray(latestRaw) ? latestRaw : [];
-    } catch {
-      const thread = chatThreadsRef.current.find((item) => item.id === threadId);
-      const targetType = (thread?.targetType || "").trim();
-      const targetId = (thread?.targetId || "").trim();
 
-      if (targetType && targetId) {
+    if (targetType && targetId) {
+      try {
         const response = await queryChatTargetHistoryApi(targetType, targetId, {
           pageSize: MESSAGE_PAGE_SIZE,
         });
-        latest = (response.list || []).map((row) => mapATMessageToConversation(row, userID, threadId));
-        historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
-      } else {
-        const response = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
-        latest = response.map((row) => mapATMessageToConversation(row, userID, threadId));
+        const rows = pickMessagesForThreadFromTargetHistory(response.list || [], threadId);
+        if (rows.length > 0 || (response.list || []).length === 0) {
+          latest = rows.map((row) => mapATMessageToConversation(row, userID, threadId));
+          historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
+        }
+      } catch {
+        // Fall through to the session endpoint below.
+      }
+    }
+    if (latest.length === 0) {
+      try {
+        const rows = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+        latest = rows.map((row) => mapATMessageToConversation(row, userID, threadId));
+      } catch {
+        const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+        latest = normalizeMessagesForUser(Array.isArray(latestRaw) ? latestRaw : [], userID);
       }
     }
     latest = sortConversationMessagesChronologically(latest);
-    const merged = cached && cached.length > 0 ? mergeAppendUnique(cached, latest) : latest;
-    const safeMerged = Array.isArray(merged) ? merged : [];
+    const merged = cached && cached.length > 0 ? mergeMessagesPreferIncoming(cached, latest) : latest;
+    const safeMerged = Array.isArray(merged) ? sortConversationMessagesChronologically(merged) : [];
     if (useThreadCache) {
       void writeThreadCache(userID, threadId, safeMerged);
     }
@@ -1165,6 +1246,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     const oldest = current[0]?.id;
     if (!oldest) return 0;
     const useThreadCache = shouldUseThreadMessageCache(threadId);
+    const thread = chatThreadsRef.current.find((item) => item.id === threadId);
+    const targetType = (thread?.targetType || "").trim();
+    const targetId = (thread?.targetId || "").trim();
 
     // Try local cache first.
     const cached = useThreadCache ? await readThreadCache(userID, threadId) : null;
@@ -1187,30 +1271,40 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     }
 
     let older: ConversationMessage[] = [];
-    try {
-      older = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE, before: oldest });
-    } catch {
-      const thread = chatThreadsRef.current.find((item) => item.id === threadId);
-      const targetType = (thread?.targetType || "").trim();
-      const targetId = (thread?.targetId || "").trim();
-      const cursor = historyCursorByThreadRef.current[threadId];
-      if (targetType && targetId && cursor) {
+    const cursor = historyCursorByThreadRef.current[threadId];
+    if (targetType && targetId && cursor) {
+      try {
         const response = await queryChatTargetHistoryApi(targetType, targetId, {
           cursor,
           pageSize: MESSAGE_PAGE_SIZE,
         });
-        older = (response.list || []).map((row) => mapATMessageToConversation(row, userID, threadId));
+        older = pickMessagesForThreadFromTargetHistory(response.list || [], threadId).map((row) =>
+          mapATMessageToConversation(row, userID, threadId)
+        );
         historyCursorByThreadRef.current[threadId] = response.pagination?.next_cursor || null;
-      } else {
-        const oldestSeqNo = current[0]?.seqNo;
-        if (typeof oldestSeqNo === "number" && Number.isFinite(oldestSeqNo)) {
+      } catch {
+        // Fall through to the session endpoint below.
+      }
+    }
+    if (older.length === 0) {
+      const oldestSeqNo = current[0]?.seqNo;
+      if (typeof oldestSeqNo === "number" && Number.isFinite(oldestSeqNo)) {
+        try {
           const response = await listChatSessionMessagesApi(threadId, {
             limit: MESSAGE_PAGE_SIZE,
             beforeSeqNo: oldestSeqNo,
           });
           older = response.map((row) => mapATMessageToConversation(row, userID, threadId));
+        } catch {
+          // Fall through to the legacy thread endpoint below.
         }
       }
+    }
+    if (older.length === 0) {
+      older = normalizeMessagesForUser(
+        await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE, before: oldest }),
+        userID
+      );
     }
     older = sortConversationMessagesChronologically(older);
     if (!Array.isArray(older) || older.length === 0) return 0;
@@ -1390,7 +1484,17 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           const payload = event.payload as ConversationMessage;
           const threadId = event.threadId || payload?.threadId;
           if (!threadId || !payload?.id) break;
-          const normalizedPayload = normalizeMessageForUser({ ...payload, threadId }, userID);
+          const eventTimestamp = normalizeConversationDateTime(event.sentAt) || new Date().toISOString();
+          const normalizedPayload = normalizeMessageForUser(
+            {
+              ...payload,
+              threadId,
+              createdAt: payload.createdAt || undefined,
+              updatedAt: payload.updatedAt || undefined,
+              receivedAt: payload.receivedAt || eventTimestamp,
+            },
+            userID
+          );
 
           setMessagesByThread((prev) => {
             const history = prev[threadId] || [];
@@ -1752,6 +1856,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         if (!threadId) return null;
         const useThreadCache = shouldUseThreadMessageCache(threadId);
         if (isE2E) {
+          const nowIso = new Date().toISOString();
           const senderId = (payload.senderId || userID || "e2e-guest-user").trim();
           const userMessage: ConversationMessage = {
             id: `e2e_msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1766,6 +1871,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             imageName: payload.imageName,
             isMe: payload.isMe ?? true,
             time: "Now",
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            receivedAt: nowIso,
           };
           const base = messagesByThreadRef.current[threadId] || [];
           const nextMessages = sortConversationMessagesChronologically([...base, userMessage]);
@@ -1784,8 +1892,11 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         }
         try {
           const result = await sendThreadMessageApi(threadId, payload);
+          const existingIds = new Set((messagesByThreadRef.current[threadId] || []).map((message) => message.id));
           if (Array.isArray(result.messages)) {
-            const nextMessages = sortConversationMessagesChronologically(result.messages);
+            const nextMessages = sortConversationMessagesChronologically(
+              stampMissingReceivedAt(normalizeMessagesForUser(result.messages, userID), existingIds)
+            );
             setMessagesByThread((prev) => ({
               ...prev,
               [threadId]: nextMessages,
@@ -1794,11 +1905,23 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
               void upsertThreadCache(userID, threadId, nextMessages);
             }
           }
-          const preview = result.aiMessage
-            ? previewMessage(result.aiMessage)
-            : previewMessage(result.userMessage);
+          const normalizedUserMessage = result.userMessage
+            ? stampMissingReceivedAt([normalizeMessageForUser(result.userMessage, userID)], existingIds)[0]
+            : undefined;
+          const normalizedAIMessage = result.aiMessage
+            ? stampMissingReceivedAt([normalizeMessageForUser(result.aiMessage, userID)], existingIds, Date.now() + 1)[0]
+            : undefined;
+          const preview = normalizedAIMessage
+            ? previewMessage(normalizedAIMessage)
+            : normalizedUserMessage
+              ? previewMessage(normalizedUserMessage)
+              : "";
           setChatThreads((prev) => updateThreadPreview(prev, threadId, preview));
-          return result;
+          return {
+            ...result,
+            userMessage: normalizedUserMessage || result.userMessage,
+            aiMessage: normalizedAIMessage || result.aiMessage,
+          };
         } catch {
           return null;
         }
@@ -2172,7 +2295,10 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             threadId,
             variables,
           });
-          const message = result.message;
+          const existingIds = new Set((messagesByThreadRef.current[threadId || ""] || []).map((item) => item.id));
+          const message = result.message
+            ? stampMissingReceivedAt([normalizeMessageForUser(result.message, userID)], existingIds)[0]
+            : undefined;
           if (threadId && message) {
             setMessagesByThread((prev) => {
               const history = prev[threadId] || [];
@@ -2181,7 +2307,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
               }
               return {
                 ...prev,
-                [threadId]: [...history, message],
+                [threadId]: sortConversationMessagesChronologically([...history, message]),
               };
             });
             setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(message)));
@@ -2201,14 +2327,23 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
             includeMyBot: options?.includeMyBot,
             appendUserMessage: true,
           });
+          const existingIds = new Set((messagesByThreadRef.current[threadId] || []).map((item) => item.id));
+          const normalizedUserMessage = result.userMessage
+            ? stampMissingReceivedAt([normalizeMessageForUser(result.userMessage, userID)], existingIds)[0]
+            : undefined;
+          const normalizedReplies = stampMissingReceivedAt(
+            normalizeMessagesForUser(result.replies || [], userID),
+            existingIds,
+            Date.now() + 1
+          );
 
           setMessagesByThread((prev) => {
             const history = prev[threadId] || [];
             const next = [...history];
-            if (result.userMessage && !next.some((item) => item.id === result.userMessage?.id)) {
-              next.push(result.userMessage);
+            if (normalizedUserMessage && !next.some((item) => item.id === normalizedUserMessage.id)) {
+              next.push(normalizedUserMessage);
             }
-            for (const reply of result.replies || []) {
+            for (const reply of normalizedReplies) {
               if (!next.some((item) => item.id === reply.id)) {
                 next.push(reply);
               }
@@ -2220,18 +2355,18 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
           });
 
           const cacheBatch: ConversationMessage[] = [];
-          if (result.userMessage) cacheBatch.push(result.userMessage);
-          if (Array.isArray(result.replies) && result.replies.length) {
-            cacheBatch.push(...result.replies);
+          if (normalizedUserMessage) cacheBatch.push(normalizedUserMessage);
+          if (normalizedReplies.length > 0) {
+            cacheBatch.push(...normalizedReplies);
           }
           void upsertThreadCache(userID, threadId, cacheBatch);
 
-          const latest = result.replies?.[result.replies.length - 1];
+          const latest = normalizedReplies[normalizedReplies.length - 1];
           if (latest) {
             setChatThreads((prev) => updateThreadPreview(prev, threadId, previewMessage(latest)));
           }
 
-          return result.replies || [];
+          return normalizedReplies;
         } catch (err) {
           // Do not swallow errors: the chat screen needs to surface failures (e.g. rate limits)
           // instead of silently clearing the input and showing nothing.

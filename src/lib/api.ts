@@ -1065,7 +1065,8 @@ export function mapATMessageToConversation(
   const isMe = isUserRole && Boolean(currentUserId);
   const messageType = (row.message_type || "text").trim() || "text";
   const content = row.content || "";
-  const createdAt = row.created_at || row.updated_at || "";
+  const createdAt = normalizeDateTime(row.created_at);
+  const updatedAt = normalizeDateTime(row.updated_at);
   const senderName = isUserRole ? "Me" : role === "assistant" ? "Assistant" : "System";
   const senderType = isUserRole ? "human" : role === "assistant" ? "agent" : "system";
   return {
@@ -1079,7 +1080,10 @@ export function mapATMessageToConversation(
     content,
     type: messageType,
     isMe,
-    time: createdAt,
+    time: createdAt || updatedAt,
+    createdAt: createdAt || undefined,
+    updatedAt: updatedAt || undefined,
+    receivedAt: createdAt || updatedAt || undefined,
   };
 }
 

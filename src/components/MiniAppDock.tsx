@@ -205,6 +205,7 @@ export function MiniAppDock() {
   );
 
   const latestGenerated = useMemo(() => generated, [generated]);
+  const shouldCenterQuickRow = PRESET_ACTIONS.length + installedCustomApps.length + 1 <= 4;
 
   const openGenerator = (seedPrompt?: string) => {
     setPrompt(seedPrompt ?? prompt);
@@ -261,6 +262,62 @@ export function MiniAppDock() {
     );
   };
 
+  const renderQuickItems = () => (
+    <>
+      {PRESET_ACTIONS.map((action) => {
+        const installed = installedByPreset[action.id];
+        const isPending = pendingPreset === action.id;
+        return (
+          <Pressable
+            key={action.id}
+            style={styles.quickItem}
+            testID={`miniapp-preset-card-${action.id}`}
+            onPress={() => handlePresetPress(action.id)}
+          >
+            <View style={[styles.quickIcon, { backgroundColor: `${action.color}2A`, borderColor: `${action.color}55` }]}>
+              <Ionicons name={action.icon} size={16} color={action.color} />
+            </View>
+            <Text style={styles.quickLabel}>{actionLabel(action, language)}</Text>
+            <Text style={styles.quickState} testID={`miniapp-preset-state-${action.id}`}>
+              {isPending
+                ? tr("安装中...", "Installing...")
+                : installed
+                ? tr("打开", "Open")
+                : tr("去安装", "Install")}
+            </Text>
+          </Pressable>
+        );
+      })}
+
+      {installedCustomApps.map((app) => (
+        <Pressable
+          key={app.id}
+          style={styles.quickItem}
+          testID={`miniapp-installed-card-${app.id}`}
+          onPress={() => router.push(`/miniapp/${app.id}`)}
+        >
+          <View style={[styles.quickIcon, styles.quickIconCustom]}>
+            <Ionicons name="apps-outline" size={16} color="#38bdf8" />
+          </View>
+          <Text style={styles.quickLabel} numberOfLines={1}>{app.name}</Text>
+          <Text style={styles.quickState}>{tr("打开", "Open")}</Text>
+        </Pressable>
+      ))}
+
+      <Pressable
+        style={styles.quickItem}
+        testID="miniapp-tasks-entry"
+        onPress={() => router.push("/tasks")}
+      >
+        <View style={[styles.quickIcon, styles.quickIconTasks]}>
+          <Ionicons name="checkmark-done-outline" size={16} color="#22c55e" />
+        </View>
+        <Text style={styles.quickLabel}>{tr("任务", "Tasks")}</Text>
+        <Text style={styles.quickState}>{tr("打开", "Open")}</Text>
+      </Pressable>
+    </>
+  );
+
   return (
     <>
       <View style={styles.dockCard} testID="miniapp-dock">
@@ -287,59 +344,18 @@ export function MiniAppDock() {
         {!collapsed ? (
           <View style={styles.quickSection}>
             <Text style={styles.quickHeading}>{tr("默认应用", "Default Apps")}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickRow}>
-              {PRESET_ACTIONS.map((action) => {
-                const installed = installedByPreset[action.id];
-                const isPending = pendingPreset === action.id;
-                return (
-                  <Pressable
-                    key={action.id}
-                    style={styles.quickItem}
-                    testID={`miniapp-preset-card-${action.id}`}
-                    onPress={() => handlePresetPress(action.id)}
-                  >
-                    <View style={[styles.quickIcon, { backgroundColor: `${action.color}2A`, borderColor: `${action.color}55` }]}>
-                      <Ionicons name={action.icon} size={16} color={action.color} />
-                    </View>
-                    <Text style={styles.quickLabel}>{actionLabel(action, language)}</Text>
-                    <Text style={styles.quickState} testID={`miniapp-preset-state-${action.id}`}>
-                      {isPending
-                        ? tr("安装中...", "Installing...")
-                        : installed
-                        ? tr("打开", "Open")
-                        : tr("去安装", "Install")}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-
-              {installedCustomApps.map((app) => (
-                <Pressable
-                  key={app.id}
-                  style={styles.quickItem}
-                  testID={`miniapp-installed-card-${app.id}`}
-                  onPress={() => router.push(`/miniapp/${app.id}`)}
-                >
-                  <View style={[styles.quickIcon, styles.quickIconCustom]}>
-                    <Ionicons name="apps-outline" size={16} color="#38bdf8" />
-                  </View>
-                  <Text style={styles.quickLabel} numberOfLines={1}>{app.name}</Text>
-                  <Text style={styles.quickState}>{tr("打开", "Open")}</Text>
-                </Pressable>
-              ))}
-
-              <Pressable
-                style={styles.quickItem}
-                testID="miniapp-tasks-entry"
-                onPress={() => router.push("/tasks")}
+            {shouldCenterQuickRow ? (
+              <View style={[styles.quickRow, styles.quickRowCentered]}>{renderQuickItems()}</View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.quickScroller}
+                contentContainerStyle={styles.quickRow}
               >
-                <View style={[styles.quickIcon, styles.quickIconTasks]}>
-                  <Ionicons name="checkmark-done-outline" size={16} color="#22c55e" />
-                </View>
-                <Text style={styles.quickLabel}>{tr("任务", "Tasks")}</Text>
-                <Text style={styles.quickState}>{tr("打开", "Open")}</Text>
-              </Pressable>
-            </ScrollView>
+                {renderQuickItems()}
+              </ScrollView>
+            )}
           </View>
         ) : null}
 
@@ -497,22 +513,28 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    paddingHorizontal: 12,
-    flexDirection: "row",
+    paddingLeft: 44,
+    paddingRight: 52,
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    position: "relative",
   },
   centerText: {
+    flex: 1,
     gap: 2,
+    alignItems: "center",
+    justifyContent: "center",
   },
   centerTitle: {
     color: "#e2e8f0",
     fontSize: 14,
     fontWeight: "900",
+    textAlign: "center",
   },
   centerSub: {
     color: "rgba(148,163,184,0.95)",
     fontSize: 11,
+    textAlign: "center",
   },
   centerArrow: {
     width: 28,
@@ -523,6 +545,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
     justifyContent: "center",
+    position: "absolute",
+    right: 8,
+    top: 8,
   },
   quickSection: {
     gap: 6,
@@ -532,11 +557,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 1,
+    textAlign: "center",
+    alignSelf: "center",
+  },
+  quickScroller: {
+    width: "100%",
   },
   quickRow: {
     flexDirection: "row",
     gap: 6,
     paddingHorizontal: 2,
+  },
+  quickRowCentered: {
+    width: "100%",
+    justifyContent: "space-evenly",
+    paddingHorizontal: 8,
   },
   quickItem: {
     width: 72,

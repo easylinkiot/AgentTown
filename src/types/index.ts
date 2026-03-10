@@ -70,6 +70,9 @@ export interface ConversationMessage {
   type: ConversationType | string;
   isMe: boolean;
   time?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  receivedAt?: string;
   voiceDuration?: string;
   replyContext?: string;
   imageUri?: string;

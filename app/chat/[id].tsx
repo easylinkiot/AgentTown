@@ -12,8 +12,8 @@ import {
   Dimensions,
   Easing,
   FlatList,
-  GestureResponderEvent,
   Image,
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -48,8 +48,9 @@ import {
   buildTaskItemFromCandidate,
 } from "@/src/features/chat/ask-ai-helpers";
 import {
-  formatConversationDisplayTime,
-  parseConversationTimestamp,
+  formatConversationMessageDisplayTime,
+  normalizeConversationMessageTimestamps,
+  resolveConversationSortTimestamp,
   sortConversationMessagesChronologically,
 } from "@/src/features/chat/chat-helpers";
 import {
@@ -69,7 +70,6 @@ import {
 } from "@/src/features/chat/mention-helpers";
 import {
   applyMentionSelection,
-  buildMentionPickerItems,
   filterMentionPickerItems,
   type MentionPickerItem,
   shouldOpenMentionPicker,
@@ -185,6 +185,8 @@ const MEDIA_SHEET_DRAG_CLOSE_DISTANCE = 120;
 const MEDIA_GRID_MIN_ITEM_SIZE = 80;
 const MEDIA_GRID_GAP = 8;
 const AUTO_TRANSLATE_BATCH_SIZE = 24;
+const CHAT_COMPOSER_MIN_HEIGHT = 72;
+const CHAT_COMPOSER_MAX_HEIGHT = 144;
 const EMPTY_MESSAGES: ConversationMessage[] = [];
 const PLUS_PANEL_ITEMS: PlusPanelItem[] = [
   { key: "image", icon: "image-outline", zh: "图片", en: "Image" },
@@ -301,22 +303,23 @@ function toGiftedMessage(
   currentUserId: string,
   fallbackTime: number
 ): GiftedMessage {
-  const senderID = (message.senderId || "").trim();
+  const normalizedMessage = normalizeConversationMessageTimestamps(message);
+  const senderID = (normalizedMessage.senderId || "").trim();
   const isMe = senderID !== "" && currentUserId ? senderID === currentUserId : Boolean(message.isMe);
-  const parsedTime = parseConversationTimestamp(message.time || "");
+  const parsedTime = resolveConversationSortTimestamp(normalizedMessage);
   const createdAt = typeof parsedTime === "number" ? new Date(parsedTime) : new Date(fallbackTime);
 
   return {
-    _id: message.id || `${fallbackTime}`,
-    text: message.content || "",
+    _id: normalizedMessage.id || `${fallbackTime}`,
+    text: normalizedMessage.content || "",
     createdAt,
     user: {
-      _id: isMe ? currentUserId || "me" : message.senderId || message.senderName || "other",
-      name: message.senderName,
-      avatar: message.senderAvatar,
+      _id: isMe ? currentUserId || "me" : normalizedMessage.senderId || normalizedMessage.senderName || "other",
+      name: normalizedMessage.senderName,
+      avatar: normalizedMessage.senderAvatar,
     },
-    system: message.type === "system",
-    raw: message,
+    system: normalizedMessage.type === "system",
+    raw: normalizedMessage,
   };
 }
 
@@ -338,16 +341,18 @@ function isLikelySameMessage(a: GiftedMessage, b: GiftedMessage) {
 }
 
 function compareGiftedMessagesDesc(a: GiftedMessage, b: GiftedMessage) {
+  const at = resolveConversationSortTimestamp(a.raw);
+  const bt = resolveConversationSortTimestamp(b.raw);
+  if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) {
+    return (bt as number) - (at as number);
+  }
+  if (Number.isFinite(bt) && !Number.isFinite(at)) return 1;
+  if (Number.isFinite(at) && !Number.isFinite(bt)) return -1;
+
   const aSeq = typeof a.raw?.seqNo === "number" ? a.raw.seqNo : null;
   const bSeq = typeof b.raw?.seqNo === "number" ? b.raw.seqNo : null;
   if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
     return bSeq - aSeq;
-  }
-
-  const at = new Date(a.createdAt).getTime();
-  const bt = new Date(b.createdAt).getTime();
-  if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) {
-    return bt - at;
   }
 
   return String(b._id).localeCompare(String(a._id));
@@ -511,7 +516,6 @@ export default function ChatDetailScreen() {
   const isWideDesktopWeb = Platform.OS === "web" && windowWidth >= 1280;
   const { user } = useAuth();
   const isDraggingRef = useRef(false);
-  const bubbleHeightsRef = useRef<Record<string, number>>({});
   const params = useLocalSearchParams<{
     id: string;
     name?: string;
@@ -660,53 +664,87 @@ export default function ChatDetailScreen() {
   );
 
   const mentionCandidates = useMemo(() => {
-    if (!thread.isGroup) return [] as MentionCandidate[];
-    const out: MentionCandidate[] = [
-      {
+    const out: MentionCandidate[] = [];
+    if (thread.isGroup) {
+      out.push({
         key: "mention-all",
         kind: "all",
         token: "All",
         label: "@All",
         desc: tr("通知所有人，并触发群内 NPC 回复", "Notify everyone and trigger group NPC replies"),
-      },
-      {
-        key: "mention-mybot",
-        kind: "mybot",
-        token: botConfig.name?.trim() || "MyBot",
-        label: `@${botConfig.name?.trim() || "MyBot"}`,
-        desc: tr("仅自己可见，触发 MyBot 私有建议", "Private to you. Trigger a private MyBot suggestion."),
-        avatar: thread.avatar || botConfig.avatar,
-      },
-    ];
-    const seenTokens = new Set(out.map((item) => item.token.toLowerCase()));
-    for (const member of members) {
-      if (member.memberType === "human" && currentUserId && (member.friendId || "").trim() === currentUserId) continue;
-      const baseLabel = getMemberDisplayName(member).trim() || member.name?.trim() || tr("未命名成员", "Unnamed member");
-      let token = baseLabel;
-      let suffix = 2;
-      while (seenTokens.has(token.toLowerCase())) {
-        token = `${baseLabel} ${suffix}`;
-        suffix += 1;
-      }
-      seenTokens.add(token.toLowerCase());
-      out.push({
-        key: `mention-${member.id}`,
-        kind: "member",
-        token,
-        label: `@${token}`,
-        desc:
-          member.memberType === "role"
-            ? tr("虚拟角色", "NPC")
-            : member.memberType === "agent"
-              ? tr("机器人", "Bot")
-              : tr("群成员", "Member"),
-        memberId: member.id,
-        memberType: member.memberType,
-        avatar: member.avatar,
       });
     }
+
+    const myBotToken = botConfig.name?.trim() || "MyBot";
+    out.push({
+      key: "mention-mybot",
+      kind: "mybot",
+      token: myBotToken,
+      label: `@${myBotToken}`,
+      desc: tr("仅自己可见，触发 MyBot 私有建议", "Private to you. Trigger a private MyBot suggestion."),
+      avatar: thread.avatar || botConfig.avatar,
+    });
+
+    const seenTokens = new Set(out.map((item) => item.token.toLowerCase()));
+    if (thread.isGroup) {
+      for (const member of members) {
+        if (member.memberType === "human" && currentUserId && (member.friendId || "").trim() === currentUserId) continue;
+        const baseLabel = getMemberDisplayName(member).trim() || member.name?.trim() || tr("未命名成员", "Unnamed member");
+        let token = baseLabel;
+        let suffix = 2;
+        while (seenTokens.has(token.toLowerCase())) {
+          token = `${baseLabel} ${suffix}`;
+          suffix += 1;
+        }
+        seenTokens.add(token.toLowerCase());
+        out.push({
+          key: `mention-${member.id}`,
+          kind: "member",
+          token,
+          label: `@${token}`,
+          desc:
+            member.memberType === "role"
+              ? tr("虚拟角色", "NPC")
+              : member.memberType === "agent"
+                ? tr("机器人", "Bot")
+                : tr("群成员", "Member"),
+          memberId: member.id,
+          memberType: member.memberType,
+          avatar: member.avatar,
+        });
+      }
+    } else {
+      const baseLabel =
+        resolveFriendDisplayName(linkedFriend, thread.name || tr("对话对象", "Chat partner")).trim() ||
+        linkedFriend?.name?.trim() ||
+        tr("对话对象", "Chat partner");
+      if (!seenTokens.has(baseLabel.toLowerCase())) {
+        out.push({
+          key: "mention-direct-peer",
+          kind: "member",
+          token: baseLabel,
+          label: `@${baseLabel}`,
+          desc: tr("当前对话对象", "Current chat partner"),
+          memberType: "human",
+          avatar: linkedFriend?.avatar || thread.avatar,
+        });
+      }
+    }
+
     return out;
-  }, [botConfig.avatar, botConfig.name, currentUserId, getMemberDisplayName, members, thread.avatar, thread.isGroup, tr]);
+  }, [
+    botConfig.avatar,
+    botConfig.name,
+    currentUserId,
+    getMemberDisplayName,
+    linkedFriend,
+    members,
+    resolveFriendDisplayName,
+    thread.avatar,
+    thread.isGroup,
+    thread.name,
+    tr,
+  ]);
 
   const isSelfThreadMember = useCallback(
     (member: ThreadMember) => {
@@ -1290,6 +1328,7 @@ export default function ChatDetailScreen() {
     setMediaSending(true);
 
     const localEntries = assets.map((asset, index) => {
+      const nowIso = new Date().toISOString();
       const localId = `local_media_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`;
       const inferredName = inferUploadFilename(asset, index);
       const isVideo = asset.type === "video";
@@ -1307,6 +1346,9 @@ export default function ChatDetailScreen() {
         imageName: isVideo ? undefined : inferredName,
         isMe: true,
         time: tr("刚刚", "Now"),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        receivedAt: nowIso,
       };
       return { localId, asset, localMessage };
     });
@@ -1740,14 +1782,15 @@ export default function ChatDetailScreen() {
   const [hasUserScrolled, setHasUserScrolled] = useState(false);
 
   const activeMention = useMemo(() => extractActiveMention(input), [input]);
+  const activeMentionKey = activeMention ? `${activeMention.start}:${activeMention.query}` : "";
   const filteredMentionCandidates = useMemo(() => {
-    if (!thread.isGroup || !activeMention) return [] as MentionCandidate[];
+    if (!activeMention) return [] as MentionCandidate[];
     const keyword = activeMention.query;
     if (!keyword) return mentionCandidates;
     return mentionCandidates.filter((candidate) =>
       candidate.token.toLowerCase().includes(keyword) || candidate.desc.toLowerCase().includes(keyword)
     );
-  }, [activeMention, mentionCandidates, thread.isGroup]);
+  }, [activeMention, mentionCandidates]);
 
   useEffect(() => {
     setHasMore(true);
@@ -1859,12 +1902,6 @@ export default function ChatDetailScreen() {
 
   const [actionModal, setActionModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<ConversationMessage | null>(null);
-  const [actionAnchor, setActionAnchor] = useState<{
-    yTop: number;
-    yBottom: number;
-    align: "left" | "right";
-  } | null>(null);
-  const [aiCardHeight, setAiCardHeight] = useState(164);
   const [askAI, setAskAI] = useState("");
   const [askAICandidates, setAskAICandidates] = useState<AssistCandidate[]>([]);
   const [askAISelectedIndex, setAskAISelectedIndex] = useState(0);
@@ -1891,15 +1928,10 @@ export default function ChatDetailScreen() {
   const [myBotPanel, setMyBotPanel] = useState(false);
   const [memberNameListModal, setMemberNameListModal] = useState(false);
   const [mentionPickerVisible, setMentionPickerVisible] = useState(false);
-  const [mentionPoolFriends, setMentionPoolFriends] = useState<Friend[]>([]);
-  const [mentionPoolNpcs, setMentionPoolNpcs] = useState<NPC[]>([]);
-  const [mentionPickerLoading, setMentionPickerLoading] = useState(false);
-  const [mentionPickerError, setMentionPickerError] = useState<string | null>(null);
-  const [mentionPickerNonce, setMentionPickerNonce] = useState(0);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<MentionPickerItem[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
-  const mentionPickerTriggerArmedRef = useRef(true);
+  const suppressedMentionKeyRef = useRef<string | null>(null);
   const [myBotQuestion, setMyBotQuestion] = useState("");
   const [myBotAnswer, setMyBotAnswer] = useState<string | null>(null);
   const [myBotError, setMyBotError] = useState<string | null>(null);
@@ -1910,6 +1942,22 @@ export default function ChatDetailScreen() {
   const [myBotTaskBusy, setMyBotTaskBusy] = useState(false);
   const [myBotTaskSaveBusy, setMyBotTaskSaveBusy] = useState(false);
   const [imageViewerState, setImageViewerState] = useState<{ uri: string; label?: string } | null>(null);
+  const actionDialogStyle = useMemo(
+    () => ({
+      width: Math.min(560, Math.max(320, windowWidth - 28)),
+      minHeight: Math.min(Math.max(360, Math.round(windowHeight * 0.66)), Math.max(420, Math.round(windowHeight * 0.82))),
+      maxHeight: Math.max(420, Math.round(windowHeight * 0.82)),
+    }),
+    [windowHeight, windowWidth]
+  );
+  const myBotDialogStyle = useMemo(
+    () => ({
+      width: Math.min(620, Math.max(320, windowWidth - 28)),
+      minHeight: Math.min(Math.max(420, Math.round(windowHeight * 0.68)), Math.max(500, Math.round(windowHeight * 0.86))),
+      maxHeight: Math.max(500, Math.round(windowHeight * 0.86)),
+    }),
+    [windowHeight, windowWidth]
+  );
 
   const [memberModal, setMemberModal] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
@@ -1962,10 +2010,6 @@ export default function ChatDetailScreen() {
       mounted = false;
     };
   }, [chatId, listMembers, refreshThreadMessages, shouldRouteToAiChat, thread.isGroup]);
-
-  useEffect(() => {
-    setMentionPickerVisible(Boolean(thread.isGroup && activeMention && filteredMentionCandidates.length > 0));
-  }, [activeMention, filteredMentionCandidates.length, thread.isGroup]);
 
   const latestMessageSeqNo = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -2021,17 +2065,26 @@ export default function ChatDetailScreen() {
   }, [resetMentionPickerState]);
 
   useEffect(() => {
-    if (!shouldOpenMentionPicker(input)) {
-      mentionPickerTriggerArmedRef.current = true;
+    if (!shouldOpenMentionPicker(input) || filteredMentionCandidates.length === 0) {
+      suppressedMentionKeyRef.current = null;
       if (mentionPickerVisible) {
         closeMentionPicker();
       }
       return;
     }
 
-    if (!mentionPickerTriggerArmedRef.current || mentionPickerVisible) return;
+    if (suppressedMentionKeyRef.current && suppressedMentionKeyRef.current !== activeMentionKey) {
+      suppressedMentionKeyRef.current = null;
+    }
+    if (suppressedMentionKeyRef.current === activeMentionKey) {
+      if (mentionPickerVisible) {
+        closeMentionPicker();
+      }
+      return;
+    }
+    if (mentionPickerVisible) return;
     setMentionPickerVisible(true);
-  }, [closeMentionPicker, input, mentionPickerVisible]);
+  }, [activeMentionKey, closeMentionPicker, filteredMentionCandidates.length, input, mentionPickerVisible]);
 
   useEffect(() => {
     if (!memberModal) return;
@@ -2071,34 +2124,23 @@ export default function ChatDetailScreen() {
 
   useEffect(() => {
     if (!mentionPickerVisible) return;
-
-    let alive = true;
-    setMentionPickerLoading(true);
-    setMentionPickerError(null);
-
-    Promise.all([listFriendsApi(), listNPCsApi()])
-      .then(([nextFriends, nextNpcs]) => {
-        if (!alive) return;
-        setMentionPoolFriends(Array.isArray(nextFriends) ? nextFriends : []);
-        setMentionPoolNpcs(Array.isArray(nextNpcs) ? nextNpcs : []);
-      })
-      .catch((err) => {
-        if (!alive) return;
-        setMentionPickerError(formatApiError(err));
-      })
-      .finally(() => {
-        if (!alive) return;
-        setMentionPickerLoading(false);
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [mentionPickerNonce, mentionPickerVisible]);
+    setSearchKeyword(activeMention?.query || "");
+  }, [activeMention?.query, mentionPickerVisible]);
 
   const mentionItems = useMemo(
-    () => buildMentionPickerItems(mentionPoolFriends, mentionPoolNpcs),
-    [mentionPoolFriends, mentionPoolNpcs]
+    () =>
+      filteredMentionCandidates.map((candidate) => ({
+        key: candidate.key,
+        id: candidate.memberId || candidate.key,
+        name: candidate.token,
+        avatar: candidate.avatar,
+        type:
+          candidate.kind === "mybot" || candidate.memberType === "role" || candidate.memberType === "agent"
+            ? ("npc" as const)
+            : ("user" as const),
+        subtitle: candidate.desc,
+      })),
+    [filteredMentionCandidates]
   );
   const filteredMentionItems = useMemo(
     () => filterMentionPickerItems(mentionItems, searchKeyword),
@@ -2456,6 +2498,29 @@ export default function ChatDetailScreen() {
     setMyBotPanel(false);
   }, []);
 
+  const openMyBotPanel = useCallback(
+    (options?: { question?: string; deferOpen?: boolean }) => {
+      const nextQuestion = options?.question ?? "";
+      const open = () => {
+        setMyBotMode("advice");
+        setMyBotQuestion(nextQuestion);
+        setMyBotAnswer(null);
+        setMyBotError(null);
+        setMyBotTaskDrafts([]);
+        setMyBotTaskError(null);
+        setMyBotPanel(true);
+      };
+
+      Keyboard.dismiss();
+      if (options?.deferOpen) {
+        InteractionManager.runAfterInteractions(open);
+        return;
+      }
+      open();
+    },
+    []
+  );
+
   const openImageViewer = useCallback((uri?: string, label?: string) => {
     const safeUri = (uri || "").trim();
     if (!safeUri) return;
@@ -2570,6 +2635,7 @@ export default function ChatDetailScreen() {
     if (!content || submitting || !chatId) return;
 
     const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const nowIso = new Date().toISOString();
     const localMessage: ConversationMessage = {
       id: localId,
       threadId: chatId,
@@ -2581,6 +2647,9 @@ export default function ChatDetailScreen() {
       type: "text",
       isMe: true,
       time: tr("刚刚", "Now"),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      receivedAt: nowIso,
     };
     setPendingMessages((prev) => GiftedChat.append(prev, [toGiftedMessage(localMessage, currentUserId, Date.now())]));
 
@@ -2605,10 +2674,7 @@ export default function ChatDetailScreen() {
             ok = true;
             clearLocalPendingOnSuccess = true;
             if (mentionState.mentionedMyBot) {
-              setMyBotQuestion(content);
-              setMyBotAnswer(null);
-              setMyBotError(null);
-              setMyBotPanel(true);
+              openMyBotPanel({ question: content });
               void requestPrivateMyBotReply(content);
             }
           }
@@ -2621,16 +2687,14 @@ export default function ChatDetailScreen() {
           ok = true;
           clearLocalPendingOnSuccess = true;
           if (mentionState.mentionedMyBot) {
-            setMyBotQuestion(content);
-            setMyBotAnswer(null);
-            setMyBotError(null);
-            setMyBotPanel(true);
+            openMyBotPanel({ question: content });
             void requestPrivateMyBotReply(content);
           }
         }
       } else if (isMyBotChatThreadId(chatId) || aiAgentMode) {
         let resolvedAgentSessionId = "";
         botLocalId = `local_bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const botNowIso = new Date().toISOString();
         const botMessage: ConversationMessage = {
           id: botLocalId,
           threadId: chatId,
@@ -2642,6 +2706,9 @@ export default function ChatDetailScreen() {
           type: "text",
           isMe: false,
           time: tr("刚刚", "Now"),
+          createdAt: botNowIso,
+          updatedAt: botNowIso,
+          receivedAt: botNowIso,
         };
         setPendingMessages((prev) => GiftedChat.append(prev, [toGiftedMessage(botMessage, currentUserId, Date.now())]));
 
@@ -2982,11 +3049,10 @@ export default function ChatDetailScreen() {
     setAskAIMoreMenuOpen(false);
     setIsStreaming(false);
     setIsAddingTasks(false);
-    setActionAnchor(null);
     setActionModal(true);
   };
 
-  const handleMessagePress = (message: ConversationMessage, ev?: GestureResponderEvent) => {
+  const handleMessagePress = (message: ConversationMessage) => {
     if (isDraggingRef.current) return;
     abortAskAIStream();
     setActionMessage(message);
@@ -2999,19 +3065,6 @@ export default function ChatDetailScreen() {
     setAskAIMoreMenuOpen(false);
     setIsStreaming(false);
     setIsAddingTasks(false);
-    if (ev?.nativeEvent) {
-      const h = bubbleHeightsRef.current[message.id] || 56;
-      const top = ev.nativeEvent.pageY - ev.nativeEvent.locationY;
-      const bottom = top + h;
-      const meFinal = isCurrentUserMessage(message, currentUserId);
-      setActionAnchor({
-        yTop: top,
-        yBottom: bottom,
-        align: meFinal ? "right" : "left",
-      });
-    } else {
-      setActionAnchor(null);
-    }
     setActionModal(true);
   };
 
@@ -3261,7 +3314,7 @@ export default function ChatDetailScreen() {
     if (current.toLowerCase().includes(mention.toLowerCase())) return;
     if (extractActiveMention(input)) {
       setInput(replaceActiveMention(input, safeName));
-      setMentionPickerVisible(false);
+      closeMentionPicker();
       return;
     }
     if (!current) {
@@ -3272,18 +3325,12 @@ export default function ChatDetailScreen() {
     setInput(`${input}${spacer}${mention} `);
   };
 
-  const handleSelectMentionCandidate = useCallback((candidate: MentionCandidate) => {
-    setInput((previous) => replaceActiveMention(previous, candidate.token));
-    setMentionPickerVisible(false);
-  }, []);
   const commitMentionItems = useCallback(
     (items: MentionPickerItem[]) => {
       if (items.length === 0) {
-        mentionPickerTriggerArmedRef.current = false;
         closeMentionPicker();
         return;
       }
-      mentionPickerTriggerArmedRef.current = false;
       setInput(applyMentionSelection(input, items));
       closeMentionPicker();
     },
@@ -3291,13 +3338,12 @@ export default function ChatDetailScreen() {
   );
 
   const handleMentionPickerClose = useCallback(() => {
-    mentionPickerTriggerArmedRef.current = false;
+    suppressedMentionKeyRef.current = activeMentionKey;
     closeMentionPicker();
-  }, [closeMentionPicker]);
+  }, [activeMentionKey, closeMentionPicker]);
 
   const handleMentionPickerSelect = useCallback(
     (item: MentionPickerItem) => {
-      setMentionPickerError(null);
       if (!isMultiSelectMode) {
         commitMentionItems([item]);
         return;
@@ -3425,7 +3471,7 @@ export default function ChatDetailScreen() {
         : translatedRawText;
       const hasTranslatedText = !streamText && translatedText !== "";
       const displayText = hasTranslatedText ? translatedText : sourceText;
-      const displayTime = formatConversationDisplayTime(raw.time || "");
+      const displayTime = formatConversationMessageDisplayTime(raw);
       const canToggleOriginal = hasTranslatedText && sourceText !== "" && sourceText !== displayText;
       const originalVisible = Boolean(showOriginalByMessageId[raw.id]);
       const ownAvatar = (user?.avatar || botConfig.avatar || "").trim();
@@ -3555,10 +3601,7 @@ export default function ChatDetailScreen() {
             </Pressable>
           ) : null}
           <Pressable
-            onLayout={(e) => {
-              bubbleHeightsRef.current[raw.id] = e.nativeEvent.layout.height;
-            }}
-            onPress={(e) => handleMessagePress(raw, e)}
+            onPress={() => handleMessagePress(raw)}
             onLongPress={() => handleLongPress(raw)}
             style={[
               styles.bubble,
@@ -3743,7 +3786,6 @@ export default function ChatDetailScreen() {
               },
               onBlur: (event) => {
                 upstreamOnBlur?.(event);
-                setMentionPickerVisible(false);
                 handleChatInputBlur();
               },
             }}
@@ -3776,27 +3818,6 @@ export default function ChatDetailScreen() {
   const renderChatInputToolbar = useCallback(
     (props: InputToolbarProps<IMessage>) => (
       <View style={styles.toolbarStack}>
-        {mentionPickerVisible ? (
-          <View style={styles.mentionPanel}>
-            <ScrollView keyboardShouldPersistTaps="handled" style={styles.mentionScroll}>
-              {filteredMentionCandidates.map((candidate) => (
-                <Pressable
-                  key={candidate.key}
-                  style={({ pressed }) => [styles.mentionItem, pressed && styles.mentionItemPressed]}
-                  onPress={() => handleSelectMentionCandidate(candidate)}
-                >
-                  <View style={styles.mentionItemBody}>
-                    <Text style={styles.mentionItemTitle}>{candidate.label}</Text>
-                    <Text style={styles.mentionItemDesc} numberOfLines={1}>
-                      {candidate.desc}
-                    </Text>
-                  </View>
-                  <Ionicons name="arrow-forward" size={14} color="rgba(148,163,184,0.9)" />
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        ) : null}
         <InputToolbar
           {...props}
           containerStyle={styles.toolbarContainer}
@@ -3807,7 +3828,7 @@ export default function ChatDetailScreen() {
         />
       </View>
     ),
-    [filteredMentionCandidates, handleSelectMentionCandidate, mentionPickerVisible, renderToolbarActions, renderToolbarComposer, renderToolbarSend]
+    [renderToolbarActions, renderToolbarComposer, renderToolbarSend]
   );
 
   if (shouldRouteToAiChat) return null;
@@ -3856,14 +3877,7 @@ export default function ChatDetailScreen() {
                     ]}
                     testID="chat-mybot-panel-button"
                     onPress={() => {
-                      Keyboard.dismiss();
-                      setMyBotMode("advice");
-                      setMyBotQuestion("");
-                      setMyBotAnswer(null);
-                      setMyBotError(null);
-                      setMyBotTaskDrafts([]);
-                      setMyBotTaskError(null);
-                      setMyBotPanel(true);
+                      openMyBotPanel({ deferOpen: true });
                     }}
                   >
                     <Ionicons name="sparkles-outline" size={16} color="rgba(191,219,254,0.95)" />
@@ -3973,9 +3987,9 @@ export default function ChatDetailScreen() {
                     : tr("Message", "Message")
                 }
                 renderInputToolbar={renderChatInputToolbar}
-                minInputToolbarHeight={56}
-                minComposerHeight={50}
-                maxComposerHeight={120}
+                minInputToolbarHeight={CHAT_COMPOSER_MIN_HEIGHT}
+                minComposerHeight={CHAT_COMPOSER_MIN_HEIGHT}
+                maxComposerHeight={CHAT_COMPOSER_MAX_HEIGHT}
                 isKeyboardInternallyHandled={false}
                 renderMessage={renderMessage}
                 renderSystemMessage={renderSystemMessage}
@@ -4150,48 +4164,22 @@ export default function ChatDetailScreen() {
 
         {/* Ask AI Modal 组件 */}
         <Modal visible={actionModal} transparent animationType="fade" onRequestClose={closeActionModal}>
-          <Pressable style={styles.actionOverlay} onPress={closeActionModal}>
+          <View style={styles.actionOverlay}>
+            <Pressable style={styles.modalBackdrop} onPress={closeActionModal} />
+            <KeyboardAvoidingView
+              style={styles.actionDialogWrap}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Math.max(insets.top, 8)}
+            >
             <AnimatedPressable
               ref={aiCardRef}
               style={[
                 styles.aiCard,
-                (() => {
-                  const { height: screenH } = Dimensions.get("screen");
-                  const { width: winW } = Dimensions.get("window");
-                  const width = Math.min(360, Math.max(240, winW - 28));
-                  const marginH = 14;
-                  const isIOS = Platform.OS === "ios";
-                  const centeredLeft = Math.max(marginH, (winW - width) / 2);
-
-                  const anchor = actionAnchor;
-                  const preferBelow = anchor ? anchor.yBottom + 10 : screenH - insets.bottom - 12 - aiCardHeight;
-                  const maxTop = screenH - Math.max(insets.bottom, 0) - 12 - aiCardHeight;
-                  let top = Math.min(preferBelow, maxTop);
-
-                  if (anchor && preferBelow > maxTop) {
-                    const above = anchor.yTop - 10 - aiCardHeight;
-                    const minTop = Math.max(insets.top, 0) + 12;
-                    if (above >= minTop) {
-                      top = above;
-                    }
-                  }
-
-                  const minTop = Math.max(insets.top, 0) + 12;
-                  if (top < minTop) top = minTop;
-
-                  return {
-                    position: "absolute" as const,
-                    top,
-                    width,
-                    left: isIOS ? centeredLeft : actionAnchor?.align === "left" ? marginH : undefined,
-                    right: isIOS ? undefined : actionAnchor?.align === "right" ? marginH : undefined,
-                  };
-                })(),
+                actionDialogStyle,
                 {
                   transform: [{ translateY: Animated.multiply(aiKeyboardShift, -1) }],
                 },
               ]}
-              onLayout={(e) => setAiCardHeight(e.nativeEvent.layout.height)}
               onPress={() => null}
             >
               <View style={styles.aiAskRow}>
@@ -4392,17 +4380,19 @@ export default function ChatDetailScreen() {
               ) : null}
 
             </AnimatedPressable>
-          </Pressable>
+            </KeyboardAvoidingView>
+          </View>
         </Modal>
 
         <Modal visible={myBotPanel} transparent animationType="fade" onRequestClose={closeMyBotPanel}>
-          <Pressable style={styles.modalOverlay} onPress={closeMyBotPanel}>
+          <View style={styles.modalOverlay}>
+            <Pressable style={styles.modalBackdrop} onPress={closeMyBotPanel} />
             <KeyboardAvoidingView
               style={styles.myBotAvoid}
               behavior={Platform.OS === "ios" ? "padding" : undefined}
               keyboardVerticalOffset={Math.max(insets.top, 8)}
             >
-            <Pressable testID="chat-mybot-panel" style={styles.myBotCard} onPress={Keyboard.dismiss}>
+            <Pressable testID="chat-mybot-panel" style={[styles.myBotCard, myBotDialogStyle]} onPress={() => null}>
               <View pointerEvents="none" style={styles.myBotDecorLayer}>
                 <View style={[styles.myBotOrb, styles.myBotOrbPrimary]} />
                 <View style={[styles.myBotOrb, styles.myBotOrbSecondary]} />
@@ -4687,7 +4677,7 @@ export default function ChatDetailScreen() {
               </ScrollView>
             </Pressable>
             </KeyboardAvoidingView>
-          </Pressable>
+          </View>
         </Modal>
 
         <Modal visible={Boolean(imageViewerState)} transparent animationType="fade" onRequestClose={closeImageViewer}>
@@ -4711,14 +4701,14 @@ export default function ChatDetailScreen() {
         <MentionPickerModal
           visible={mentionPickerVisible}
           items={filteredMentionItems}
-          loading={mentionPickerLoading}
-          error={mentionPickerError}
+          loading={false}
+          error={null}
           isMultiSelectMode={isMultiSelectMode}
           selectedItems={selectedItems}
           searchKeyword={searchKeyword}
           translate={tr}
           onClose={handleMentionPickerClose}
-          onRetry={() => setMentionPickerNonce((nonce) => nonce + 1)}
+          onRetry={() => undefined}
           onToggleMultiSelectMode={() => setIsMultiSelectMode(true)}
           onSelectItem={handleMentionPickerSelect}
           onDone={handleMentionPickerDone}
@@ -5771,26 +5761,26 @@ const styles = StyleSheet.create({
   },
   inputBox: {
     flex: 1,
-    minHeight: 50,
+    minHeight: CHAT_COMPOSER_MIN_HEIGHT,
     justifyContent: "center",
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     backgroundColor: "rgba(15,23,42,0.55)",
     paddingHorizontal: 14,
-    paddingVertical: 2,
+    paddingVertical: 6,
   },
   input: {
     color: "#e2e8f0",
     fontSize: 17,
     lineHeight: 24,
-    minHeight: 46,
-    paddingTop: 10,
-    paddingBottom: 12,
+    minHeight: CHAT_COMPOSER_MIN_HEIGHT - 12,
+    paddingTop: 12,
+    paddingBottom: 14,
     includeFontPadding: Platform.OS === "android",
     textAlignVertical: "top",
     margin: 0,
-    maxHeight: 120,
+    maxHeight: CHAT_COMPOSER_MAX_HEIGHT - 12,
   },
   sendBtn: {
     width: 40,
@@ -5820,6 +5810,18 @@ const styles = StyleSheet.create({
   actionOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  actionDialogWrap: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
   actionSheet: {
     borderRadius: 18,
@@ -5857,6 +5859,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.92)",
     padding: 12,
     gap: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.28,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
   },
   aiModeRow: {
     flexDirection: "row",
@@ -6072,14 +6078,11 @@ const styles = StyleSheet.create({
     maxHeight: "92%",
   },
   myBotCard: {
-    width: "92%",
-    maxWidth: 520,
     borderRadius: 24,
     borderWidth: 1,
     borderColor: "rgba(125,211,252,0.2)",
     backgroundColor: "rgba(4,8,20,0.94)",
     padding: 16,
-    maxHeight: "88%",
     overflow: "hidden",
     position: "relative",
     shadowColor: "#000000",

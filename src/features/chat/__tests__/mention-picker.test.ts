@@ -8,11 +8,15 @@ import {
 import type { Friend, NPC } from "@/src/types";
 
 describe("mention picker helpers", () => {
-  it("opens only when the first character is @", () => {
+  it("opens while an @ mention token is actively being typed", () => {
     expect(shouldOpenMentionPicker("@")).toBe(true);
     expect(shouldOpenMentionPicker("@hello")).toBe(true);
-    expect(shouldOpenMentionPicker(" @hello")).toBe(false);
-    expect(shouldOpenMentionPicker("hello @world")).toBe(false);
+    expect(shouldOpenMentionPicker("hello @world")).toBe(true);
+    expect(shouldOpenMentionPicker(" @hello")).toBe(true);
+    expect(shouldOpenMentionPicker("请找@小爱")).toBe(true);
+    expect(shouldOpenMentionPicker("@hello thanks")).toBe(false);
+    expect(shouldOpenMentionPicker("@2244661996 感谢您的请求")).toBe(false);
+    expect(shouldOpenMentionPicker("test@example.com")).toBe(false);
   });
 
   it("builds a merged user and npc list while excluding bot friends", () => {

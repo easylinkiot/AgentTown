@@ -149,6 +149,9 @@ describe("chat history api", () => {
       isMe: true,
       content: "hello",
       type: "text",
+      time: "2026-02-27T12:00:00.000Z",
+      createdAt: "2026-02-27T12:00:00.000Z",
+      receivedAt: "2026-02-27T12:00:00.000Z",
     });
   });
 });
