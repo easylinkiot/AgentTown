@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image as ExpoImage } from "expo-image";
+import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -29,7 +30,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import * as RNClipboardModule from "react-native/Libraries/Components/Clipboard/Clipboard";
 import {
   Composer,
   type ComposerProps,
@@ -195,14 +195,6 @@ const QUICK_ACTION_MENU_ESTIMATED_HEIGHT = 118;
 const QUICK_ACTION_MENU_MIN_WIDTH = 248;
 const QUICK_ACTION_MENU_MAX_WIDTH = 320;
 const QUICK_ACTION_POINTER_SIZE = 10;
-type ClipboardLike = {
-  setString(content: string): void;
-};
-const ClipboardCompat: ClipboardLike = (
-  (RNClipboardModule as unknown as { default?: ClipboardLike; Clipboard?: ClipboardLike }).default ??
-  (RNClipboardModule as unknown as { default?: ClipboardLike; Clipboard?: ClipboardLike }).Clipboard ??
-  (RNClipboardModule as unknown as ClipboardLike)
-);
 const EMPTY_MESSAGES: ConversationMessage[] = [];
 const PLUS_PANEL_ITEMS: PlusPanelItem[] = [
   { key: "image", icon: "image-outline", zh: "图片", en: "Image" },
@@ -3059,7 +3051,7 @@ export default function ChatDetailScreen() {
         );
         return;
       }
-      ClipboardCompat.setString(text);
+      void Clipboard.setStringAsync(text);
       Alert.alert(tr("已复制", "Copied"), tr("消息已复制到剪贴板。", "Message copied to clipboard."));
     },
     [tr]

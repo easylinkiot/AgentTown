@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as VideoThumbnails from "expo-video-thumbnails";
@@ -17,7 +18,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import * as RNClipboardModule from "react-native/Libraries/Components/Clipboard/Clipboard";
 import {
   Composer,
   type ComposerProps,
@@ -71,14 +71,6 @@ const KEYBOARD_CLEARANCE = 25;
 const KEYBOARD_CLEARANCE_IOS = 25;
 const CHAT_COMPOSER_MIN_HEIGHT = 72;
 const CHAT_COMPOSER_MAX_HEIGHT = 144;
-type ClipboardLike = {
-  setString(content: string): void;
-};
-const ClipboardCompat: ClipboardLike = (
-  (RNClipboardModule as unknown as { default?: ClipboardLike; Clipboard?: ClipboardLike }).default ??
-  (RNClipboardModule as unknown as { default?: ClipboardLike; Clipboard?: ClipboardLike }).Clipboard ??
-  (RNClipboardModule as unknown as ClipboardLike)
-);
 
 async function toMediaPickerAsset(
   asset: ImagePicker.ImagePickerAsset,
@@ -319,7 +311,7 @@ export default function NPCChatScreen() {
         );
         return;
       }
-      ClipboardCompat.setString(text);
+      void Clipboard.setStringAsync(text);
       Alert.alert(tr("已复制", "Copied"), tr("消息已复制到剪贴板。", "Message copied to clipboard."));
     },
     [tr]
