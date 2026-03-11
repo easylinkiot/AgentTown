@@ -1220,7 +1220,12 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     if (latest.length === 0) {
       try {
         const rows = await listChatSessionMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
-        latest = rows.map((row) => mapATMessageToConversation(row, userID, threadId));
+        if (Array.isArray(rows) && rows.length > 0) {
+          latest = rows.map((row) => mapATMessageToConversation(row, userID, threadId));
+        } else {
+          const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
+          latest = normalizeMessagesForUser(Array.isArray(latestRaw) ? latestRaw : [], userID);
+        }
       } catch {
         const latestRaw = await listThreadMessagesApi(threadId, { limit: MESSAGE_PAGE_SIZE });
         latest = normalizeMessagesForUser(Array.isArray(latestRaw) ? latestRaw : [], userID);
