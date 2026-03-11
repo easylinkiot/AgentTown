@@ -12,6 +12,7 @@ import {
   Dimensions,
   Easing,
   FlatList,
+  type GestureResponderEvent,
   Image,
   InteractionManager,
   Keyboard,
@@ -27,6 +28,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import * as RNClipboardModule from "react-native/Libraries/Components/Clipboard/Clipboard";
 import {
   Composer,
   type ComposerProps,
@@ -187,6 +189,19 @@ const MEDIA_GRID_GAP = 8;
 const AUTO_TRANSLATE_BATCH_SIZE = 24;
 const CHAT_COMPOSER_MIN_HEIGHT = 72;
 const CHAT_COMPOSER_MAX_HEIGHT = 144;
+const LIVE_MESSAGE_REFRESH_INTERVAL_MS = 2000;
+const QUICK_ACTION_MENU_ESTIMATED_HEIGHT = 118;
+const QUICK_ACTION_MENU_MIN_WIDTH = 248;
+const QUICK_ACTION_MENU_MAX_WIDTH = 320;
+const QUICK_ACTION_POINTER_SIZE = 10;
+type ClipboardLike = {
+  setString(content: string): void;
+};
+const ClipboardCompat: ClipboardLike = (
+  (RNClipboardModule as unknown as { default?: ClipboardLike; Clipboard?: ClipboardLike }).default ??
+  (RNClipboardModule as unknown as { default?: ClipboardLike; Clipboard?: ClipboardLike }).Clipboard ??
+  (RNClipboardModule as unknown as ClipboardLike)
+);
 const EMPTY_MESSAGES: ConversationMessage[] = [];
 const PLUS_PANEL_ITEMS: PlusPanelItem[] = [
   { key: "image", icon: "image-outline", zh: "图片", en: "Image" },
@@ -212,7 +227,7 @@ function askAISkillFallbackLabel(action: AssistSkillAction, tr: (zh: string, en:
     case "translate":
       return tr("翻译", "Translate");
     case "follow_up":
-      return tr("跟进", "Follow-up");
+      return tr("总结", "Summary");
     default:
       return action;
   }
@@ -516,6 +531,7 @@ export default function ChatDetailScreen() {
   const isWideDesktopWeb = Platform.OS === "web" && windowWidth >= 1280;
   const { user } = useAuth();
   const isDraggingRef = useRef(false);
+  const liveRefreshBusyRef = useRef(false);
   const params = useLocalSearchParams<{
     id: string;
     name?: string;
@@ -563,8 +579,11 @@ export default function ChatDetailScreen() {
   const tr = (zh: string, en: string) => tx(language, zh, en);
   const threadDisplayLanguage: ThreadDisplayLanguage = threadLanguageById[chatId] || language || "en";
   const [translationMode, setTranslationMode] = useState<TranslationMode>("off");
-  const [translationControlsVisible, setTranslationControlsVisible] = useState(false);
   const translationEnabled = translationMode !== "off";
+  const translationModeLabel = useMemo(
+    () => THREAD_LANGUAGE_OPTIONS.find((item) => item.key === translationMode)?.label || "Off",
+    [translationMode]
+  );
 
   const openEntityConfig = useCallback(
     (entity: { entityType: "human" | "bot" | "npc"; entityId?: string; name?: string; avatar?: string }) => {
@@ -588,8 +607,17 @@ export default function ChatDetailScreen() {
 
   useEffect(() => {
     setTranslationMode("off");
-    setTranslationControlsVisible(false);
   }, [chatId]);
+
+  const cycleTranslationMode = useCallback(() => {
+    const modeOrder = THREAD_LANGUAGE_OPTIONS.map((item) => item.key);
+    const currentIndex = Math.max(0, modeOrder.indexOf(translationMode));
+    const nextMode = modeOrder[(currentIndex + 1) % modeOrder.length] || "off";
+    setTranslationMode(nextMode);
+    if (nextMode === "off") return;
+    setTranslationRefreshToken((prev) => prev + 1);
+    void updateThreadLanguage(chatId, nextMode);
+  }, [chatId, translationMode, updateThreadLanguage]);
 
   useEffect(() => {
     if (!shouldRouteToAiChat || !chatId) return;
@@ -1902,6 +1930,13 @@ export default function ChatDetailScreen() {
 
   const [actionModal, setActionModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<ConversationMessage | null>(null);
+  const [quickActionMenuVisible, setQuickActionMenuVisible] = useState(false);
+  const [quickActionMessage, setQuickActionMessage] = useState<ConversationMessage | null>(null);
+  const [quickActionAnchor, setQuickActionAnchor] = useState({ x: 0, y: 0 });
+  const [selectedActionMessageId, setSelectedActionMessageId] = useState("");
+  const [pendingQuickSkillRun, setPendingQuickSkillRun] = useState<{ messageId: string; skillId: string } | null>(
+    null
+  );
   const [askAI, setAskAI] = useState("");
   const [askAICandidates, setAskAICandidates] = useState<AssistCandidate[]>([]);
   const [askAISelectedIndex, setAskAISelectedIndex] = useState(0);
@@ -1922,6 +1957,7 @@ export default function ChatDetailScreen() {
   const askAIAbortRef = useRef<AbortController | null>(null);
   const askAIRequestSeqRef = useRef(0);
   const askAIMountedRef = useRef(true);
+  const skipNextMessagePressRef = useRef(false);
   const autoTranslateAbortRef = useRef<AbortController | null>(null);
   const autoTranslateRequestSeqRef = useRef(0);
   const autoTranslatePendingRef = useRef<Set<string>>(new Set());
@@ -1950,6 +1986,26 @@ export default function ChatDetailScreen() {
     }),
     [windowHeight, windowWidth]
   );
+  const quickActionMenuLayout = useMemo(() => {
+    const width = Math.min(QUICK_ACTION_MENU_MAX_WIDTH, Math.max(QUICK_ACTION_MENU_MIN_WIDTH, windowWidth - 24));
+    const anchorX = Number.isFinite(quickActionAnchor.x) ? quickActionAnchor.x : windowWidth / 2;
+    const anchorY = Number.isFinite(quickActionAnchor.y) ? quickActionAnchor.y : windowHeight / 2;
+    const left = Math.min(windowWidth - width - 12, Math.max(12, anchorX - width / 2));
+    const showAbove = anchorY > windowHeight * 0.52;
+    const top = showAbove
+      ? Math.max(insets.top + 8, anchorY - QUICK_ACTION_MENU_ESTIMATED_HEIGHT)
+      : Math.min(windowHeight - QUICK_ACTION_MENU_ESTIMATED_HEIGHT - insets.bottom - 8, anchorY + 10);
+    const pointerLeft = Math.max(18, Math.min(width - 18, anchorX - left));
+    return {
+      menuStyle: {
+        width,
+        left,
+        top,
+      },
+      pointerLeft,
+      showAbove,
+    };
+  }, [insets.bottom, insets.top, quickActionAnchor.x, quickActionAnchor.y, windowHeight, windowWidth]);
   const myBotDialogStyle = useMemo(
     () => ({
       width: Math.min(620, Math.max(320, windowWidth - 28)),
@@ -1957,6 +2013,14 @@ export default function ChatDetailScreen() {
       maxHeight: Math.max(500, Math.round(windowHeight * 0.86)),
     }),
     [windowHeight, windowWidth]
+  );
+  const chatComposerMaxHeight = useMemo(
+    () => Math.max(CHAT_COMPOSER_MIN_HEIGHT, Math.floor(windowHeight * 0.5)),
+    [windowHeight]
+  );
+  const chatComposerTextMaxHeight = useMemo(
+    () => Math.max(CHAT_COMPOSER_MIN_HEIGHT - 12, chatComposerMaxHeight - 12),
+    [chatComposerMaxHeight]
   );
 
   const [memberModal, setMemberModal] = useState(false);
@@ -2010,6 +2074,32 @@ export default function ChatDetailScreen() {
       mounted = false;
     };
   }, [chatId, listMembers, refreshThreadMessages, shouldRouteToAiChat, thread.isGroup]);
+
+  useEffect(() => {
+    if (!chatId || shouldRouteToAiChat || isE2E) return;
+
+    let disposed = false;
+    const tick = async () => {
+      if (disposed || liveRefreshBusyRef.current) return;
+      liveRefreshBusyRef.current = true;
+      try {
+        await refreshThreadMessages(chatId);
+      } catch {
+        // Keep the chat responsive even if one poll fails.
+      } finally {
+        liveRefreshBusyRef.current = false;
+      }
+    };
+
+    const timer = setInterval(() => {
+      void tick();
+    }, LIVE_MESSAGE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [chatId, isE2E, refreshThreadMessages, shouldRouteToAiChat]);
 
   const latestMessageSeqNo = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -2890,9 +2980,147 @@ export default function ChatDetailScreen() {
   const closeActionModal = useCallback(() => {
     if (isAddingTasks) return;
     abortAskAIStream();
+    setPendingQuickSkillRun(null);
     setAskAIMoreMenuOpen(false);
     setActionModal(false);
   }, [abortAskAIStream, isAddingTasks]);
+
+  const closeQuickActionMenu = useCallback(() => {
+    skipNextMessagePressRef.current = false;
+    setQuickActionMenuVisible(false);
+    setQuickActionMessage(null);
+    setSelectedActionMessageId("");
+  }, []);
+
+  const copyMessageText = useCallback(
+    (value: string) => {
+      const text = value.trim();
+      if (!text) {
+        Alert.alert(
+          tr("无法复制", "Unable to copy"),
+          tr("该消息没有可复制的文字内容。", "This message has no copyable text content.")
+        );
+        return;
+      }
+      ClipboardCompat.setString(text);
+      Alert.alert(tr("已复制", "Copied"), tr("消息已复制到剪贴板。", "Message copied to clipboard."));
+    },
+    [tr]
+  );
+
+  const getMessageCopyText = useCallback(
+    (message: ConversationMessage) => {
+      const sourceText = normalizeDisplayedContent((message.content || "").trim(), message.senderName);
+      const translatedRawText = translationEnabled
+        ? (translatedByMessageId[message.id]?.[threadDisplayLanguage] || "").trim()
+        : "";
+      const translatedText =
+        !translationEnabled || isPlaceholderTranslationText(translatedRawText, sourceText, threadDisplayLanguage)
+          ? ""
+          : translatedRawText;
+      const shouldUseTranslated = translatedText !== "" && !showOriginalByMessageId[message.id];
+      const primaryText = shouldUseTranslated ? translatedText : sourceText;
+      if (primaryText) return primaryText;
+      const replyContext = (message.replyContext || "").trim();
+      if (replyContext) return replyContext;
+      const imageName = (message.imageName || "").trim();
+      if (imageName) return imageName;
+      return "";
+    },
+    [showOriginalByMessageId, threadDisplayLanguage, translatedByMessageId, translationEnabled]
+  );
+
+  const openActionModalForMessage = useCallback(
+    (message: ConversationMessage) => {
+      const fallbackSkillId = askAISkillOptions[0]?.skillId || DEFAULT_ASK_AI_SKILL_OPTIONS[0]?.skillId || "";
+      closeQuickActionMenu();
+      abortAskAIStream();
+      setActionMessage(message);
+      setAskAI("");
+      setAskAICandidates([]);
+      setAskAISelectedIndex(0);
+      setAskAISelectedTaskKeys(new Set());
+      setAskAIError(null);
+      setSelectedAskAISkillId((prev) => prev || fallbackSkillId);
+      setAskAIMoreMenuOpen(false);
+      setIsStreaming(false);
+      setIsAddingTasks(false);
+      setActionModal(true);
+    },
+    [abortAskAIStream, askAISkillOptions, closeQuickActionMenu]
+  );
+
+  const openActionModalWithSkill = useCallback(
+    (message: ConversationMessage, action?: AssistSkillAction | null) => {
+      openActionModalForMessage(message);
+      if (!action) return;
+      const matchedSkill =
+        askAISkillOptions.find((item) => item.action === action) ||
+        DEFAULT_ASK_AI_SKILL_OPTIONS.find((item) => item.action === action) ||
+        null;
+      if (!matchedSkill?.skillId) return;
+      setSelectedAskAISkillId(matchedSkill.skillId);
+      setAskAIMoreMenuOpen(false);
+      if (!matchedSkill.userInputRequired) {
+        setPendingQuickSkillRun({
+          messageId: (message.id || "").trim(),
+          skillId: matchedSkill.skillId,
+        });
+      }
+    },
+    [askAISkillOptions, openActionModalForMessage]
+  );
+
+  const quickActionItems = useMemo(() => {
+    const message = quickActionMessage;
+    if (!message) return [] as { key: string; icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; onPress: () => void }[];
+
+    const copyText = getMessageCopyText(message);
+    const runAfterClose = (callback: () => void) => {
+      closeQuickActionMenu();
+      setTimeout(callback, 0);
+    };
+    const items: { key: string; icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; onPress: () => void }[] = [
+      {
+        key: "reply",
+        icon: "arrow-undo-outline",
+        label: tr("Reply", "Reply"),
+        onPress: () => runAfterClose(() => openActionModalWithSkill(message, "auto_reply")),
+      },
+      {
+        key: "summary",
+        icon: "document-text-outline",
+        label: tr("Summary", "Summary"),
+        onPress: () => runAfterClose(() => openActionModalWithSkill(message, "follow_up")),
+      },
+      {
+        key: "task",
+        icon: "checkbox-outline",
+        label: tr("To-do", "To-do"),
+        onPress: () => runAfterClose(() => openActionModalWithSkill(message, "add_task")),
+      },
+      {
+        key: "ask-ai",
+        icon: "sparkles-outline",
+        label: "ASK",
+        onPress: () => runAfterClose(() => openActionModalWithSkill(message, null)),
+      },
+    ];
+
+    if (copyText) {
+      items.push({
+        key: "copy",
+        icon: "copy-outline",
+        label: tr("Copy", "Copy"),
+        onPress: () => {
+          closeQuickActionMenu();
+          copyMessageText(copyText);
+        },
+      });
+    }
+
+    return items;
+  }, [closeQuickActionMenu, copyMessageText, getMessageCopyText, openActionModalWithSkill, quickActionMessage, tr]);
 
   const focusAskAIInput = useCallback(() => {
     setKeyboardTarget("askAI");
@@ -3037,36 +3265,42 @@ export default function ChatDetailScreen() {
     ]
   );
 
-  const handleLongPress = (message: ConversationMessage) => {
-    abortAskAIStream();
-    setActionMessage(message);
-    setAskAI("");
-    setAskAICandidates([]);
-    setAskAISelectedIndex(0);
-    setAskAISelectedTaskKeys(new Set());
-    setAskAIError(null);
-    setSelectedAskAISkillId(defaultAssistSkillOption?.skillId || "");
-    setAskAIMoreMenuOpen(false);
-    setIsStreaming(false);
-    setIsAddingTasks(false);
-    setActionModal(true);
-  };
+  useEffect(() => {
+    if (!pendingQuickSkillRun || !actionModal || !actionMessage) return;
+    if ((actionMessage.id || "").trim() !== pendingQuickSkillRun.messageId) return;
+    const option = askAISkillOptions.find((item) => item.skillId === pendingQuickSkillRun.skillId) || null;
+    setPendingQuickSkillRun(null);
+    if (!option || option.userInputRequired) return;
+    void runAssistGeneration(option);
+  }, [actionMessage, actionModal, askAISkillOptions, pendingQuickSkillRun, runAssistGeneration]);
 
-  const handleMessagePress = (message: ConversationMessage) => {
-    if (isDraggingRef.current) return;
-    abortAskAIStream();
-    setActionMessage(message);
-    setAskAI("");
-    setAskAICandidates([]);
-    setAskAISelectedIndex(0);
-    setAskAISelectedTaskKeys(new Set());
-    setAskAIError(null);
-    setSelectedAskAISkillId(defaultAssistSkillOption?.skillId || "");
-    setAskAIMoreMenuOpen(false);
-    setIsStreaming(false);
-    setIsAddingTasks(false);
-    setActionModal(true);
-  };
+  const handleLongPress = useCallback(
+    (message: ConversationMessage, event?: GestureResponderEvent) => {
+      if (isDraggingRef.current) return;
+      skipNextMessagePressRef.current = true;
+      const pageX = event?.nativeEvent?.pageX ?? windowWidth / 2;
+      const pageY = event?.nativeEvent?.pageY ?? windowHeight / 2;
+      setQuickActionMessage(message);
+      setSelectedActionMessageId((message.id || "").trim());
+      setQuickActionAnchor({ x: pageX, y: pageY });
+      setQuickActionMenuVisible(true);
+    },
+    [windowHeight, windowWidth]
+  );
+
+  const handleMessagePress = useCallback(
+    (_message: ConversationMessage) => {
+      if (isDraggingRef.current) return;
+      if (skipNextMessagePressRef.current) {
+        skipNextMessagePressRef.current = false;
+        return;
+      }
+      if (quickActionMenuVisible) {
+        closeQuickActionMenu();
+      }
+    },
+    [closeQuickActionMenu, quickActionMenuVisible]
+  );
 
   const handleAskAISubmit = useCallback(() => {
     if (isStreaming || isAddingTasks) return;
@@ -3461,6 +3695,7 @@ export default function ChatDetailScreen() {
       const actorID = currentUserId;
       const meFinal = isCurrentUserMessage(raw, actorID);
       const highlighted = highlightMessageId !== "" && raw.id === highlightMessageId;
+      const actionSelected = selectedActionMessageId !== "" && raw.id === selectedActionMessageId;
       const streamText = streamingById[raw.id];
       const sourceText = normalizeDisplayedContent((streamText ?? raw.content) || "", raw.senderName);
       const translatedRawText = translationEnabled
@@ -3517,7 +3752,7 @@ export default function ChatDetailScreen() {
           <View style={styles.messageBody}>
             {raw.replyContext ? (
               <View style={styles.replyContext}>
-                <Text style={styles.replyText} numberOfLines={2}>
+                <Text style={styles.replyText} numberOfLines={2} selectable={actionSelected}>
                   {raw.replyContext}
                 </Text>
               </View>
@@ -3542,7 +3777,9 @@ export default function ChatDetailScreen() {
               </View>
             ) : null}
             {displayText && !hideImagePlaceholder ? (
-              <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{displayText}</Text>
+              <Text style={[styles.msgText, meFinal && styles.msgTextMe]} selectable={actionSelected}>
+                {displayText}
+              </Text>
             ) : null}
             {canToggleOriginal ? (
               <Pressable
@@ -3564,7 +3801,9 @@ export default function ChatDetailScreen() {
                 <Text style={[styles.originalLabel, meFinal && styles.originalLabelMe]}>
                   {tr("原文", "Original")}
                 </Text>
-                <Text style={[styles.originalText, meFinal && styles.originalTextMe]}>{sourceText}</Text>
+                <Text style={[styles.originalText, meFinal && styles.originalTextMe]} selectable={actionSelected}>
+                  {sourceText}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -3602,11 +3841,12 @@ export default function ChatDetailScreen() {
           ) : null}
           <Pressable
             onPress={() => handleMessagePress(raw)}
-            onLongPress={() => handleLongPress(raw)}
+            onLongPress={(event) => handleLongPress(raw, event)}
             style={[
               styles.bubble,
               meFinal ? styles.bubbleMe : styles.bubbleOther,
               highlighted && styles.bubbleHighlight,
+              actionSelected && styles.bubbleActionSelected,
             ]}
           >
             {!meFinal && raw.senderName ? (
@@ -3655,6 +3895,7 @@ export default function ChatDetailScreen() {
       highlightMessageId,
       openEntityConfig,
       openImageViewer,
+      selectedActionMessageId,
       streamingById,
       threadDisplayLanguage,
       translationEnabled,
@@ -3757,11 +3998,11 @@ export default function ChatDetailScreen() {
       const upstreamOnBlur = props?.textInputProps?.onBlur;
       const upstreamOnChangeText = props?.textInputProps?.onChangeText as ((value: string) => void) | undefined;
       return (
-        <View style={styles.inputBox}>
+        <View style={[styles.inputBox, { maxHeight: chatComposerMaxHeight }]}>
           <Composer
             {...props}
             multiline
-            textInputStyle={styles.input}
+            textInputStyle={[styles.input, { maxHeight: chatComposerTextMaxHeight }]}
             placeholderTextColor="rgba(148,163,184,0.9)"
             textInputProps={{
               ...(props?.textInputProps || {}),
@@ -3793,14 +4034,20 @@ export default function ChatDetailScreen() {
         </View>
       );
     },
-    [handleChatInputBlur, handleChatInputFocus, isStreaming]
+    [chatComposerMaxHeight, chatComposerTextMaxHeight, handleChatInputBlur, handleChatInputFocus, isStreaming]
   );
 
   const renderToolbarSend = useCallback(() => {
+    const sendIconColor = canAbortMyBotSend || !sendDisabled ? "rgba(248,250,252,0.96)" : "rgba(148,163,184,0.95)";
     return (
       <Pressable
         testID="chat-send-button"
-        style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
+        style={[
+          styles.sendBtn,
+          sendDisabled && styles.sendBtnIdle,
+          sendDisabled && styles.sendBtnDisabled,
+          canAbortMyBotSend && styles.sendBtnActive,
+        ]}
         onPress={() => {
           if (canAbortMyBotSend) {
             abortMyBotStream();
@@ -3810,7 +4057,12 @@ export default function ChatDetailScreen() {
         }}
         disabled={sendDisabled}
       >
-        <Ionicons name={canAbortMyBotSend ? "stop" : "arrow-up"} size={18} color="#0b1220" />
+        <Ionicons
+          name={canAbortMyBotSend ? "stop" : sendDisabled ? "wifi" : "arrow-up"}
+          size={18}
+          color={sendIconColor}
+          style={sendDisabled ? { transform: [{ rotate: "90deg" }] } : undefined}
+        />
       </Pressable>
     );
   }, [abortMyBotStream, canAbortMyBotSend, handleSend, sendDisabled]);
@@ -3864,26 +4116,22 @@ export default function ChatDetailScreen() {
               </Text>
             </Pressable>
               <View style={styles.headerActions}>
-                {thread.isGroup ? (
-                  <Pressable
-                    style={[
-                      styles.headerIcon,
-                      {
-                        width: "auto",
-                        paddingHorizontal: 10,
-                        flexDirection: "row",
-                        gap: 6,
-                      },
-                    ]}
-                    testID="chat-mybot-panel-button"
-                    onPress={() => {
-                      openMyBotPanel({ deferOpen: true });
-                    }}
-                  >
-                    <Ionicons name="sparkles-outline" size={16} color="rgba(191,219,254,0.95)" />
-                    <Text style={{ color: "rgba(191,219,254,0.95)", fontSize: 12, fontWeight: "800" }}>MyBot</Text>
-                  </Pressable>
-                ) : null}
+              {!aiAgentMode ? (
+                <Pressable
+                  testID="chat-language-cycle-button"
+                  style={[styles.headerIcon, styles.headerLanguageBtn, translationEnabled && styles.headerLanguageBtnActive]}
+                  onPress={cycleTranslationMode}
+                >
+                  <Ionicons
+                    name={translationEnabled ? "language" : "language-outline"}
+                    size={14}
+                    color={translationEnabled ? "rgba(191,219,254,0.98)" : "rgba(226,232,240,0.92)"}
+                  />
+                  <Text style={[styles.headerLanguageBtnText, translationEnabled && styles.headerLanguageBtnTextActive]}>
+                    {translationModeLabel}
+                  </Text>
+                </Pressable>
+              ) : null}
                 {thread.isGroup ? (
                 <Pressable
                   testID="chat-add-member-button"
@@ -3916,35 +4164,6 @@ export default function ChatDetailScreen() {
               ) : null}
             </View>
           </View>
-
-          {translationControlsVisible ? (
-          <View style={styles.threadLanguageRow}>
-            {THREAD_LANGUAGE_OPTIONS.map((item) => {
-              const active = item.key === "off" ? !translationEnabled : translationEnabled && threadDisplayLanguage === item.key;
-              return (
-                <Pressable
-                  key={item.key}
-                  style={[styles.threadLanguageChip, active && styles.threadLanguageChipActive]}
-                  onPress={() => {
-                    if (item.key === "off") {
-                      setTranslationMode("off");
-                      setTranslationControlsVisible(false);
-                      return;
-                    }
-                    setTranslationMode(item.key);
-                    setTranslationRefreshToken((prev) => prev + 1);
-                    setTranslationControlsVisible(false);
-                    void updateThreadLanguage(chatId, item.key);
-                  }}
-                >
-                  <Text style={[styles.threadLanguageChipText, active && styles.threadLanguageChipTextActive]}>
-                    {item.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          ) : null}
 
           {failedDraft ? (
             <StateBanner
@@ -3989,7 +4208,7 @@ export default function ChatDetailScreen() {
                 renderInputToolbar={renderChatInputToolbar}
                 minInputToolbarHeight={CHAT_COMPOSER_MIN_HEIGHT}
                 minComposerHeight={CHAT_COMPOSER_MIN_HEIGHT}
-                maxComposerHeight={CHAT_COMPOSER_MAX_HEIGHT}
+                maxComposerHeight={chatComposerMaxHeight}
                 isKeyboardInternallyHandled={false}
                 renderMessage={renderMessage}
                 renderSystemMessage={renderSystemMessage}
@@ -4159,6 +4378,60 @@ export default function ChatDetailScreen() {
                 </Pressable>
               </View>
             </Animated.View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={quickActionMenuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={closeQuickActionMenu}
+        >
+          <View style={styles.quickActionOverlay}>
+            <Pressable style={styles.modalBackdrop} onPress={closeQuickActionMenu} />
+            <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+              <Pressable
+                testID="chat-message-quick-actions"
+                style={[styles.quickActionMenu, quickActionMenuLayout.menuStyle]}
+                onPress={() => null}
+              >
+                {!quickActionMenuLayout.showAbove ? (
+                  <View
+                    style={[
+                      styles.quickActionPointer,
+                      styles.quickActionPointerTop,
+                      { left: quickActionMenuLayout.pointerLeft - QUICK_ACTION_POINTER_SIZE / 2 },
+                    ]}
+                  />
+                ) : null}
+                <View style={styles.quickActionGrid}>
+                  {quickActionItems.map((item) => (
+                    <Pressable
+                      key={item.key}
+                      testID={`chat-message-quick-action-${item.key}`}
+                      style={styles.quickActionItem}
+                      onPress={item.onPress}
+                    >
+                      <View style={styles.quickActionItemIcon}>
+                        <Ionicons name={item.icon} size={14} color="rgba(74,74,74,0.98)" />
+                      </View>
+                      <Text allowFontScaling={false} numberOfLines={1} style={styles.quickActionItemText}>
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {quickActionMenuLayout.showAbove ? (
+                  <View
+                    style={[
+                      styles.quickActionPointer,
+                      styles.quickActionPointerBottom,
+                      { left: quickActionMenuLayout.pointerLeft - QUICK_ACTION_POINTER_SIZE / 2 },
+                    ]}
+                  />
+                ) : null}
+              </Pressable>
+            </View>
           </View>
         </Modal>
 
@@ -5056,24 +5329,6 @@ export default function ChatDetailScreen() {
                   <Text style={styles.menuText}>{tr("NPC参与：仅@时回复", "NPC: Mention only")}</Text>
                 </Pressable>
               ) : null}
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => {
-                  setTranslationControlsVisible((prev) => !prev);
-                  setThreadMenuModal(false);
-                }}
-              >
-                <Ionicons
-                  name={translationControlsVisible ? "language" : "language-outline"}
-                  size={16}
-                  color={translationControlsVisible ? "rgba(147,197,253,0.95)" : "rgba(148,163,184,0.9)"}
-                />
-                <Text style={styles.menuText}>
-                  {translationControlsVisible
-                    ? tr("隐藏翻译栏", "Hide translation bar")
-                    : tr("显示翻译栏", "Show translation bar")}
-                </Text>
-              </Pressable>
               {linkedFriend ? (
                 <Pressable style={styles.menuItem} onPress={confirmDeleteFriend}>
                   <Ionicons name="person-remove-outline" size={16} color="rgba(248,113,113,0.95)" />
@@ -5126,9 +5381,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -5137,45 +5392,14 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   title: {
-    color: "#e2e8f0",
-    fontSize: 18,
+    color: "#f8fafc",
+    fontSize: 17,
     fontWeight: "900",
   },
   subtitle: {
-    color: "rgba(148,163,184,0.95)",
-    fontSize: 13,
+    color: "rgba(148,163,184,0.88)",
+    fontSize: 10,
     fontWeight: "700",
-  },
-  threadLanguageRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: -2,
-    marginBottom: 2,
-    paddingLeft: 52,
-  },
-  threadLanguageChip: {
-    minWidth: 34,
-    height: 26,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.36)",
-    backgroundColor: "rgba(30,41,59,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-  },
-  threadLanguageChipActive: {
-    borderColor: "rgba(147,197,253,0.75)",
-    backgroundColor: "rgba(30,64,175,0.45)",
-  },
-  threadLanguageChipText: {
-    color: "rgba(226,232,240,0.88)",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  threadLanguageChipTextActive: {
-    color: "#f8fafc",
   },
   headerActions: {
     flexDirection: "row",
@@ -5185,11 +5409,29 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  headerLanguageBtn: {
+    width: "auto",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    gap: 6,
+  },
+  headerLanguageBtnActive: {
+    borderColor: "rgba(147,197,253,0.58)",
+    backgroundColor: "rgba(59,130,246,0.28)",
+  },
+  headerLanguageBtnText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  headerLanguageBtnTextActive: {
+    color: "rgba(241,245,249,0.98)",
   },
   messageList: {
     flex: 1,
@@ -5229,7 +5471,7 @@ const styles = StyleSheet.create({
   },
   sysText: {
     color: "rgba(226,232,240,0.78)",
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: "700",
   },
   msgRow: {
@@ -5254,8 +5496,8 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   msgAvatarFallback: {
     alignItems: "center",
@@ -5294,19 +5536,23 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   bubbleOther: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(44,44,46,0.96)",
+    borderColor: "rgba(255,255,255,0.08)",
   },
   bubbleMe: {
-    backgroundColor: "rgba(37,99,235,0.80)",
-    borderColor: "rgba(59,130,246,0.35)",
+    backgroundColor: "rgba(37,99,235,0.95)",
+    borderColor: "rgba(147,197,253,0.70)",
   },
   bubbleHighlight: {
     borderColor: "rgba(250,204,21,0.45)",
   },
+  bubbleActionSelected: {
+    borderColor: "rgba(96,165,250,0.95)",
+    backgroundColor: "rgba(58,58,60,0.98)",
+  },
   sender: {
-    color: "rgba(226,232,240,0.86)",
-    fontSize: 13,
+    color: "rgba(148,163,184,0.96)",
+    fontSize: 11,
     fontWeight: "900",
   },
   messageBody: {
@@ -5314,12 +5560,12 @@ const styles = StyleSheet.create({
   },
   replyContext: {
     borderLeftWidth: 2,
-    borderLeftColor: "rgba(148,163,184,0.7)",
+    borderLeftColor: "rgba(255,255,255,0.28)",
     paddingLeft: 8,
   },
   replyText: {
     color: "rgba(203,213,225,0.9)",
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: "700",
   },
   voiceRow: {
@@ -5349,13 +5595,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: "rgba(15,23,42,0.88)",
+    backgroundColor: "rgba(28,28,30,0.88)",
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.45)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   mediaUploadBadgeMe: {
-    backgroundColor: "rgba(30,41,59,0.7)",
-    borderColor: "rgba(191,219,254,0.5)",
+    backgroundColor: "rgba(28,28,30,0.76)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   mediaUploadText: {
     color: "rgba(191,219,254,0.95)",
@@ -5372,7 +5618,7 @@ const styles = StyleSheet.create({
   },
   imageViewerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(2,6,23,0.9)",
+    backgroundColor: "rgba(0,0,0,0.90)",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
@@ -5385,7 +5631,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.2)",
-    backgroundColor: "rgba(4,8,20,0.96)",
+    backgroundColor: "rgba(28,28,30,0.96)",
     padding: 14,
     gap: 12,
   },
@@ -5409,17 +5655,17 @@ const styles = StyleSheet.create({
   },
   imageLabel: {
     color: "rgba(148,163,184,0.9)",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
   },
   msgText: {
-    color: "rgba(226,232,240,0.92)",
-    fontSize: 17,
-    lineHeight: 24,
+    color: "rgba(248,250,252,0.97)",
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: "600",
   },
   msgTextMe: {
-    color: "#f8fafc",
+    color: "rgba(248,250,252,0.98)",
   },
   originalToggle: {
     alignSelf: "flex-start",
@@ -5427,7 +5673,7 @@ const styles = StyleSheet.create({
   },
   originalToggleText: {
     color: "rgba(191,219,254,0.95)",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
   },
   originalToggleTextMe: {
@@ -5442,7 +5688,7 @@ const styles = StyleSheet.create({
   },
   originalLabel: {
     color: "rgba(148,163,184,0.95)",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.3,
@@ -5452,16 +5698,16 @@ const styles = StyleSheet.create({
   },
   originalText: {
     color: "rgba(203,213,225,0.94)",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: "500",
   },
   originalTextMe: {
     color: "rgba(224,242,254,0.95)",
   },
   time: {
-    color: "rgba(148,163,184,0.9)",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.56)",
+    fontSize: 10,
     fontWeight: "700",
   },
   toolbarContainer: {
@@ -5482,7 +5728,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.18)",
-    backgroundColor: "rgba(9,16,30,0.96)",
+    backgroundColor: "rgba(28,28,30,0.96)",
     overflow: "hidden",
   },
   mentionScroll: {
@@ -5499,7 +5745,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   mentionItemPressed: {
-    backgroundColor: "rgba(30,41,59,0.75)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   mentionItemBody: {
     flex: 1,
@@ -5512,7 +5758,7 @@ const styles = StyleSheet.create({
   },
   mentionItemDesc: {
     color: "rgba(148,163,184,0.92)",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "600",
   },
   toolbarActionGroup: {
@@ -5531,7 +5777,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.96)",
+    backgroundColor: "rgba(28,28,30,0.96)",
   },
   plusPanelGrid: {
     flexDirection: "row",
@@ -5554,14 +5800,14 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.4)",
-    backgroundColor: "rgba(30,64,175,0.22)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
   plusPanelLabel: {
     color: "rgba(226,232,240,0.95)",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "800",
     textAlign: "center",
   },
@@ -5579,7 +5825,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     borderBottomWidth: 0,
-    backgroundColor: "rgba(15,23,42,0.98)",
+    backgroundColor: "rgba(28,28,30,0.98)",
     overflow: "hidden",
   },
   mediaSheetHandle: {
@@ -5646,7 +5892,7 @@ const styles = StyleSheet.create({
   mediaAssetThumbPlaceholder: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(15,23,42,0.52)",
+    backgroundColor: "rgba(28,28,30,0.56)",
   },
   mediaAssetCheck: {
     position: "absolute",
@@ -5657,7 +5903,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1.5,
     borderColor: "rgba(241,245,249,0.92)",
-    backgroundColor: "rgba(15,23,42,0.55)",
+    backgroundColor: "rgba(28,28,30,0.55)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -5705,14 +5951,14 @@ const styles = StyleSheet.create({
     minHeight: 34,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.62)",
-    backgroundColor: "rgba(30,64,175,0.28)",
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   mediaSheetRetryText: {
-    color: "rgba(219,234,254,0.98)",
+    color: "rgba(241,245,249,0.96)",
     fontSize: 12,
     fontWeight: "800",
   },
@@ -5753,7 +5999,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(31,41,55,0.95)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
@@ -5766,14 +6012,14 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.55)",
+    backgroundColor: "rgba(44,44,46,0.94)",
     paddingHorizontal: 14,
     paddingVertical: 6,
   },
   input: {
-    color: "#e2e8f0",
-    fontSize: 17,
-    lineHeight: 24,
+    color: "#f8fafc",
+    fontSize: 15,
+    lineHeight: 21,
     minHeight: CHAT_COMPOSER_MIN_HEIGHT - 12,
     paddingTop: 12,
     paddingBottom: 14,
@@ -5786,12 +6032,22 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 16,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "rgba(59,130,246,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.62)",
     alignItems: "center",
     justifyContent: "center",
   },
+  sendBtnIdle: {
+    backgroundColor: "rgba(31,41,55,0.95)",
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  sendBtnActive: {
+    backgroundColor: "rgba(59,130,246,0.96)",
+    borderColor: "rgba(147,197,253,0.62)",
+  },
   sendBtnDisabled: {
-    opacity: 0.55,
+    opacity: 1,
   },
   modalOverlay: {
     flex: 1,
@@ -5806,6 +6062,71 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 18,
     justifyContent: "flex-end",
+  },
+  quickActionOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.22)",
+  },
+  quickActionMenu: {
+    position: "absolute",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(74,74,74,0.98)",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 16,
+  },
+  quickActionGrid: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+    gap: 8,
+  },
+  quickActionItem: {
+    width: 52,
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 0,
+    paddingVertical: 2,
+  },
+  quickActionItemIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.98)",
+  },
+  quickActionItemText: {
+    color: "rgba(255,255,255,0.96)",
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  quickActionPointer: {
+    position: "absolute",
+    width: QUICK_ACTION_POINTER_SIZE,
+    height: QUICK_ACTION_POINTER_SIZE,
+    backgroundColor: "rgba(74,74,74,0.98)",
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  quickActionPointerTop: {
+    top: -6,
+    transform: [{ rotate: "-135deg" }],
+  },
+  quickActionPointerBottom: {
+    bottom: -6,
+    transform: [{ rotate: "45deg" }],
   },
   actionOverlay: {
     flex: 1,
@@ -5827,7 +6148,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "rgba(28,28,30,0.94)",
     padding: 14,
     gap: 10,
   },
@@ -5856,7 +6177,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "rgba(28,28,30,0.94)",
     padding: 12,
     gap: 10,
     shadowColor: "#000000",
@@ -6071,7 +6392,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "rgba(28,28,30,0.95)",
     padding: 14,
     gap: 10,
     minHeight: 360,
@@ -6080,8 +6401,8 @@ const styles = StyleSheet.create({
   myBotCard: {
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(125,211,252,0.2)",
-    backgroundColor: "rgba(4,8,20,0.94)",
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(28,28,30,0.95)",
     padding: 16,
     overflow: "hidden",
     position: "relative",
@@ -6117,23 +6438,23 @@ const styles = StyleSheet.create({
     minHeight: 38,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
-    backgroundColor: "rgba(8,15,32,0.52)",
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 10,
   },
   myBotModeChipActive: {
-    borderColor: "rgba(147,197,253,0.34)",
-    backgroundColor: "rgba(30,64,175,0.28)",
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.16)",
   },
   myBotModeChipText: {
-    color: "rgba(191,219,254,0.86)",
+    color: "rgba(203,213,225,0.90)",
     fontSize: 12,
     fontWeight: "800",
   },
   myBotModeChipTextActive: {
-    color: "#eff6ff",
+    color: "rgba(248,250,252,0.98)",
   },
   myBotOrb: {
     position: "absolute",
@@ -6144,21 +6465,21 @@ const styles = StyleSheet.create({
     height: 220,
     top: -118,
     left: -84,
-    backgroundColor: "rgba(37,99,235,0.2)",
+    backgroundColor: "rgba(255,255,255,0.07)",
   },
   myBotOrbSecondary: {
     width: 210,
     height: 210,
     right: -112,
     bottom: -116,
-    backgroundColor: "rgba(91,33,182,0.18)",
+    backgroundColor: "rgba(255,255,255,0.05)",
   },
   myBotOrbAccent: {
     width: 120,
     height: 120,
     top: 96,
     right: 54,
-    backgroundColor: "rgba(14,165,233,0.09)",
+    backgroundColor: "rgba(255,255,255,0.04)",
   },
   myBotGlowBand: {
     position: "absolute",
@@ -6167,7 +6488,7 @@ const styles = StyleSheet.create({
     width: "72%",
     height: 124,
     borderRadius: 999,
-    backgroundColor: "rgba(191,219,254,0.08)",
+    backgroundColor: "rgba(255,255,255,0.05)",
   },
   myBotHero: {
     flexDirection: "row",
@@ -6187,9 +6508,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(30,41,59,0.62)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.34)",
+    borderColor: "rgba(255,255,255,0.16)",
   },
   myBotHeroCopy: {
     flex: 1,
@@ -6210,13 +6531,13 @@ const styles = StyleSheet.create({
   myBotPrivatePill: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.3)",
-    backgroundColor: "rgba(30,64,175,0.2)",
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   myBotPrivatePillText: {
-    color: "rgba(219,234,254,0.98)",
+    color: "rgba(241,245,249,0.98)",
     fontSize: 10,
     fontWeight: "900",
   },
@@ -6235,13 +6556,13 @@ const styles = StyleSheet.create({
   myBotPromptChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(125,211,252,0.22)",
-    backgroundColor: "rgba(8,15,32,0.6)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   myBotPromptChipText: {
-    color: "rgba(219,234,254,0.96)",
+    color: "rgba(241,245,249,0.95)",
     fontSize: 12,
     fontWeight: "800",
   },
@@ -6252,7 +6573,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   myBotLabel: {
-    color: "rgba(191,219,254,0.95)",
+    color: "rgba(226,232,240,0.95)",
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 0.8,
@@ -6263,7 +6584,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.18)",
-    backgroundColor: "rgba(8,15,32,0.72)",
+    backgroundColor: "rgba(44,44,46,0.90)",
     color: "rgba(241,245,249,0.96)",
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -6272,7 +6593,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   myBotHintText: {
-    color: "rgba(191,219,254,0.84)",
+    color: "rgba(203,213,225,0.86)",
     fontSize: 12,
     lineHeight: 18,
     fontWeight: "700",
@@ -6292,7 +6613,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.09)",
-    backgroundColor: "rgba(8,15,32,0.52)",
+    backgroundColor: "rgba(255,255,255,0.06)",
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
@@ -6305,8 +6626,8 @@ const styles = StyleSheet.create({
   myBotBusyCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.18)",
-    backgroundColor: "rgba(8,15,32,0.56)",
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.07)",
     paddingHorizontal: 14,
     paddingVertical: 16,
     flexDirection: "row",
@@ -6324,8 +6645,8 @@ const styles = StyleSheet.create({
   myBotTaskCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.16)",
-    backgroundColor: "rgba(8,15,32,0.62)",
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     padding: 12,
     flexDirection: "row",
     alignItems: "flex-start",
@@ -6342,13 +6663,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   myBotTaskMeta: {
-    color: "rgba(147,197,253,0.88)",
+    color: "rgba(203,213,225,0.86)",
     fontSize: 11,
     lineHeight: 16,
     fontWeight: "800",
   },
   myBotTaskReason: {
-    color: "rgba(191,219,254,0.88)",
+    color: "rgba(226,232,240,0.86)",
     fontSize: 12,
     lineHeight: 17,
     fontWeight: "700",
@@ -6358,8 +6679,8 @@ const styles = StyleSheet.create({
     minHeight: 34,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.3)",
-    backgroundColor: "rgba(37,99,235,0.82)",
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.14)",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 10,
@@ -6369,7 +6690,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(148,163,184,0.12)",
   },
   myBotMiniActionText: {
-    color: "#eff6ff",
+    color: "rgba(241,245,249,0.96)",
     fontSize: 11,
     fontWeight: "900",
   },
@@ -6380,7 +6701,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   myBotReminderSectionTitle: {
-    color: "rgba(191,219,254,0.96)",
+    color: "rgba(226,232,240,0.94)",
     fontSize: 12,
     fontWeight: "900",
   },
@@ -6388,7 +6709,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(8,15,32,0.48)",
+    backgroundColor: "rgba(255,255,255,0.07)",
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
@@ -6403,7 +6724,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.2)",
-    backgroundColor: "rgba(9,17,35,0.76)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
@@ -6418,8 +6739,8 @@ const styles = StyleSheet.create({
     minHeight: 46,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.36)",
-    backgroundColor: "rgba(37,99,235,0.88)",
+    borderColor: "rgba(255,255,255,0.20)",
+    backgroundColor: "rgba(229,231,235,0.96)",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
@@ -6429,7 +6750,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(148,163,184,0.12)",
   },
   myBotPrimaryActionText: {
-    color: "#eff6ff",
+    color: "rgba(17,24,39,0.98)",
     fontSize: 13,
     fontWeight: "900",
   },
@@ -6483,8 +6804,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
   },
   filterBtnActive: {
-    borderColor: "rgba(59,130,246,0.35)",
-    backgroundColor: "rgba(30,64,175,0.22)",
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   filterText: {
     color: "rgba(203,213,225,0.78)",
@@ -6539,8 +6860,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
   },
   memberItemSelected: {
-    borderColor: "rgba(59,130,246,0.42)",
-    backgroundColor: "rgba(30,64,175,0.20)",
+    borderColor: "rgba(255,255,255,0.24)",
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   memberIdentity: {
     flexDirection: "row",
@@ -6561,7 +6882,7 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(15,23,42,0.55)",
+    backgroundColor: "rgba(44,44,46,0.86)",
   },
   memberAvatarFallback: {
     alignItems: "center",

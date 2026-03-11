@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(15,23,42,0.55)",
+    backgroundColor: "rgba(44,44,46,0.74)",
   },
   avatarWrap: {
     position: "relative",
@@ -254,11 +254,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   unreadBadgeNeo: {
-    borderColor: "rgba(15,23,42,0.9)",
+    borderColor: "rgba(28,28,30,0.9)",
   },
   unreadText: {
     color: "white",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
   },
   body: {
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   name: {
-    fontSize: 17,
+    fontSize: 13,
     fontWeight: "700",
     color: "#111827",
     maxWidth: "84%",
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
     color: "#f8fafc",
   },
   memberCount: {
-    fontSize: 11,
+    fontSize: 10,
     color: "#64748b",
     fontWeight: "600",
   },
@@ -295,14 +295,14 @@ const styles = StyleSheet.create({
     color: "rgba(148,163,184,0.95)",
   },
   time: {
-    fontSize: 13,
+    fontSize: 10,
     color: "#6b7280",
   },
   timeNeo: {
     color: "rgba(148,163,184,0.78)",
   },
   message: {
-    fontSize: 14,
+    fontSize: 11,
     color: "#4b5563",
   },
   messageNeo: {
@@ -313,7 +313,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   highlightNeo: {
-    color: "#60a5fa",
+    color: "rgba(241,245,249,0.96)",
     fontWeight: "700",
   },
 });

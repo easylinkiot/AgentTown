@@ -106,8 +106,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(127,29,29,0.25)",
   },
   bannerInfo: {
-    borderColor: "rgba(59,130,246,0.22)",
-    backgroundColor: "rgba(30,64,175,0.18)",
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   bannerIcon: {
     width: 26,
@@ -224,8 +224,7 @@ const styles = StyleSheet.create({
   },
   skelBubbleMe: {
     width: "62%",
-    backgroundColor: "rgba(37,99,235,0.16)",
-    borderColor: "rgba(59,130,246,0.22)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.12)",
   },
 });
-
