@@ -35,6 +35,7 @@ import {
   inferUploadFilename,
   normalizeMediaAssetForUpload,
 } from "@/src/features/chat/media-upload";
+import { normalizeConversationDateTime } from "@/src/features/chat/chat-helpers";
 import { tx } from "@/src/i18n/translate";
 import {
   formatApiError,
@@ -122,11 +123,10 @@ function toGiftedNPCMessage(
   const rawText = typeof row.content === "string" ? row.content : "";
   const normalizedImageUri =
     messageType === "image" && /^https?:\/\//i.test(rawText.trim()) ? rawText.trim() : "";
-  const createdAtValue = row.created_at || row.updated_at;
-  const parsedTime =
-    typeof createdAtValue === "number"
-      ? new Date(createdAtValue > 1_000_000_000_000 ? createdAtValue : createdAtValue * 1000)
-      : new Date(Date.parse(String(createdAtValue || "")) || Date.now() + index);
+  const normalizedCreatedAt = normalizeConversationDateTime(row.created_at);
+  const normalizedUpdatedAt = normalizeConversationDateTime(row.updated_at);
+  const parsedMillis = Date.parse(normalizedUpdatedAt || normalizedCreatedAt || "");
+  const parsedTime = Number.isFinite(parsedMillis) ? new Date(parsedMillis) : new Date(Date.now() + index);
   return {
     _id: row.id || `${role}_${index}_${parsedTime.getTime()}`,
     text: normalizedImageUri ? "" : rawText,
@@ -312,7 +312,6 @@ export default function NPCChatScreen() {
         return;
       }
       void Clipboard.setStringAsync(text);
-      Alert.alert(tr("已复制", "Copied"), tr("消息已复制到剪贴板。", "Message copied to clipboard."));
     },
     [tr]
   );

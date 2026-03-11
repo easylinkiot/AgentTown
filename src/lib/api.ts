@@ -569,12 +569,80 @@ function coerceNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+const EXPLICIT_TIMEZONE_SUFFIX = /(z|[+-]\d{2}:?\d{2})$/i;
+const NAIVE_DATETIME_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[t\s](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?$/i;
+
+function normalizeFractionToMillis(value?: string) {
+  if (!value) return "000";
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "000";
+  return digits.slice(0, 3).padEnd(3, "0");
+}
+
+function normalizeDateTimeSeparator(value: string) {
+  const trimmed = (value || "").trim();
+  return trimmed.replace(
+    /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)/,
+    "$1T$2"
+  );
+}
+
+function parseBackendUtcSuffixTimestamp(value: string): number | null {
+  const match = value.match(
+    /^(\d{4}-\d{2}-\d{2})[t\s](\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?\s+([+-]\d{2}):?(\d{2})\s+UTC$/i
+  );
+  if (!match) return null;
+
+  const [, datePart, hourMinute, secondRaw, fractionRaw, offsetHour, offsetMinute] = match;
+  const second = secondRaw || "00";
+  const millis = normalizeFractionToMillis(fractionRaw);
+  const iso = `${datePart}T${hourMinute}:${second}.${millis}${offsetHour}:${offsetMinute}`;
+  const parsed = Date.parse(iso);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseDateTimeToMillis(value: string): number | null {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return null;
+
+  const normalized = normalizeDateTimeSeparator(trimmed);
+  const backendUtcParsed = parseBackendUtcSuffixTimestamp(normalized);
+  if (typeof backendUtcParsed === "number") {
+    return backendUtcParsed;
+  }
+  const naiveMatch = normalized.match(NAIVE_DATETIME_PATTERN);
+  const hasExplicitTimezone = EXPLICIT_TIMEZONE_SUFFIX.test(normalized);
+  if (naiveMatch && !hasExplicitTimezone) {
+    const [, year, month, day, hour, minute, secondRaw, fractionRaw] = naiveMatch;
+    const second = secondRaw || "00";
+    const millis = normalizeFractionToMillis(fractionRaw);
+    const utcIso = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
+    const utcParsed = Date.parse(utcIso);
+    if (Number.isFinite(utcParsed)) {
+      return utcParsed;
+    }
+  }
+
+  const directParsed = Date.parse(normalized);
+  if (Number.isFinite(directParsed)) return directParsed;
+
+  if (!hasExplicitTimezone) {
+    const forcedUtcParsed = Date.parse(`${normalized}Z`);
+    if (Number.isFinite(forcedUtcParsed)) {
+      return forcedUtcParsed;
+    }
+  }
+
+  return null;
+}
+
 function normalizeDateTime(value: unknown) {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return "";
-    const asDate = Date.parse(trimmed);
-    return Number.isFinite(asDate) ? new Date(asDate).toISOString() : trimmed;
+    const asDate = parseDateTimeToMillis(trimmed);
+    return typeof asDate === "number" ? new Date(asDate).toISOString() : trimmed;
   }
   const unix = coerceNumber(value);
   if (typeof unix !== "number") return "";

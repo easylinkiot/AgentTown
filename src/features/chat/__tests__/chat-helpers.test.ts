@@ -103,6 +103,75 @@ describe("chat helpers", () => {
     );
   });
 
+  it("prefers receivedAt over createdAt for display", () => {
+    const created = new Date();
+    created.setHours(18, 32, 10, 123);
+    const received = new Date(created.getTime() + 864);
+    const message = createMessage({
+      time: "18:32",
+      createdAt: created.toISOString(),
+      receivedAt: received.toISOString(),
+    });
+
+    expect(formatConversationMessageDisplayTime(message)).toBe(
+      received.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    );
+  });
+
+  it("normalizes naive UTC datetime strings without timezone", () => {
+    const timestamp = resolveConversationSortTimestamp(
+      createMessage({
+        receivedAt: "2026-03-10 18:32:10.987654",
+      })
+    );
+
+    expect(timestamp).toBe(Date.parse("2026-03-10T18:32:10.987Z"));
+  });
+
+  it("treats naive datetime display values as UTC", () => {
+    const display = formatConversationDisplayTime("2026-03-10 18:32:10");
+    const expectedDate = new Date("2026-03-10T18:32:10.000Z");
+    const now = new Date();
+    const sameDay =
+      expectedDate.getFullYear() === now.getFullYear() &&
+      expectedDate.getMonth() === now.getMonth() &&
+      expectedDate.getDate() === now.getDate();
+    const expected = sameDay
+      ? expectedDate.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : expectedDate.toLocaleString([], expectedDate.getFullYear() === now.getFullYear()
+        ? {
+            month: "numeric",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }
+        : {
+            year: "numeric",
+            month: "numeric",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+
+    expect(display).toBe(expected);
+  });
+
+  it("parses UTC suffix datetime strings used by backend", () => {
+    const timestamp = resolveConversationSortTimestamp(
+      createMessage({
+        receivedAt: "2026-03-11 19:14:17.096676 +0000 UTC",
+      })
+    );
+
+    expect(timestamp).toBe(Date.parse("2026-03-11T19:14:17.096Z"));
+  });
+
   it("uses receivedAt for millisecond sorting precision", () => {
     const timestamp = resolveConversationSortTimestamp(
       createMessage({

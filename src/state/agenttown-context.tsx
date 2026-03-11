@@ -564,18 +564,7 @@ function pickGroupOwnerId(thread?: ChatThread) {
 }
 
 function normalizeLooseDateTime(value: unknown) {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return "";
-    const parsed = Date.parse(trimmed);
-    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : trimmed;
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const millis = value > 1_000_000_000_000 ? value : value * 1000;
-    const parsed = new Date(millis);
-    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : "";
-  }
-  return "";
+  return normalizeConversationDateTime(value);
 }
 
 function mapV2SessionMessageToConversation(

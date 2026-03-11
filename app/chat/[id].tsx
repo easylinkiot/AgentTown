@@ -3574,7 +3574,6 @@ export default function ChatDetailScreen() {
         return;
       }
       void Clipboard.setStringAsync(text);
-      Alert.alert(tr("已复制", "Copied"), tr("消息已复制到剪贴板。", "Message copied to clipboard."));
     },
     [tr]
   );
