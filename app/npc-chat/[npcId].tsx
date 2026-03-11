@@ -1,8 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  ActionSheetIOS,
+  Alert,
   Animated,
   Easing,
   Keyboard,
@@ -11,6 +15,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import {
@@ -26,12 +31,17 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
+import {
+  inferUploadFilename,
+  normalizeMediaAssetForUpload,
+} from "@/src/features/chat/media-upload";
 import { tx } from "@/src/i18n/translate";
 import {
   formatApiError,
   getNPC,
   listNPCSessionMessages,
   listNPCSessions,
+  uploadFileV2,
   type V2ChatSessionMessage,
 } from "@/src/lib/api";
 import { runChatCompletions } from "@/src/services/chatAssist";
@@ -43,10 +53,55 @@ type GiftedNPCMessage = IMessage & {
   role: "user" | "assistant";
 };
 
+type MediaPickerAsset = {
+  id: string;
+  type: "image" | "video";
+  uri: string;
+  thumbUri: string;
+  duration?: number;
+  filename?: string;
+  width?: number;
+  height?: number;
+  fileSize?: number;
+};
+
 type KeyboardTarget = "chat";
 
 const KEYBOARD_CLEARANCE = 25;
 const KEYBOARD_CLEARANCE_IOS = 25;
+const CHAT_COMPOSER_MIN_HEIGHT = 72;
+const CHAT_COMPOSER_MAX_HEIGHT = 144;
+
+async function toMediaPickerAsset(
+  asset: ImagePicker.ImagePickerAsset,
+  index: number
+): Promise<MediaPickerAsset> {
+  const type = asset.type === "video" ? "video" : "image";
+  const uri = (asset.uri || "").trim();
+  let thumbUri = uri;
+  if (type === "video" && uri) {
+    try {
+      const thumbnail = await VideoThumbnails.getThumbnailAsync(uri, { time: 0 });
+      if (thumbnail.uri) {
+        thumbUri = thumbnail.uri;
+      }
+    } catch {
+      thumbUri = uri;
+    }
+  }
+  const fallbackName = `${type}_${Date.now()}_${index + 1}.${type === "video" ? "mp4" : "jpg"}`;
+  return {
+    id: (asset.assetId || `${type}_${Date.now()}_${index}`).trim(),
+    type,
+    uri,
+    thumbUri: thumbUri || uri,
+    duration: type === "video" && typeof asset.duration === "number" ? Math.max(0, Math.round(asset.duration)) : undefined,
+    filename: (asset.fileName || fallbackName).trim() || fallbackName,
+    width: typeof asset.width === "number" ? asset.width : undefined,
+    height: typeof asset.height === "number" ? asset.height : undefined,
+    fileSize: typeof asset.fileSize === "number" ? asset.fileSize : undefined,
+  };
+}
 
 function parseSessionId(payload: unknown) {
   if (!payload || typeof payload !== "object") return "";
@@ -63,6 +118,10 @@ function toGiftedNPCMessage(
   index: number
 ): GiftedNPCMessage {
   const role = (row.role || "").trim().toLowerCase() === "user" ? "user" : "assistant";
+  const messageType = (row.message_type || "text").trim().toLowerCase();
+  const rawText = typeof row.content === "string" ? row.content : "";
+  const normalizedImageUri =
+    messageType === "image" && /^https?:\/\//i.test(rawText.trim()) ? rawText.trim() : "";
   const createdAtValue = row.created_at || row.updated_at;
   const parsedTime =
     typeof createdAtValue === "number"
@@ -70,7 +129,8 @@ function toGiftedNPCMessage(
       : new Date(Date.parse(String(createdAtValue || "")) || Date.now() + index);
   return {
     _id: row.id || `${role}_${index}_${parsedTime.getTime()}`,
-    text: typeof row.content === "string" ? row.content : "",
+    text: normalizedImageUri ? "" : rawText,
+    image: normalizedImageUri || undefined,
     createdAt: parsedTime,
     user: {
       _id: role === "user" ? currentUserId || "me" : "npc_assistant",
@@ -83,6 +143,7 @@ function toGiftedNPCMessage(
 export default function NPCChatScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { npcId, name, sessionId: routeSessionId } = useLocalSearchParams<{
     npcId: string;
     name?: string;
@@ -98,6 +159,7 @@ export default function NPCChatScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [mediaSending, setMediaSending] = useState(false);
   const [sessionId, setSessionId] = useState("");
   const [input, setInput] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -107,9 +169,17 @@ export default function NPCChatScreen() {
   const lastKeyboardDurationRef = useRef(0);
 
   const npcName = useMemo(() => npc?.name || name || tr("NPC 对话", "NPC Chat"), [name, npc?.name, tr]);
-  const sendDisabled = sending || input.trim().length === 0;
+  const sendDisabled = sending || mediaSending || input.trim().length === 0;
   const ContainerView = Animated.View;
   const containerStyle = [styles.container, { paddingBottom: keyboardPadding }];
+  const chatComposerMaxHeight = useMemo(
+    () => Math.max(CHAT_COMPOSER_MIN_HEIGHT, Math.floor(windowHeight * 0.5)),
+    [windowHeight]
+  );
+  const chatComposerTextMaxHeight = useMemo(
+    () => Math.max(CHAT_COMPOSER_MIN_HEIGHT - 12, chatComposerMaxHeight - 12),
+    [chatComposerMaxHeight]
+  );
 
   const loadMessages = useCallback(
     async (nextSessionId: string, nextNpcName: string) => {
@@ -231,15 +301,124 @@ export default function NPCChatScreen() {
     [applyKeyboardAvoidance, resetKeyboardOffsets]
   );
 
-  const handleSend = useCallback(
-    async (outgoing: IMessage[] = []) => {
-      const text = String(outgoing[0]?.text || input).trim();
-      if (!npcId || !text || sending) return;
+  const copyMessageText = useCallback(
+    (value: string) => {
+      const text = value.trim();
+      if (!text) {
+        Alert.alert(
+          tr("无法复制", "Unable to copy"),
+          tr("该消息没有可复制的文字内容。", "This message has no copyable text content.")
+        );
+        return;
+      }
+      void Clipboard.setStringAsync(text);
+      Alert.alert(tr("已复制", "Copied"), tr("消息已复制到剪贴板。", "Message copied to clipboard."));
+    },
+    [tr]
+  );
 
-      const localUserId = `npc_user_${Date.now()}`;
-      const localAssistantId = `npc_assistant_${Date.now()}`;
-      const localUserMessage: GiftedNPCMessage = {
-        _id: localUserId,
+  const openMessageActions = useCallback(
+    (
+      actions: { label: string; onPress?: () => void; style?: "default" | "cancel" }[]
+    ) => {
+      if (Platform.OS === "ios") {
+        const options = actions.map((item) => item.label);
+        const cancelButtonIndex = actions.findIndex((item) => item.style === "cancel");
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options,
+            cancelButtonIndex: cancelButtonIndex >= 0 ? cancelButtonIndex : undefined,
+          },
+          (buttonIndex) => {
+            if (buttonIndex < 0 || buttonIndex >= actions.length) return;
+            const selected = actions[buttonIndex];
+            if (selected.style === "cancel") return;
+            selected.onPress?.();
+          }
+        );
+        return;
+      }
+
+      Alert.alert(
+        "",
+        "",
+        actions.map((item) => ({
+          text: item.label,
+          onPress: item.onPress,
+          style: item.style,
+        }))
+      );
+    },
+    []
+  );
+
+  const handleMessageLongPress = useCallback(
+    (_context: unknown, message?: IMessage) => {
+      const text = String(message?.text || "").trim();
+      openMessageActions([
+        ...(text
+          ? [
+              {
+                label: tr("Reply", "Reply"),
+                onPress: () => {
+                  setInput(text);
+                },
+              },
+              {
+                label: tr("Summary", "Summary"),
+                onPress: () => {
+                  setInput(
+                    tr(
+                      `请总结这条消息的重点：${text}`,
+                      `Summarize the key points of this message: ${text}`
+                    )
+                  );
+                },
+              },
+              {
+                label: tr("To-do", "To-do"),
+                onPress: () => {
+                  setInput(
+                    tr(
+                      `请把这条消息提炼成可执行待办：${text}`,
+                      `Extract actionable to-dos from this message: ${text}`
+                    )
+                  );
+                },
+              },
+              {
+                label: "ASK",
+                onPress: () => {
+                  setInput(
+                    tr(
+                      `关于这条消息，请继续深入分析：${text}`,
+                      `Please analyze this message in depth: ${text}`
+                    )
+                  );
+                },
+              },
+              { label: tr("Copy", "Copy"), onPress: () => copyMessageText(text) },
+            ]
+          : []),
+        { label: tr("取消", "Cancel"), style: "cancel" as const },
+      ]);
+    },
+    [copyMessageText, openMessageActions, tr]
+  );
+
+  const sendNPCTurn = useCallback(
+    async (
+      content: string,
+      options?: {
+        clearInput?: boolean;
+        localUserMessage?: GiftedNPCMessage | null;
+      }
+    ) => {
+      const text = content.trim();
+      if (!npcId || !text || sending) return false;
+
+      const defaultLocalUserMessage: GiftedNPCMessage = {
+        _id: `npc_user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         text,
         createdAt: new Date(),
         user: {
@@ -248,6 +427,9 @@ export default function NPCChatScreen() {
         },
         role: "user",
       };
+      const localUserMessage =
+        options?.localUserMessage === undefined ? defaultLocalUserMessage : options.localUserMessage;
+      const localAssistantId = `npc_assistant_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const localAssistantMessage: GiftedNPCMessage = {
         _id: localAssistantId,
         text: "",
@@ -259,10 +441,15 @@ export default function NPCChatScreen() {
         role: "assistant",
       };
 
-      setMessages((prev) => GiftedChat.append(prev, [localAssistantMessage, localUserMessage]));
+      setMessages((prev) => {
+        const nextBatch = localUserMessage ? [localAssistantMessage, localUserMessage] : [localAssistantMessage];
+        return GiftedChat.append(prev, nextBatch);
+      });
       setSending(true);
       setError(null);
-      setInput("");
+      if (options?.clearInput ?? true) {
+        setInput("");
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -317,26 +504,168 @@ export default function NPCChatScreen() {
             )
           );
         }
+        return true;
       } catch (err) {
         if (!controller.signal.aborted) {
           setError(formatApiError(err));
           setMessages((prev) => prev.filter((item) => item._id !== localAssistantId));
         }
+        return false;
       } finally {
         abortRef.current = null;
         setSending(false);
       }
     },
-    [
-      currentUserId,
-      loadMessages,
-      npcId,
-      npcName,
-      sending,
-      sessionId,
-      input,
-      user?.displayName,
-    ]
+    [currentUserId, loadMessages, npcId, npcName, sending, sessionId, user?.displayName]
+  );
+
+  const ensureCameraPermission = useCallback(async () => {
+    let permission = await ImagePicker.getCameraPermissionsAsync();
+    if (permission.granted) return true;
+    if (!permission.canAskAgain) {
+      Alert.alert(
+        tr("无法访问相机", "Camera access denied"),
+        tr("请在系统设置中允许相机访问后再试。", "Enable camera access in system settings and try again.")
+      );
+      return false;
+    }
+    permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (permission.granted) return true;
+    Alert.alert(
+      tr("无法访问相机", "Camera access denied"),
+      tr("请允许相机权限后继续。", "Please grant camera permission to continue.")
+    );
+    return false;
+  }, [tr]);
+
+  const ensureLibraryPermission = useCallback(async () => {
+    let permission = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (permission.granted) return true;
+    if (!permission.canAskAgain) {
+      Alert.alert(
+        tr("无法访问相册", "Media access denied"),
+        tr("请在系统设置中允许相册访问后再试。", "Enable media-library access in system settings and try again.")
+      );
+      return false;
+    }
+    permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.granted) return true;
+    Alert.alert(
+      tr("无法访问相册", "Media access denied"),
+      tr("请允许相册权限后继续。", "Please grant media-library permission to continue.")
+    );
+    return false;
+  }, [tr]);
+
+  const sendPickedMediaAsset = useCallback(
+    async (asset: MediaPickerAsset) => {
+      if (sending || mediaSending) return;
+      setMediaSending(true);
+      setError(null);
+      try {
+        const uploadResult = await uploadFileV2({
+          ...(await normalizeMediaAssetForUpload(asset, 0)),
+        });
+        const uploadedUri = `${uploadResult.url || ""}`.trim();
+        if (!uploadedUri) {
+          throw new Error(tr("上传成功但未返回文件 URL。", "Upload succeeded but no file URL was returned."));
+        }
+        const uploadedName = (uploadResult.name || asset.filename || inferUploadFilename(asset, 0)).trim();
+        const previewUri = (asset.thumbUri || asset.uri || "").trim();
+        const localUserMessage: GiftedNPCMessage = {
+          _id: `npc_media_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          text: asset.type === "video" ? `${tr("[视频]", "[Video]")} ${uploadedName}` : "",
+          image: asset.type === "image" ? previewUri : undefined,
+          createdAt: new Date(),
+          user: {
+            _id: currentUserId || "me",
+            name: user?.displayName || "Me",
+          },
+          role: "user",
+        };
+        const prompt = [
+          asset.type === "video"
+            ? tr("用户发送了一段视频。", "The user sent a video.")
+            : tr("用户发送了一张图片。", "The user sent an image."),
+          `${tr("文件名", "File")}: ${uploadedName}`,
+          `${tr("链接", "URL")}: ${uploadedUri}`,
+          tr(
+            "请结合这个附件继续对话。如果你无法直接读取媒体内容，要明确说明，并基于文件类型和当前上下文给出有帮助的下一步。",
+            "Continue the conversation with this attachment in mind. If you cannot directly inspect the media, say so clearly and still provide a helpful next step based on the file type and current context."
+          ),
+        ].join("\n");
+        await sendNPCTurn(prompt, {
+          clearInput: false,
+          localUserMessage,
+        });
+      } catch (err) {
+        setError(formatApiError(err));
+      } finally {
+        setMediaSending(false);
+      }
+    },
+    [currentUserId, formatApiError, mediaSending, sendNPCTurn, sending, tr, user?.displayName]
+  );
+
+  const openImagePicker = useCallback(async () => {
+    if (!(await ensureLibraryPermission())) return;
+    const picker = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images", "videos"],
+      quality: 0.9,
+      allowsEditing: false,
+      allowsMultipleSelection: false,
+    });
+    if (picker.canceled || !picker.assets?.length) return;
+    const asset = await toMediaPickerAsset(picker.assets[0], 0);
+    if (!asset.uri) return;
+    await sendPickedMediaAsset(asset);
+  }, [ensureLibraryPermission, sendPickedMediaAsset]);
+
+  const openCameraPicker = useCallback(async () => {
+    if (!(await ensureCameraPermission())) return;
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.9,
+      allowsEditing: false,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = await toMediaPickerAsset(result.assets[0], 0);
+    if (!asset.uri) return;
+    await sendPickedMediaAsset(asset);
+  }, [ensureCameraPermission, sendPickedMediaAsset]);
+
+  const openAttachActions = useCallback(() => {
+    const actions = [
+      { label: tr("选择图片或视频", "Choose image or video"), onPress: () => void openImagePicker() },
+      { label: tr("拍照", "Camera"), onPress: () => void openCameraPicker() },
+      { label: tr("取消", "Cancel"), style: "cancel" as const },
+    ];
+    openMessageActions(actions);
+  }, [openCameraPicker, openImagePicker, openMessageActions, tr]);
+
+  const handleSend = useCallback(
+    async (outgoing: IMessage[] = []) => {
+      const text = String(outgoing[0]?.text || input).trim();
+      if (!text) return;
+      await sendNPCTurn(text, { clearInput: true });
+    },
+    [input, sendNPCTurn]
+  );
+
+  const renderToolbarActions = useCallback(
+    () => (
+      <View style={styles.toolbarActionGroup}>
+        <Pressable
+          testID="chat-plus-button"
+          style={[styles.inputIcon, (sending || mediaSending) && styles.inputIconDisabled]}
+          disabled={sending || mediaSending}
+          onPress={openAttachActions}
+        >
+          <Ionicons name="add" size={18} color="rgba(226,232,240,0.85)" />
+        </Pressable>
+      </View>
+    ),
+    [mediaSending, openAttachActions, sending]
   );
 
   const renderToolbarComposer = useCallback(
@@ -345,10 +674,11 @@ export default function NPCChatScreen() {
       const upstreamOnBlur = props?.textInputProps?.onBlur;
       const upstreamOnChangeText = props?.textInputProps?.onChangeText as ((value: string) => void) | undefined;
       return (
-        <View style={styles.inputBox}>
+        <View style={[styles.inputBox, { maxHeight: chatComposerMaxHeight }]}>
           <Composer
             {...props}
-            textInputStyle={styles.input}
+            multiline
+            textInputStyle={[styles.input, { maxHeight: chatComposerTextMaxHeight }]}
             placeholderTextColor="rgba(148,163,184,0.9)"
             textInputProps={{
               ...(props?.textInputProps || {}),
@@ -356,8 +686,10 @@ export default function NPCChatScreen() {
               nativeID: "chat-message-input",
               accessibilityLabel: "chat-message-input",
               showSoftInputOnFocus: true,
-              editable: !sending,
+              editable: !sending && !mediaSending,
               maxLength: 4000,
+              multiline: true,
+              scrollEnabled: true,
               onChangeText: (value: string) => {
                 props.onTextChanged?.(value);
                 upstreamOnChangeText?.(value);
@@ -376,20 +708,25 @@ export default function NPCChatScreen() {
         </View>
       );
     },
-    [sending, setKeyboardTarget]
+    [chatComposerMaxHeight, chatComposerTextMaxHeight, mediaSending, sending, setKeyboardTarget]
   );
 
   const renderToolbarSend = useCallback(
     () => (
       <Pressable
         testID="chat-send-button"
-        style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
+        style={[styles.sendBtn, sendDisabled && styles.sendBtnIdle, sendDisabled && styles.sendBtnDisabled]}
         onPress={() => {
           void handleSend();
         }}
         disabled={sendDisabled}
       >
-        <Ionicons name="arrow-up" size={18} color="#0b1220" />
+        <Ionicons
+          name={sendDisabled ? "wifi" : "arrow-up"}
+          size={18}
+          color={sendDisabled ? "rgba(148,163,184,0.95)" : "rgba(248,250,252,0.96)"}
+          style={sendDisabled ? { transform: [{ rotate: "90deg" }] } : undefined}
+        />
       </Pressable>
     ),
     [handleSend, sendDisabled]
@@ -401,11 +738,12 @@ export default function NPCChatScreen() {
         {...props}
         containerStyle={styles.toolbarContainer}
         primaryStyle={styles.toolbarPrimary}
+        renderActions={renderToolbarActions}
         renderComposer={renderToolbarComposer}
         renderSend={renderToolbarSend}
       />
     ),
-    [renderToolbarComposer, renderToolbarSend]
+    [renderToolbarActions, renderToolbarComposer, renderToolbarSend]
   );
 
   return (
@@ -458,6 +796,7 @@ export default function NPCChatScreen() {
               <GiftedChat
                 messages={messages}
                 onSend={(rows) => void handleSend(rows)}
+                onLongPress={handleMessageLongPress}
                 user={{
                   _id: currentUserId || "me",
                   name: user?.displayName || "Me",
@@ -478,7 +817,9 @@ export default function NPCChatScreen() {
                   </View>
                 )}
                 renderInputToolbar={renderChatInputToolbar}
-                minInputToolbarHeight={56}
+                minInputToolbarHeight={CHAT_COMPOSER_MIN_HEIGHT}
+                minComposerHeight={CHAT_COMPOSER_MIN_HEIGHT}
+                maxComposerHeight={chatComposerMaxHeight}
                 isKeyboardInternallyHandled={false}
                 keyboardShouldPersistTaps="handled"
                 messagesContainerStyle={styles.messageContainer}
@@ -519,8 +860,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   headerMain: {
     flex: 1,
@@ -528,12 +869,12 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#f8fafc",
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "900",
   },
   subtitle: {
     color: "rgba(148,163,184,0.92)",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
   },
   editBtn: {
@@ -543,11 +884,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(191,219,254,0.18)",
-    backgroundColor: "rgba(30,41,59,0.55)",
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   editText: {
-    color: "rgba(191,219,254,0.96)",
+    color: "rgba(226,232,240,0.95)",
     fontSize: 12,
     fontWeight: "900",
   },
@@ -581,25 +922,48 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingTop: 0,
   },
+  toolbarActionGroup: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
+  inputIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 16,
+    backgroundColor: "rgba(31,41,55,0.95)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inputIconDisabled: {
+    opacity: 0.45,
+  },
   inputBox: {
     flex: 1,
-    minHeight: 44,
+    minHeight: CHAT_COMPOSER_MIN_HEIGHT,
     justifyContent: "center",
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.55)",
-    paddingHorizontal: 12,
+    backgroundColor: "rgba(44,44,46,0.94)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
   },
   input: {
     color: "#f8fafc",
-    fontSize: 17,
-    lineHeight: 22,
-    paddingTop: 9,
-    paddingBottom: 9,
-    includeFontPadding: false,
-    textAlignVertical: "center",
-    maxHeight: 120,
+    fontSize: 15,
+    lineHeight: 21,
+    minHeight: CHAT_COMPOSER_MIN_HEIGHT - 12,
+    paddingTop: 12,
+    paddingBottom: 14,
+    includeFontPadding: Platform.OS === "android",
+    textAlignVertical: "top",
+    margin: 0,
+    maxHeight: CHAT_COMPOSER_MAX_HEIGHT - 12,
   },
   sendBtn: {
     width: 40,
@@ -607,9 +971,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e2e8f0",
+    borderWidth: 1,
+    borderColor: "rgba(147,197,253,0.62)",
+    backgroundColor: "rgba(59,130,246,0.96)",
+  },
+  sendBtnIdle: {
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(31,41,55,0.95)",
   },
   sendBtnDisabled: {
-    opacity: 0.55,
+    opacity: 1,
   },
 });
