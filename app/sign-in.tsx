@@ -2,8 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
-import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -778,13 +778,6 @@ export default function SignInScreen() {
                       </View>
 
                       <View style={authStyles.ghostRow}>
-                        <Pressable
-                          style={[authStyles.ghostBtn, busyKey !== null && authStyles.btnDisabled]}
-                          disabled={busyKey !== null}
-                          onPress={() => setAuthMode("sign_up")}
-                        >
-                          <Text style={authStyles.ghostBtnText}>{tr("创建账号", "Create Account")}</Text>
-                        </Pressable>
                         <Pressable
                           style={[authStyles.ghostBtn, busyKey !== null && authStyles.btnDisabled]}
                           disabled={busyKey !== null}
