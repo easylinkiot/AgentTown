@@ -114,6 +114,7 @@ export default function HomeScreen() {
   const [peopleModal, setPeopleModal] = useState(false);
   const [friendModal, setFriendModal] = useState(false);
   const [groupModal, setGroupModal] = useState(false);
+  const [teamMenuVisible, setTeamMenuVisible] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
 
   const [friendQuery, setFriendQuery] = useState("");
@@ -810,175 +811,281 @@ export default function HomeScreen() {
     <KeyframeBackground>
       <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
-          <View style={styles.topBar}>
-            <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>
-              <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
-              <View style={styles.onlineDot} />
+          <View style={styles.townSection}>
+            <View style={styles.townDimLayer} />
+            <View style={styles.townGridLayer} />
+
+            <View style={styles.topBar}>
+              <Pressable style={styles.profileChip} onPress={() => router.push("/config" as never)}>
+                <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
+                <View style={styles.onlineDot} />
+              </Pressable>
+
+              <Pressable style={styles.worldMapPill} onPress={() => router.push("/town-map" as never)}>
+                <Ionicons name="globe-outline" size={14} color="rgba(226,232,240,0.92)" />
+                <Text style={styles.worldMapText}>{tr("世界地图", "WORLD MAP")}</Text>
+              </Pressable>
+
+              <View style={styles.topActions}>
+                <Pressable style={styles.topIcon} onPress={() => router.push("/town-map" as never)}>
+                  <Ionicons name="locate-outline" size={16} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+                <Pressable style={styles.topIcon} testID="home-quick-actions-open" onPress={() => setPeopleModal(true)}>
+                  <Ionicons name="people-outline" size={16} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={styles.townAskWrap}>
+              <Pressable style={styles.askPlus} onPress={() => setPeopleModal(true)}>
+                <Ionicons name="add" size={16} color="rgba(226,232,240,0.92)" />
+              </Pressable>
+              <Pressable
+                testID="home-mybot-entry"
+                style={styles.askBar}
+                onPress={() => {
+                  void handleOpenAskAnything();
+                }}
+              >
+                <Text style={styles.askPlaceholder}>{tr("Ask anything", "Ask anything")}</Text>
+                <View style={styles.askRight}>
+                  {openingAskAnything ? (
+                    <ActivityIndicator size="small" color="rgba(226,232,240,0.75)" />
+                  ) : (
+                    <>
+                      <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.75)" />
+                      <Ionicons name="send" size={16} color="rgba(226,232,240,0.75)" />
+                    </>
+                  )}
+                </View>
+              </Pressable>
+            </View>
+
+            <View style={styles.townActionRow}>
+              <Pressable style={styles.townActionPill} onPress={() => router.push("/town-map" as never)}>
+                <Ionicons name="planet-outline" size={14} color="rgba(226,232,240,0.95)" />
+                <Text style={styles.townActionText}>{tr("Bot Park", "Bot Park")}</Text>
+              </Pressable>
+              <Pressable style={styles.townActionPill} onPress={() => router.push("/miniapps" as never)}>
+                <Ionicons name="construct-outline" size={14} color="rgba(226,232,240,0.95)" />
+                <Text style={styles.townActionText}>{tr("Maker Park", "Maker Park")}</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.townHomesLayer} pointerEvents="box-none">
+              {[0, 1, 2].map((idx) => {
+                const target = presence[idx];
+                if (!target) return null;
+                return (
+                  <Pressable
+                    key={`town-home-${target.id}`}
+                    style={[
+                      styles.townMiniHome,
+                      idx === 0 ? styles.townMiniHomeA : idx === 1 ? styles.townMiniHomeB : styles.townMiniHomeC,
+                    ]}
+                    onPress={() =>
+                      openEntityConfig({
+                        entityType: target.entityType,
+                        entityId: target.entityId,
+                        name: target.name,
+                        avatar: target.avatar,
+                      })
+                    }
+                  >
+                    <Ionicons name="home" size={12} color="rgba(226,232,240,0.92)" />
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Pressable style={styles.myHomeChip} onPress={() => router.push("/living-room" as never)}>
+              <Ionicons name="home-outline" size={12} color="rgba(226,232,240,0.95)" />
+              <Text style={styles.myHomeText}>{tr("My Home", "My Home")}</Text>
             </Pressable>
 
-            <Pressable style={styles.worldMapPill} onPress={() => router.push("/town-map" as never)}>
-              <Ionicons name="globe-outline" size={14} color="rgba(226,232,240,0.92)" />
-              <Text style={styles.worldMapText}>{tr("世界地图", "WORLD MAP")}</Text>
-            </Pressable>
-
-            <View style={styles.topActions}>
-              <Pressable style={styles.topIcon} onPress={() => router.push("/town-map" as never)}>
-                <Ionicons name="locate-outline" size={16} color="rgba(226,232,240,0.92)" />
-              </Pressable>
-              <Pressable style={styles.topIcon} testID="home-quick-actions-open" onPress={() => setPeopleModal(true)}>
-                <Ionicons name="people-outline" size={16} color="rgba(226,232,240,0.92)" />
-              </Pressable>
+            <View style={styles.miniAppLayer}>
+              <MiniAppDock />
             </View>
           </View>
 
-          <MiniAppDock />
-
-          <Pressable
-            testID="home-mybot-entry"
-            style={styles.askBar}
-            onPress={() => {
-              void handleOpenAskAnything();
-            }}
-          >
-            <View style={styles.askPlus}>
-              <Ionicons name="add" size={16} color="rgba(226,232,240,0.92)" />
+          <View style={styles.chatSheet}>
+            <View style={styles.chatSheetHandleWrap}>
+              <View style={styles.chatSheetHandle} />
             </View>
-            <Text style={styles.askPlaceholder}>{tr("Ask anything", "Ask anything")}</Text>
-            <View style={styles.askRight}>
-              {openingAskAnything ? (
-                <ActivityIndicator size="small" color="rgba(226,232,240,0.75)" />
-              ) : (
-                <>
-                  <Ionicons name="mic-outline" size={16} color="rgba(226,232,240,0.75)" />
-                  <Ionicons name="send" size={16} color="rgba(226,232,240,0.75)" />
-                </>
-              )}
-            </View>
-          </Pressable>
 
-          {uiError ? (
-            <StateBanner
-              variant="error"
-              title={tr("加载失败", "Something went wrong")}
-              message={uiError}
-              actionLabel={tr("关闭", "Dismiss")}
-              onAction={() => setUiError(null)}
-            />
-          ) : null}
-          {refreshingChats ? (
-            <View style={styles.refreshHint}>
-              <ActivityIndicator size="small" color="#93c5fd" />
-              <Text style={styles.refreshHintText}>{tr("刷新会话中...", "Refreshing chats...")}</Text>
-            </View>
-          ) : null}
+            {uiError ? (
+              <StateBanner
+                variant="error"
+                title={tr("加载失败", "Something went wrong")}
+                message={uiError}
+                actionLabel={tr("关闭", "Dismiss")}
+                onAction={() => setUiError(null)}
+              />
+            ) : null}
+            {refreshingChats ? (
+              <View style={styles.refreshHint}>
+                <ActivityIndicator size="small" color="rgba(226,232,240,0.78)" />
+                <Text style={styles.refreshHintText}>{tr("刷新会话中...", "Refreshing chats...")}</Text>
+              </View>
+            ) : null}
 
-          {!bootstrapReady ? (
-            <LoadingSkeleton kind="chat_list" />
-          ) : (
-            <FlatList
-              testID="home-chat-list"
-              data={list}
-              keyExtractor={(item) => item.id}
-              style={styles.chatList}
-              alwaysBounceVertical
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshingChats}
-                  onRefresh={handleRefreshChats}
-                  tintColor="rgba(226,232,240,0.92)"
-                  colors={["#60a5fa"]}
-                  progressBackgroundColor="rgba(15,23,42,0.92)"
-                  progressViewOffset={10}
-                />
-              }
-              renderItem={({ item }) => (
-                <ChatListItem
-                  chat={item}
-                  language={language}
-                  theme="neo"
-                  onPress={() => handleOpenThread(item)}
-                  onAvatarPress={openThreadAvatarConfig}
-                />
-              )}
-              contentContainerStyle={styles.listContent}
-              ListHeaderComponent={
-                npcList.length > 0 ? (
-                  <View style={styles.npcListWrap}>
-                    {npcList.map((npc) => (
-                      <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
-                    ))}
-                  </View>
-                ) : null
-              }
-            />
-          )}
+            {!bootstrapReady ? (
+              <LoadingSkeleton kind="chat_list" />
+            ) : (
+              <FlatList
+                testID="home-chat-list"
+                data={list}
+                keyExtractor={(item) => item.id}
+                style={styles.chatList}
+                alwaysBounceVertical
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshingChats}
+                    onRefresh={handleRefreshChats}
+                    tintColor="rgba(226,232,240,0.92)"
+                    colors={["#94a3b8"]}
+                    progressBackgroundColor="rgba(28,28,30,0.92)"
+                    progressViewOffset={10}
+                  />
+                }
+                renderItem={({ item }) => (
+                  <ChatListItem
+                    chat={item}
+                    language={language}
+                    theme="neo"
+                    onPress={() => handleOpenThread(item)}
+                    onAvatarPress={openThreadAvatarConfig}
+                  />
+                )}
+                contentContainerStyle={styles.listContent}
+                ListHeaderComponent={
+                  npcList.length > 0 ? (
+                    <View style={styles.npcListWrap}>
+                      {npcList.map((npc) => (
+                        <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
+                      ))}
+                    </View>
+                  ) : null
+                }
+              />
+            )}
+          </View>
 
-          <View style={[styles.presenceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.presenceScroll}
-              contentContainerStyle={styles.presenceRow}
-            >
-              <Pressable style={styles.presenceAddInline} onPress={() => setPeopleModal(true)}>
-                <Ionicons name="add" size={18} color="rgba(226,232,240,0.92)" />
-              </Pressable>
-              {presence.length
-                ? presence.map((item, index) => {
-                  const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
-                  const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
-                  const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
-                  return (
+          <View style={[styles.teamDockWrap, { paddingBottom: Math.max(insets.bottom, 8) }]} pointerEvents="box-none">
+            <View style={styles.teamDock}>
+              <View style={styles.teamDockLeft}>
+                <Pressable style={styles.teamDockAdd} onPress={() => setTeamMenuVisible((prev) => !prev)}>
+                  <Ionicons name={teamMenuVisible ? "close" : "add"} size={18} color="rgba(226,232,240,0.92)" />
+                </Pressable>
+                {teamMenuVisible ? (
+                  <View style={styles.teamMenu}>
                     <Pressable
-                      key={item.id}
-                      testID={`home-presence-item-${index}`}
-                      style={styles.presenceItem}
-                      onLongPress={() => handleRemovePresence(item)}
-                      delayLongPress={280}
-                      onPress={() =>
-                        openEntityConfig({
-                          entityType: item.entityType,
-                          entityId: item.entityId,
-                          name: item.name,
-                          avatar: item.avatar,
-                        })
-                      }
+                      style={styles.teamMenuItem}
+                      onPress={() => {
+                        setTeamMenuVisible(false);
+                        setGroupModal(true);
+                      }}
                     >
-                      <View style={styles.presenceAvatarWrap}>
-                        {item.avatar ? (
-                          <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
-                        ) : (
-                          <View style={[styles.presenceAvatar, styles.presenceAvatarFallback]}>
-                            <Ionicons name="person-outline" size={18} color="rgba(226,232,240,0.82)" />
-                          </View>
-                        )}
-                        <View
-                          testID={`home-presence-role-badge-${index}-${item.role}`}
-                          style={[
-                            styles.presenceRoleBadge,
-                            item.role === "npc"
-                              ? styles.presenceRoleBadgeNpc
-                              : item.role === "bot"
-                                ? styles.presenceRoleBadgeBot
-                                : styles.presenceRoleBadgeHuman,
-                          ]}
-                        >
-                          <Ionicons
-                            name={presenceRoleIcon(item.role)}
-                            size={9}
-                            color={item.role === "human" ? "rgba(12,18,32,0.95)" : "rgba(248,250,252,0.95)"}
-                          />
-                        </View>
-                        <View style={styles.presenceDot} />
-                      </View>
-                      <Text testID={`home-presence-name-${index}`} style={styles.presenceName} numberOfLines={1}>
-                        {displayName}
-                      </Text>
+                      <Ionicons name="chatbubbles-outline" size={15} color="rgba(226,232,240,0.92)" />
+                      <Text style={styles.teamMenuText}>{tr("发起群聊", "New Group")}</Text>
                     </Pressable>
-                  );
-                })
-                : null}
-            </ScrollView>
+                    <Pressable
+                      style={styles.teamMenuItem}
+                      onPress={() => {
+                        setTeamMenuVisible(false);
+                        setFriendModal(true);
+                      }}
+                    >
+                      <Ionicons name="person-add-outline" size={15} color="rgba(226,232,240,0.92)" />
+                      <Text style={styles.teamMenuText}>{tr("添加朋友", "Add Friend")}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.teamMenuItem}
+                      onPress={() => {
+                        setTeamMenuVisible(false);
+                        router.push("/agents" as never);
+                      }}
+                    >
+                      <Ionicons name="hardware-chip-outline" size={15} color="rgba(226,232,240,0.92)" />
+                      <Text style={styles.teamMenuText}>{tr("添加Bot", "Add Bot")}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.teamMenuItem}
+                      onPress={() => {
+                        setTeamMenuVisible(false);
+                        void handleOpenScanner();
+                      }}
+                    >
+                      <Ionicons name="scan-outline" size={15} color="rgba(226,232,240,0.92)" />
+                      <Text style={styles.teamMenuText}>{tr("扫一扫", "Scan")}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.presenceScroll}
+                contentContainerStyle={styles.presenceRow}
+              >
+                {presence.length
+                  ? presence.map((item, index) => {
+                    const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
+                    const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
+                    const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
+                    return (
+                      <Pressable
+                        key={item.id}
+                        testID={`home-presence-item-${index}`}
+                        style={styles.presenceItem}
+                        onLongPress={() => handleRemovePresence(item)}
+                        delayLongPress={280}
+                        onPress={() =>
+                          openEntityConfig({
+                            entityType: item.entityType,
+                            entityId: item.entityId,
+                            name: item.name,
+                            avatar: item.avatar,
+                          })
+                        }
+                      >
+                        <View style={styles.presenceAvatarWrap}>
+                          {item.avatar ? (
+                            <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
+                          ) : (
+                            <View style={[styles.presenceAvatar, styles.presenceAvatarFallback]}>
+                              <Ionicons name="person-outline" size={18} color="rgba(226,232,240,0.82)" />
+                            </View>
+                          )}
+                          <View
+                            testID={`home-presence-role-badge-${index}-${item.role}`}
+                            style={[
+                              styles.presenceRoleBadge,
+                              item.role === "npc"
+                                ? styles.presenceRoleBadgeNpc
+                                : item.role === "bot"
+                                  ? styles.presenceRoleBadgeBot
+                                  : styles.presenceRoleBadgeHuman,
+                            ]}
+                          >
+                            <Ionicons
+                              name={presenceRoleIcon(item.role)}
+                              size={9}
+                              color={item.role === "human" ? "rgba(12,18,32,0.95)" : "rgba(248,250,252,0.95)"}
+                            />
+                          </View>
+                          <View style={styles.presenceDot} />
+                        </View>
+                        <Text testID={`home-presence-name-${index}`} style={styles.presenceName} numberOfLines={1}>
+                          {displayName}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
+                  : null}
+              </ScrollView>
+            </View>
           </View>
         </View>
 
@@ -1098,7 +1205,7 @@ export default function HomeScreen() {
                 ) : null}
                 {loadingRequests ? (
                   <View style={styles.candidateLoading}>
-                    <ActivityIndicator color="#93c5fd" />
+                <ActivityIndicator color="rgba(226,232,240,0.78)" />
                   </View>
                 ) : null}
 
@@ -1225,14 +1332,14 @@ export default function HomeScreen() {
                           borderRadius: 12,
                           borderWidth: 1,
                           borderColor: "rgba(255,255,255,0.14)",
-                          backgroundColor: active ? "rgba(37,99,235,0.28)" : "rgba(15,23,42,0.55)",
+                          backgroundColor: active ? "rgba(255,255,255,0.16)" : "rgba(44,44,46,0.78)",
                         },
                       ]}
                       onPress={() => setGroupSubCategory(item.key)}
                     >
                       <Text
                         style={{
-                          color: active ? "rgba(219,234,254,0.98)" : "rgba(203,213,225,0.92)",
+                          color: active ? "rgba(241,245,249,0.98)" : "rgba(203,213,225,0.92)",
                           fontSize: 13,
                           fontWeight: "800",
                         }}
@@ -1301,15 +1408,214 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 0,
     paddingTop: 10,
-    gap: 12,
+    gap: 0,
+  },
+  townSection: {
+    height: "46%",
+    marginHorizontal: 14,
+    borderRadius: 28,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(0,0,0,0.42)",
+    position: "relative",
+  },
+  townDimLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.36)",
+  },
+  townGridLayer: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.22,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+  },
+  townAskWrap: {
+    marginTop: 12,
+    marginHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    zIndex: 2,
+  },
+  townActionRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    zIndex: 2,
+  },
+  townActionPill: {
+    minHeight: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  townActionText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  townHomesLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
+  townMiniHome: {
+    position: "absolute",
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+  },
+  townMiniHomeA: {
+    left: "14%",
+    top: "30%",
+  },
+  townMiniHomeB: {
+    right: "15%",
+    top: "24%",
+  },
+  townMiniHomeC: {
+    left: "20%",
+    top: "56%",
+  },
+  myHomeChip: {
+    position: "absolute",
+    left: "50%",
+    top: "52%",
+    transform: [{ translateX: -44 }],
+    minHeight: 28,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.20)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    zIndex: 2,
+  },
+  myHomeText: {
+    color: "rgba(241,245,249,0.95)",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+  miniAppLayer: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 8,
+    zIndex: 5,
+  },
+  chatSheet: {
+    flex: 1,
+    marginTop: -24,
+    borderTopLeftRadius: 38,
+    borderTopRightRadius: 38,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(28,28,30,0.62)",
+    marginHorizontal: 0,
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    overflow: "hidden",
+  },
+  chatSheetHandleWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  chatSheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(148,163,184,0.45)",
+  },
+  teamDockWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    zIndex: 40,
+  },
+  teamDock: {
+    width: "92%",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(28,28,30,0.90)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 10,
+    paddingRight: 10,
+    paddingVertical: 8,
+  },
+  teamDockLeft: {
+    marginRight: 8,
+    position: "relative",
+  },
+  teamDockAdd: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(255,255,255,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  teamMenu: {
+    position: "absolute",
+    left: 0,
+    bottom: 52,
+    width: 170,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(44,44,46,0.98)",
+    paddingVertical: 4,
+    gap: 2,
+  },
+  teamMenuItem: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    marginHorizontal: 4,
+  },
+  teamMenuText: {
+    color: "rgba(226,232,240,0.95)",
+    fontSize: 14,
+    fontWeight: "700",
   },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+    marginHorizontal: 14,
+    marginTop: 4,
+    zIndex: 2,
   },
   profileChip: {
     width: 44,
@@ -1318,8 +1624,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   profileAvatar: {
     width: 30,
@@ -1336,7 +1642,7 @@ const styles = StyleSheet.create({
     bottom: 9,
     right: 9,
     borderWidth: 2,
-    borderColor: "rgba(15,23,42,0.95)",
+    borderColor: "rgba(28,28,30,0.95)",
   },
   worldMapPill: {
     flexDirection: "row",
@@ -1346,8 +1652,8 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   worldMapText: {
     color: "rgba(226,232,240,0.92)",
@@ -1366,34 +1672,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   askBar: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.55)",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    backgroundColor: "rgba(28,28,30,0.82)",
+    paddingHorizontal: 14,
+    minHeight: 42,
   },
   askPlus: {
-    width: 30,
-    height: 30,
+    width: 34,
+    height: 34,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
   askPlaceholder: {
     flex: 1,
     color: "rgba(148,163,184,0.95)",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
   },
   askRight: {
@@ -1404,7 +1711,8 @@ const styles = StyleSheet.create({
   listContent: {
     flexGrow: 1,
     paddingTop: 6,
-    paddingBottom: 18,
+    paddingBottom: 126,
+    paddingHorizontal: 4,
   },
   npcListWrap: {
     marginBottom: 8,
@@ -1413,8 +1721,8 @@ const styles = StyleSheet.create({
     minHeight: 34,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(147,197,253,0.28)",
-    backgroundColor: "rgba(15,23,42,0.55)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(28,28,30,0.68)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -1425,7 +1733,7 @@ const styles = StyleSheet.create({
   },
   refreshHintText: {
     color: "rgba(226,232,240,0.92)",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
   },
   chatList: {
@@ -1433,35 +1741,32 @@ const styles = StyleSheet.create({
   },
   presenceRow: {
     gap: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  presenceBar: {
-    flexDirection: "row",
+    paddingVertical: 2,
+    paddingHorizontal: 0,
     alignItems: "center",
   },
   presenceScroll: {
     flex: 1,
   },
   presenceItem: {
-    width: 56,
+    width: 58,
     alignItems: "center",
     gap: 5,
   },
   presenceAvatarWrap: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.06)",
     alignItems: "center",
     justifyContent: "center",
   },
   presenceAvatar: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
   },
   presenceAvatarFallback: {
     alignItems: "center",
@@ -1500,30 +1805,20 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textAlign: "center",
   },
-  presenceAddInline: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   presenceDot: {
     position: "absolute",
-    width: 9,
-    height: 9,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: "#22c55e",
-    bottom: 4,
-    right: 4,
+    bottom: 2,
+    right: 2,
     borderWidth: 2,
-    borderColor: "rgba(15,23,42,0.95)",
+    borderColor: "rgba(28,28,30,0.95)",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: "rgba(0,0,0,0.58)",
     paddingHorizontal: 14,
     paddingVertical: 18,
     justifyContent: "center",
@@ -1532,7 +1827,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "rgba(28,28,30,0.95)",
     padding: 14,
     gap: 10,
   },
@@ -1550,18 +1845,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   sheetText: {
     color: "rgba(226,232,240,0.92)",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "800",
   },
   sheetClose: {
     paddingVertical: 10,
     borderRadius: 14,
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
   },
@@ -1574,7 +1869,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "rgba(28,28,30,0.95)",
     padding: 14,
     gap: 10,
   },
@@ -1588,7 +1883,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     color: "#e2e8f0",
     paddingHorizontal: 12,
     fontSize: 13,
@@ -1606,7 +1901,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: "rgba(255,255,255,0.06)",
     padding: 8,
   },
   qrScanRow: {
@@ -1622,29 +1917,29 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.45)",
-    backgroundColor: "rgba(37,99,235,0.28)",
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
     paddingHorizontal: 12,
   },
   scanBtnText: {
-    color: "#dbeafe",
+    color: "rgba(241,245,249,0.95)",
     fontSize: 12,
     fontWeight: "800",
   },
   friendStatusCard: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.3)",
-    backgroundColor: "rgba(30,64,175,0.2)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 8,
   },
   friendStatusText: {
-    color: "rgba(219,234,254,0.96)",
+    color: "rgba(241,245,249,0.94)",
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 17,
@@ -1687,7 +1982,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   requestTitle: {
-    color: "rgba(191,219,254,0.95)",
+    color: "rgba(226,232,240,0.92)",
     fontSize: 12,
     fontWeight: "900",
     paddingHorizontal: 6,
@@ -1699,21 +1994,21 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.24)",
-    backgroundColor: "rgba(30,64,175,0.18)",
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 10,
     paddingVertical: 9,
   },
   requestActionBtn: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(59,130,246,0.42)",
-    backgroundColor: "rgba(30,64,175,0.34)",
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   requestActionText: {
-    color: "#dbeafe",
+    color: "rgba(241,245,249,0.95)",
     fontSize: 11,
     fontWeight: "900",
   },
@@ -1745,8 +2040,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   choiceBtnActive: {
-    borderColor: "rgba(59,130,246,0.35)",
-    backgroundColor: "rgba(30,64,175,0.22)",
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   choiceText: {
     color: "rgba(226,232,240,0.9)",

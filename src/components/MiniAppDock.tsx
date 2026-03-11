@@ -384,7 +384,7 @@ export function MiniAppDock() {
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleRow}>
                 <View style={styles.modalTitleIcon}>
-                  <Ionicons name="sparkles-outline" size={14} color="#bfdbfe" />
+                  <Ionicons name="sparkles-outline" size={14} color="rgba(241,245,249,0.95)" />
                 </View>
                 <Text style={styles.modalTitle}>{tr("生成此 Mini App 的提示词", "Mini App Generator")}</Text>
               </View>
@@ -411,7 +411,7 @@ export function MiniAppDock() {
                   style={[styles.fab, (!prompt.trim() || generating) && styles.fabDisabled]}
                   onPress={handleGenerate}
                 >
-                  <Ionicons name="arrow-up" size={18} color="#0b1220" />
+                  <Ionicons name="arrow-up" size={18} color="rgba(17,24,39,0.98)" />
                 </Pressable>
               </View>
 
@@ -431,7 +431,7 @@ export function MiniAppDock() {
                     <Text style={styles.readyGhostText}>{tr("丢弃", "Discard")}</Text>
                   </Pressable>
                   <Pressable style={styles.readyCta} onPress={handleInstall}>
-                    <Ionicons name="add-circle-outline" size={16} color="#0b1220" />
+                    <Ionicons name="add-circle-outline" size={16} color="rgba(17,24,39,0.98)" />
                     <Text style={styles.readyCtaText}>{tr("Add App", "Add App")}</Text>
                   </Pressable>
                 </View>
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(15,23,42,0.48)",
+    backgroundColor: "rgba(28,28,30,0.66)",
     padding: 10,
     gap: 12,
   },
@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
@@ -510,7 +510,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     paddingLeft: 44,
@@ -533,14 +533,14 @@ const styles = StyleSheet.create({
   },
   centerSub: {
     color: "rgba(148,163,184,0.95)",
-    fontSize: 11,
+    fontSize: 10,
     textAlign: "center",
   },
   centerArrow: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
   },
   quickHeading: {
     color: "rgba(148,163,184,0.92)",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "900",
     letterSpacing: 1,
     textAlign: "center",
@@ -587,12 +587,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   quickIconCustom: {
-    backgroundColor: "rgba(56,189,248,0.16)",
-    borderColor: "rgba(56,189,248,0.32)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.16)",
   },
   quickIconTasks: {
-    backgroundColor: "rgba(34,197,94,0.16)",
-    borderColor: "rgba(34,197,94,0.32)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.16)",
   },
   quickLabel: {
     color: "rgba(226,232,240,0.86)",
@@ -601,7 +601,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   quickState: {
-    color: "rgba(125,211,252,0.95)",
+    color: "rgba(186,230,253,0.94)",
     fontSize: 10,
     fontWeight: "900",
     letterSpacing: 0.6,
@@ -636,7 +636,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: "rgba(59,130,246,0.55)",
+    backgroundColor: "rgba(148,163,184,0.68)",
   },
   progressStage: {
     color: "rgba(148,163,184,0.95)",
@@ -653,7 +653,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "rgba(28,28,30,0.95)",
     overflow: "hidden",
     maxHeight: "92%",
   },
@@ -678,9 +678,9 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: "rgba(59,130,246,0.18)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
-    borderColor: "rgba(59,130,246,0.24)",
+    borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -707,12 +707,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     padding: 12,
     gap: 10,
   },
   aiLabel: {
-    color: "rgba(147,197,253,0.95)",
+    color: "rgba(226,232,240,0.94)",
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 1,
@@ -778,7 +778,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#e2e8f0",
   },
   readyCtaText: {
-    color: "#0b1220",
+    color: "rgba(17,24,39,0.98)",
     fontSize: 12,
     fontWeight: "900",
   },
@@ -787,7 +787,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   previewHero: {
     width: "100%",
@@ -805,9 +805,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: "rgba(59,130,246,0.16)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
-    borderColor: "rgba(59,130,246,0.22)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   previewTagText: {
     color: "rgba(226,232,240,0.92)",
@@ -841,7 +841,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     padding: 12,
     gap: 8,
   },
@@ -849,7 +849,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
