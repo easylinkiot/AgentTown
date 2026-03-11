@@ -93,6 +93,34 @@ describe("chat thread api", () => {
     });
   });
 
+  it("sends video thread messages with only content url and type", async () => {
+    fetchMock.mockResolvedValue(
+      mockResponse({
+        threadId: "thread_1",
+        userMessage: {
+          id: "msg_2",
+          content: "https://file.example.com/video.mov",
+          senderAvatar: "",
+          type: "video",
+          isMe: true,
+        },
+      })
+    );
+
+    await sendThreadMessage("thread_1", {
+      content: "https://file.example.com/video.mov",
+      type: "video",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/v1/chat/threads/thread_1/messages");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse((init.body as string) || "{}")).toEqual({
+      content: "https://file.example.com/video.mov",
+      type: "video",
+    });
+  });
+
   it("sends mention metadata and supports mark-read", async () => {
     fetchMock
       .mockResolvedValueOnce(

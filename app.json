@@ -57,9 +57,12 @@
         {
           "microphonePermission": "Allow UsChat to use the microphone for voice input.",
           "speechRecognitionPermission": "Allow UsChat to use speech recognition for voice input.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

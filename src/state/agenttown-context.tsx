@@ -609,6 +609,9 @@ function previewMessage(message: ConversationMessage): string {
   if (message.type === "image") {
     return message.content ? `[Image] ${message.content}` : "[Image]";
   }
+  if (message.type === "video") {
+    return "[Video]";
+  }
   if (message.type === "voice") {
     return "[Voice]";
   }

@@ -1,9 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useEvent } from "expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as LegacyFileSystem from "expo-file-system/legacy";
 import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useVideoPlayer, VideoView } from "expo-video";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -165,6 +168,17 @@ type AskAISkillOption = {
   name?: string;
   userInputRequired: boolean;
 };
+type MediaViewerState =
+  | {
+      type: "image";
+      uri: string;
+    }
+  | {
+      type: "video";
+      uri: string;
+      previewUri?: string;
+      preferredPlaybackUri?: string;
+    };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const DEFAULT_ASK_AI_SKILL_OPTIONS: AskAISkillOption[] = DEFAULT_ASSIST_SKILL_ACTIONS.map((action) => ({
@@ -255,6 +269,252 @@ function CachedChatImage({ uri, frameStyle, contentFit, testID }: CachedChatImag
   );
 }
 
+type MediaViewerVideoProps = {
+  uri: string;
+  previewUri?: string;
+  preferredPlaybackUri?: string;
+  frameStyle: React.ComponentProps<typeof View>["style"];
+};
+
+type MediaViewerVideoPlayerProps = {
+  uri: string;
+  preferredPlaybackUri?: string;
+  onLoadingChange: (loading: boolean) => void;
+  onPlaybackReady: () => void;
+  onPlaybackError: (message: string) => void;
+};
+
+function MediaViewerVideoPlayer({
+  uri,
+  preferredPlaybackUri,
+  onLoadingChange,
+  onPlaybackReady,
+  onPlaybackError,
+}: MediaViewerVideoPlayerProps) {
+  const player = useVideoPlayer(null);
+  const statusEvent = useEvent(player, "statusChange", {
+    status: player.status,
+    error: undefined,
+  });
+  const playingEvent = useEvent(player, "playingChange", {
+    isPlaying: false,
+  });
+  const requestSeqRef = useRef(0);
+  const activeSourceUriRef = useRef("");
+  const remoteSourceUriRef = useRef("");
+  const fallbackAttemptedRef = useRef(false);
+  const cachePromiseRef = useRef<Promise<string> | null>(null);
+
+  const replacePlayerSource = useCallback(
+    async (nextUri: string) => {
+      activeSourceUriRef.current = nextUri;
+      await player.replaceAsync({
+        uri: nextUri,
+        contentType: "progressive",
+      });
+    },
+    [player]
+  );
+
+  const tryFallbackToCachedSource = useCallback(
+    async (requestSeq: number) => {
+      if (fallbackAttemptedRef.current) return false;
+      fallbackAttemptedRef.current = true;
+      const cachePromise = cachePromiseRef.current;
+      if (!cachePromise) return false;
+      const cachedUri = await cachePromise.catch(() => "");
+      if (!cachedUri || cachedUri === activeSourceUriRef.current) return false;
+      if (requestSeqRef.current !== requestSeq) return false;
+      onPlaybackError("");
+      onLoadingChange(true);
+      await replacePlayerSource(cachedUri);
+      return true;
+    },
+    [onLoadingChange, onPlaybackError, replacePlayerSource]
+  );
+
+  useEffect(() => {
+    if (statusEvent.status === "error") {
+      const requestSeq = requestSeqRef.current;
+      const remoteSourceUri = remoteSourceUriRef.current;
+      if (remoteSourceUri && activeSourceUriRef.current !== remoteSourceUri) {
+        onPlaybackError("");
+        onLoadingChange(true);
+        void replacePlayerSource(remoteSourceUri)
+          .catch(() => undefined)
+          .then(() => undefined);
+        return;
+      }
+      void tryFallbackToCachedSource(requestSeq)
+        .catch(() => false)
+        .then((recovered) => {
+          if (recovered || requestSeqRef.current !== requestSeq) return;
+          onLoadingChange(false);
+          onPlaybackError(statusEvent.error?.message || "Unable to load video.");
+        });
+      return;
+    }
+    if (statusEvent.status === "readyToPlay") {
+      onLoadingChange(false);
+      onPlaybackError("");
+      onPlaybackReady();
+      player.play();
+      return;
+    }
+    if (statusEvent.status === "loading" || statusEvent.status === "idle") {
+      onLoadingChange(true);
+    }
+  }, [
+    onLoadingChange,
+    onPlaybackError,
+    onPlaybackReady,
+    player,
+    statusEvent.error?.message,
+    statusEvent.status,
+    tryFallbackToCachedSource,
+  ]);
+
+  useEffect(() => {
+    if (!playingEvent.isPlaying) return;
+    onLoadingChange(false);
+    onPlaybackReady();
+  }, [onLoadingChange, onPlaybackReady, playingEvent.isPlaying]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+    const safeUri = (uri || "").trim();
+    const preferredUri = (preferredPlaybackUri || "").trim();
+    activeSourceUriRef.current = "";
+    remoteSourceUriRef.current = safeUri;
+    fallbackAttemptedRef.current = false;
+    cachePromiseRef.current = null;
+
+    onPlaybackError("");
+    if (!safeUri) {
+      onLoadingChange(false);
+      onPlaybackError("Unable to load video.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    onLoadingChange(true);
+
+    void getCachedVideoUriIfAvailableAsync(safeUri)
+      .then(async (cachedUri) => {
+        if (cancelled || requestSeqRef.current !== requestSeq) return;
+        if (preferredUri && preferredUri !== safeUri) {
+          if (isRemoteHttpUri(safeUri)) {
+            cachePromiseRef.current = resolveCachedVideoUriAsync(safeUri);
+          }
+          await replacePlayerSource(preferredUri);
+          return;
+        }
+        if (cachedUri && cachedUri !== safeUri) {
+          cachePromiseRef.current = Promise.resolve(cachedUri);
+          await replacePlayerSource(cachedUri);
+          return;
+        }
+
+        if (isRemoteHttpUri(safeUri)) {
+          cachePromiseRef.current = resolveCachedVideoUriAsync(safeUri);
+        }
+        await replacePlayerSource(safeUri);
+      })
+      .catch((error) => {
+        if (cancelled || requestSeqRef.current !== requestSeq) return;
+        void tryFallbackToCachedSource(requestSeq)
+          .catch(() => false)
+          .then((recovered) => {
+            if (recovered || requestSeqRef.current !== requestSeq) return;
+            onLoadingChange(false);
+            onPlaybackError(formatApiError(error));
+          });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadingChange, onPlaybackError, preferredPlaybackUri, replacePlayerSource, tryFallbackToCachedSource, uri]);
+
+  return (
+    <VideoView
+      player={player}
+      style={styles.imageViewerVideo}
+      contentFit="contain"
+      nativeControls
+      fullscreenOptions={{ enable: true }}
+      onFirstFrameRender={() => {
+        onLoadingChange(false);
+        onPlaybackReady();
+      }}
+      useExoShutter={false}
+    />
+  );
+}
+
+function MediaViewerVideo({ uri, previewUri, preferredPlaybackUri, frameStyle }: MediaViewerVideoProps) {
+  const [coverVisible, setCoverVisible] = useState(Boolean((previewUri || "").trim()));
+  const [isPreparing, setIsPreparing] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const effectiveError = loadError;
+
+  const handlePlaybackReady = useCallback(() => {
+    setIsPreparing(false);
+    setLoadError("");
+    setCoverVisible(false);
+  }, []);
+
+  const handlePlaybackError = useCallback((message: string) => {
+    setLoadError(message);
+    if (message) {
+      setIsPreparing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setCoverVisible(Boolean((previewUri || "").trim()));
+    setIsPreparing(true);
+    setLoadError("");
+  }, [previewUri, uri]);
+
+  return (
+    <View style={[styles.imageViewerVideoFrame, frameStyle]}>
+      <MediaViewerVideoPlayer
+        key={uri}
+        uri={uri}
+        preferredPlaybackUri={preferredPlaybackUri}
+        onLoadingChange={setIsPreparing}
+        onPlaybackReady={handlePlaybackReady}
+        onPlaybackError={handlePlaybackError}
+      />
+      {coverVisible && previewUri ? (
+        <View pointerEvents="none" style={styles.imageViewerVideoCover}>
+          <CachedChatImage uri={previewUri} frameStyle={styles.imageViewerVideoPoster} contentFit="contain" />
+        </View>
+      ) : null}
+      {isPreparing ? (
+        <View pointerEvents="none" style={styles.imageViewerVideoLoadingOverlay}>
+          <View style={styles.imageViewerVideoLoadingBadge}>
+            <ActivityIndicator size="small" color="rgba(248,250,252,0.96)" />
+            <Text style={styles.imageViewerVideoLoadingText}>Loading video</Text>
+          </View>
+        </View>
+      ) : null}
+      {effectiveError ? (
+        <View style={styles.imageViewerVideoErrorOverlay}>
+          <Ionicons name="alert-circle-outline" size={18} color="rgba(248,250,252,0.96)" />
+          <Text style={styles.imageViewerVideoErrorText} numberOfLines={2}>
+            {effectiveError}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function TaskNavIcon({ color = "rgba(226,232,240,0.92)", size = 16 }: TaskNavIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -304,6 +564,10 @@ function isImagePlaceholderText(text: string) {
   return normalized === "[image]" || normalized === "[图片]";
 }
 
+function isVideoMessageType(type?: string) {
+  return (type || "").trim().toLowerCase() === "video";
+}
+
 function isIOSPhotoLibraryUri(uri: string) {
   return Platform.OS === "ios" && uri.trim().toLowerCase().startsWith("ph://");
 }
@@ -313,6 +577,166 @@ function normalizeRenderableImageUri(primary?: string, fallback?: string) {
   if (first && !isIOSPhotoLibraryUri(first)) return first;
   const second = (fallback || "").trim();
   if (second && !isIOSPhotoLibraryUri(second)) return second;
+  return "";
+}
+
+function isLikelyMediaUri(value?: string) {
+  const normalized = (value || "").trim();
+  if (!normalized) return false;
+  return (
+    normalized.startsWith("file://") ||
+    normalized.startsWith("content://") ||
+    normalized.startsWith("ph://") ||
+    normalized.startsWith("data:") ||
+    normalized.startsWith("e2e://") ||
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)
+  );
+}
+
+function isRemoteHttpUri(value?: string) {
+  return /^https?:\/\//i.test((value || "").trim());
+}
+
+const VIDEO_CACHE_FOLDER = "chat-video-cache";
+const VIDEO_EXTENSION_BY_CONTENT_TYPE: Record<string, string> = {
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/x-m4v": "m4v",
+};
+const pendingVideoCacheByUri = new Map<string, Promise<string>>();
+
+function hashMediaUri(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function inferVideoExtensionFromUri(value: string) {
+  const normalized = value.split("?")[0]?.trim().toLowerCase() || "";
+  const match = normalized.match(/\.([a-z0-9]{2,5})$/i);
+  return match?.[1] || "";
+}
+
+async function resolveVideoContentTypeAsync(uri: string) {
+  try {
+    const response = await fetch(uri, { method: "HEAD" });
+    const contentType = (response.headers.get("content-type") || "").split(";")[0]?.trim().toLowerCase() || "";
+    return contentType;
+  } catch {
+    return "";
+  }
+}
+
+async function ensureVideoCacheDirectoryAsync() {
+  const baseDir = LegacyFileSystem.cacheDirectory || "";
+  if (!baseDir) return "";
+  const dir = `${baseDir}${VIDEO_CACHE_FOLDER}/`;
+  const info = await LegacyFileSystem.getInfoAsync(dir);
+  if (!info.exists) {
+    await LegacyFileSystem.makeDirectoryAsync(dir, { intermediates: true });
+  }
+  return dir;
+}
+
+async function resolveVideoCacheTargetUriAsync(uri: string) {
+  const safeUri = uri.trim();
+  if (!safeUri || Platform.OS === "web" || !isRemoteHttpUri(safeUri)) {
+    return safeUri;
+  }
+
+  const dir = await ensureVideoCacheDirectoryAsync();
+  if (!dir) return safeUri;
+
+  const extensionFromUri = inferVideoExtensionFromUri(safeUri);
+  const contentType = extensionFromUri ? "" : await resolveVideoContentTypeAsync(safeUri);
+  const extension = extensionFromUri || VIDEO_EXTENSION_BY_CONTENT_TYPE[contentType] || "mov";
+  return `${dir}${hashMediaUri(safeUri)}.${extension}`;
+}
+
+async function getCachedVideoUriIfAvailableAsync(uri: string) {
+  const safeUri = uri.trim();
+  if (!safeUri || Platform.OS === "web" || !isRemoteHttpUri(safeUri)) {
+    return safeUri;
+  }
+
+  const targetUri = await resolveVideoCacheTargetUriAsync(safeUri);
+  if (!targetUri || targetUri === safeUri) return safeUri;
+
+  const cachedInfo = await LegacyFileSystem.getInfoAsync(targetUri);
+  if (cachedInfo.exists && !cachedInfo.isDirectory) {
+    return targetUri;
+  }
+  return "";
+}
+
+async function resolveCachedVideoUriAsync(uri: string) {
+  const safeUri = uri.trim();
+  if (!safeUri || Platform.OS === "web" || !isRemoteHttpUri(safeUri)) {
+    return safeUri;
+  }
+
+  const pending = pendingVideoCacheByUri.get(safeUri);
+  if (pending) return pending;
+
+  const run = (async () => {
+    const targetUri = await resolveVideoCacheTargetUriAsync(safeUri);
+    if (!targetUri || targetUri === safeUri) return safeUri;
+    const tempUri = `${targetUri}.download`;
+
+    const cachedInfo = await LegacyFileSystem.getInfoAsync(targetUri);
+    if (cachedInfo.exists && !cachedInfo.isDirectory) {
+      return targetUri;
+    }
+
+    const tempInfo = await LegacyFileSystem.getInfoAsync(tempUri);
+    if (tempInfo.exists) {
+      await LegacyFileSystem.deleteAsync(tempUri, { idempotent: true });
+    }
+
+    await LegacyFileSystem.downloadAsync(safeUri, tempUri);
+    await LegacyFileSystem.moveAsync({ from: tempUri, to: targetUri });
+    return targetUri;
+  })();
+
+  pendingVideoCacheByUri.set(safeUri, run);
+  try {
+    return await run;
+  } finally {
+    pendingVideoCacheByUri.delete(safeUri);
+  }
+}
+
+async function generateVideoThumbnailUriAsync(uri: string) {
+  const safeUri = uri.trim();
+  if (!safeUri) return "";
+
+  try {
+    const thumbnail = await VideoThumbnails.getThumbnailAsync(safeUri, { time: 0 });
+    return (thumbnail?.uri || "").trim();
+  } catch {
+    if (!isRemoteHttpUri(safeUri)) return "";
+  }
+
+  const cachedUri = await resolveCachedVideoUriAsync(safeUri);
+  if (!cachedUri || cachedUri === safeUri) return "";
+
+  try {
+    const thumbnail = await VideoThumbnails.getThumbnailAsync(cachedUri, { time: 0 });
+    return (thumbnail?.uri || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function resolveVideoMessageUri(message: Pick<ConversationMessage, "content" | "imageUri" | "type">) {
+  if (!isVideoMessageType(message.type)) return "";
+  const contentUri = (message.content || "").trim();
+  if (isLikelyMediaUri(contentUri)) return contentUri;
+  const imageUri = (message.imageUri || "").trim();
+  if (isLikelyMediaUri(imageUri)) return imageUri;
   return "";
 }
 
@@ -1163,7 +1587,7 @@ export default function ChatDetailScreen() {
           page.assets.map(async (asset) => {
             const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
             let sourceUri = (asset.uri || "").trim();
-            let thumbUri = sourceUri;
+            let thumbUri = isVideo ? "" : sourceUri;
             try {
               const info = await MediaLibrary.getAssetInfoAsync(asset.id);
               const localUri = (info.localUri || "").trim();
@@ -1175,18 +1599,7 @@ export default function ChatDetailScreen() {
             thumbUri = sourceUri;
 
             if (isVideo) {
-              try {
-                const thumbnail = await VideoThumbnails.getThumbnailAsync(sourceUri, {
-                  time: 0,
-                });
-                if (thumbnail.uri) {
-                  thumbUri = thumbnail.uri;
-                } else {
-                  thumbUri = sourceUri;
-                }
-              } catch {
-                thumbUri = sourceUri;
-              }
+              thumbUri = await generateVideoThumbnailUriAsync(sourceUri);
             }
             if (isIOSPhotoLibraryUri(thumbUri)) {
               thumbUri = "";
@@ -1369,7 +1782,9 @@ export default function ChatDetailScreen() {
       const localId = `local_media_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`;
       const inferredName = inferUploadFilename(asset, index);
       const isVideo = asset.type === "video";
-      const previewImageUri = isVideo ? "" : normalizeRenderableImageUri(asset.uri, asset.thumbUri);
+      const previewImageUri = isVideo
+        ? normalizeRenderableImageUri(asset.thumbUri, asset.uri)
+        : normalizeRenderableImageUri(asset.uri, asset.thumbUri);
       const localMessage: ConversationMessage = {
         id: localId,
         threadId: chatId,
@@ -1377,8 +1792,8 @@ export default function ChatDetailScreen() {
         senderName: user?.displayName || tr("我", "Me"),
         senderAvatar: user?.avatar || botConfig.avatar,
         senderType: "human",
-        content: isVideo ? inferredName : tr("[图片]", "[Image]"),
-        type: isVideo ? "text" : "image",
+        content: isVideo ? asset.uri : tr("[图片]", "[Image]"),
+        type: isVideo ? "video" : "image",
         imageUri: previewImageUri || undefined,
         imageName: isVideo ? undefined : inferredName,
         isMe: true,
@@ -1435,9 +1850,31 @@ export default function ChatDetailScreen() {
 
         const uploadedName = (uploadResult.name || inferUploadFilename(entry.asset, index) || entry.asset.id).trim();
         const isVideo = entry.asset.type === "video";
+        if (isVideo) {
+          const localPlaybackUri = (entry.asset.uri || "").trim();
+          if (localPlaybackUri) {
+            setVideoLocalPlaybackByUri((prev) => {
+              if (prev[uploadedUri] === localPlaybackUri) return prev;
+              return {
+                ...prev,
+                [uploadedUri]: localPlaybackUri,
+              };
+            });
+          }
+          const localPreviewUri = normalizeRenderableImageUri(entry.asset.thumbUri);
+          if (localPreviewUri) {
+            setVideoThumbnailByUri((prev) => {
+              if (prev[uploadedUri] === localPreviewUri) return prev;
+              return {
+                ...prev,
+                [uploadedUri]: localPreviewUri,
+              };
+            });
+          }
+        }
         const result = await sendMessage(chatId, {
-          content: isVideo ? uploadedName : tr("[图片]", "[Image]"),
-          type: isVideo ? "text" : "image",
+          content: isVideo ? uploadedUri : tr("[图片]", "[Image]"),
+          type: isVideo ? "video" : "image",
           imageUri: isVideo ? undefined : uploadedUri,
           imageName: isVideo ? undefined : uploadedName,
           senderId: user?.id,
@@ -1451,6 +1888,8 @@ export default function ChatDetailScreen() {
         if (!result) {
           failedCount += 1;
           lastError = tr("上传成功但消息发送失败。", "Upload succeeded but message send failed.");
+          setPendingMessages((prev) => prev.filter((message) => message._id !== entry.localId));
+        } else {
           setPendingMessages((prev) => prev.filter((message) => message._id !== entry.localId));
         }
       } catch (err) {
@@ -1649,21 +2088,30 @@ export default function ChatDetailScreen() {
       });
       if (picker.canceled || picker.assets.length === 0) return;
 
-      const pickedAssets: MediaPickerAsset[] = picker.assets.map((asset, index) => {
-        const type: MediaPickerAsset["type"] = asset.type === "video" ? "video" : "image";
-        return {
-          id: asset.assetId || `image_picker_${Date.now()}_${index}`,
-          type,
-          uri: asset.uri,
-          thumbUri: asset.uri,
-          duration: type === "video" ? Math.max(0, Math.round(asset.duration || 0)) : undefined,
-          filename: asset.fileName || undefined,
-          width: asset.width || undefined,
-          height: asset.height || undefined,
-          fileSize: asset.fileSize || undefined,
-          capturedAt: Date.now(),
-        };
-      });
+      const pickedAssets: MediaPickerAsset[] = await Promise.all(
+        picker.assets.map(async (asset, index) => {
+          const type: MediaPickerAsset["type"] = asset.type === "video" ? "video" : "image";
+          let thumbUri = type === "image" ? asset.uri : "";
+          if (type === "video") {
+            thumbUri = await generateVideoThumbnailUriAsync(asset.uri);
+            if (isIOSPhotoLibraryUri(thumbUri)) {
+              thumbUri = "";
+            }
+          }
+          return {
+            id: asset.assetId || `image_picker_${Date.now()}_${index}`,
+            type,
+            uri: asset.uri,
+            thumbUri,
+            duration: type === "video" ? Math.max(0, Math.round(asset.duration || 0)) : undefined,
+            filename: asset.fileName || undefined,
+            width: asset.width || undefined,
+            height: asset.height || undefined,
+            fileSize: asset.fileSize || undefined,
+            capturedAt: Date.now(),
+          };
+        })
+      );
 
       const result = await sendMediaWithUpload(pickedAssets);
       if (result.failedCount > 0) {
@@ -1782,6 +2230,10 @@ export default function ChatDetailScreen() {
 
   const [pendingMessages, setPendingMessages] = useState<GiftedMessage[]>([]);
   const [uploadingMediaByMessageId, setUploadingMediaByMessageId] = useState<Record<string, boolean>>({});
+  const [videoThumbnailByUri, setVideoThumbnailByUri] = useState<Record<string, string>>({});
+  const [videoLocalPlaybackByUri, setVideoLocalPlaybackByUri] = useState<Record<string, string>>({});
+  const videoThumbnailPendingRef = useRef<Set<string>>(new Set());
+  const videoThumbnailFailedRef = useRef<Set<string>>(new Set());
 
   const baseGiftedMessages = useMemo(() => {
     const baseTime = Date.now();
@@ -1808,6 +2260,56 @@ export default function ChatDetailScreen() {
     );
     return [...baseGiftedMessages, ...filteredPending].sort(compareGiftedMessagesDesc);
   }, [baseGiftedMessages, pendingMessages]);
+
+  useEffect(() => {
+    const pending = videoThumbnailPendingRef.current;
+    const failed = videoThumbnailFailedRef.current;
+    const candidates = Array.from(
+      new Set(
+        giftedMessages
+          .map((message) => message.raw)
+          .filter((message) => {
+            if (!isVideoMessageType(message.type)) return false;
+            if (normalizeRenderableImageUri(message.imageUri)) return false;
+            const videoUri = resolveVideoMessageUri(message);
+            if (!videoUri) return false;
+            if (videoThumbnailByUri[videoUri]) return false;
+            if (pending.has(videoUri) || failed.has(videoUri)) return false;
+            return true;
+          })
+          .map((message) => resolveVideoMessageUri(message))
+          .filter(Boolean)
+      )
+    );
+
+    if (candidates.length === 0) return;
+    let cancelled = false;
+
+    for (const videoUri of candidates) {
+      pending.add(videoUri);
+      void generateVideoThumbnailUriAsync(videoUri)
+        .then((thumbnailUri) => {
+          if (cancelled || !thumbnailUri) return;
+          setVideoThumbnailByUri((prev) => {
+            if (prev[videoUri] === thumbnailUri) return prev;
+            return {
+              ...prev,
+              [videoUri]: thumbnailUri,
+            };
+          });
+        })
+        .catch(() => {
+          failed.add(videoUri);
+        })
+        .finally(() => {
+          pending.delete(videoUri);
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [giftedMessages, videoThumbnailByUri]);
 
   const [loading, setLoading] = useState(() => messages.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1978,7 +2480,7 @@ export default function ChatDetailScreen() {
   const [myBotTaskError, setMyBotTaskError] = useState<string | null>(null);
   const [myBotTaskBusy, setMyBotTaskBusy] = useState(false);
   const [myBotTaskSaveBusy, setMyBotTaskSaveBusy] = useState(false);
-  const [imageViewerState, setImageViewerState] = useState<{ uri: string } | null>(null);
+  const [mediaViewerState, setMediaViewerState] = useState<MediaViewerState | null>(null);
   const imageViewerFrameStyle = useMemo(
     () => ({
       width: Math.max(260, Math.min(windowWidth - 24, 1280)),
@@ -2007,6 +2509,7 @@ export default function ChatDetailScreen() {
     }),
     [windowHeight, windowWidth]
   );
+
   const myBotDialogStyle = useMemo(
     () => ({
       width: Math.min(620, Math.max(320, windowWidth - 28)),
@@ -2578,15 +3081,34 @@ export default function ChatDetailScreen() {
     []
   );
 
+  const openMediaViewer = useCallback((nextState: MediaViewerState | null) => {
+    if (!nextState?.uri.trim()) return;
+    Keyboard.dismiss();
+    setMediaViewerState(nextState);
+  }, []);
+
   const openImageViewer = useCallback((uri?: string) => {
     const safeUri = (uri || "").trim();
     if (!safeUri) return;
-    Keyboard.dismiss();
-    setImageViewerState({ uri: safeUri });
-  }, []);
+    openMediaViewer({
+      type: "image",
+      uri: safeUri,
+    });
+  }, [openMediaViewer]);
+
+  const openVideoViewer = useCallback((uri?: string, previewUri?: string, preferredPlaybackUri?: string) => {
+    const safeUri = (uri || "").trim();
+    if (!safeUri) return;
+    openMediaViewer({
+      type: "video",
+      uri: safeUri,
+      previewUri: normalizeRenderableImageUri(previewUri),
+      preferredPlaybackUri: (preferredPlaybackUri || "").trim() || undefined,
+    });
+  }, [openMediaViewer]);
 
   const closeImageViewer = useCallback(() => {
-    setImageViewerState(null);
+    setMediaViewerState(null);
   }, []);
 
   const handleMyBotModeChange = useCallback((mode: MyBotMode) => {
@@ -3552,6 +4074,7 @@ export default function ChatDetailScreen() {
 
       const messageBody = () => {
         const isMediaUploading = Boolean(uploadingMediaByMessageId[raw.id]);
+        const isVideo = isVideoMessageType(raw.type);
         if (raw.type === "voice") {
           const voiceLabel = raw.voiceDuration
             ? tr(`语音 · ${raw.voiceDuration}`, `Voice · ${raw.voiceDuration}`)
@@ -3568,7 +4091,13 @@ export default function ChatDetailScreen() {
           );
         }
         const previewImageUri = normalizeRenderableImageUri(raw.imageUri);
+        const videoUri = isVideo ? resolveVideoMessageUri(raw) : "";
+        const videoPreviewUri = isVideo
+          ? normalizeRenderableImageUri(previewImageUri, videoThumbnailByUri[videoUri])
+          : "";
+        const videoPreferredPlaybackUri = isVideo ? (videoLocalPlaybackByUri[videoUri] || "").trim() : "";
         const hideImagePlaceholder = Boolean(previewImageUri) && isImagePlaceholderText(displayText);
+        const hideText = isVideo ? Boolean(videoUri) : hideImagePlaceholder;
 
         return (
           <View style={styles.messageBody}>
@@ -3579,7 +4108,7 @@ export default function ChatDetailScreen() {
                 </Text>
               </View>
             ) : null}
-            {previewImageUri ? (
+            {isVideo && videoUri ? (
               <View style={styles.imageWrap}>
                 {isMediaUploading ? (
                   <View style={[styles.mediaUploadBadge, meFinal && styles.mediaUploadBadgeMe]}>
@@ -3592,12 +4121,53 @@ export default function ChatDetailScreen() {
                     </Text>
                   </View>
                 ) : null}
-                <Pressable onPress={() => openImageViewer(previewImageUri)} style={styles.imagePreviewButton}>
+                <Pressable
+                  onPress={(event) => {
+                    event.stopPropagation?.();
+                    openVideoViewer(videoUri, videoPreviewUri, videoPreferredPlaybackUri);
+                  }}
+                  style={styles.imagePreviewButton}
+                >
+                  {videoPreviewUri ? (
+                    <CachedChatImage uri={videoPreviewUri} frameStyle={styles.imagePreview} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.imagePreview, styles.videoPreviewFallback]}>
+                      <Ionicons name="videocam" size={28} color="rgba(226,232,240,0.92)" />
+                      <Text style={styles.videoPreviewFallbackText}>{tr("视频", "Video")}</Text>
+                    </View>
+                  )}
+                  <View style={styles.videoPreviewOverlay}>
+                    <View style={styles.videoPreviewPlayBadge}>
+                      <Ionicons name="play" size={18} color="#f8fafc" />
+                    </View>
+                  </View>
+                </Pressable>
+              </View>
+            ) : previewImageUri ? (
+              <View style={styles.imageWrap}>
+                {isMediaUploading ? (
+                  <View style={[styles.mediaUploadBadge, meFinal && styles.mediaUploadBadgeMe]}>
+                    <ActivityIndicator
+                      size="small"
+                      color={meFinal ? "rgba(255,255,255,0.95)" : "rgba(191,219,254,0.95)"}
+                    />
+                    <Text style={[styles.mediaUploadText, meFinal && styles.mediaUploadTextMe]}>
+                      {tr("上传中...", "Uploading...")}
+                    </Text>
+                  </View>
+                ) : null}
+                <Pressable
+                  onPress={(event) => {
+                    event.stopPropagation?.();
+                    openImageViewer(previewImageUri);
+                  }}
+                  style={styles.imagePreviewButton}
+                >
                   <CachedChatImage uri={previewImageUri} frameStyle={styles.imagePreview} contentFit="cover" />
                 </Pressable>
               </View>
             ) : null}
-            {displayText && !hideImagePlaceholder ? (
+            {displayText && !hideText ? (
               <Text style={[styles.msgText, meFinal && styles.msgTextMe]}>{displayText}</Text>
             ) : null}
             {canToggleOriginal ? (
@@ -3711,6 +4281,7 @@ export default function ChatDetailScreen() {
       highlightMessageId,
       openEntityConfig,
       openImageViewer,
+      openVideoViewer,
       streamingById,
       threadDisplayLanguage,
       translationEnabled,
@@ -3721,6 +4292,8 @@ export default function ChatDetailScreen() {
       uploadingMediaByMessageId,
       user?.avatar,
       user?.displayName,
+      videoLocalPlaybackByUri,
+      videoThumbnailByUri,
     ]
   );
 
@@ -4737,7 +5310,7 @@ export default function ChatDetailScreen() {
         </Modal>
 
         <Modal
-          visible={Boolean(imageViewerState)}
+          visible={Boolean(mediaViewerState)}
           transparent
           animationType="fade"
           statusBarTranslucent
@@ -4757,8 +5330,15 @@ export default function ChatDetailScreen() {
               </View>
               <View pointerEvents="box-none" style={[styles.imageViewerContent, imageViewerContentStyle]}>
                 <Pressable style={[styles.imageViewerFrame, imageViewerFrameStyle]} onPress={() => null}>
-                  {imageViewerState?.uri ? (
-                    <CachedChatImage uri={imageViewerState.uri} frameStyle={styles.imageViewerImage} contentFit="contain" />
+                  {mediaViewerState?.type === "video" ? (
+                    <MediaViewerVideo
+                      uri={mediaViewerState.uri}
+                      previewUri={mediaViewerState.previewUri}
+                      preferredPlaybackUri={mediaViewerState.preferredPlaybackUri}
+                      frameStyle={styles.imageViewerVideoFrame}
+                    />
+                  ) : mediaViewerState?.uri ? (
+                    <CachedChatImage uri={mediaViewerState.uri} frameStyle={styles.imageViewerImage} contentFit="contain" />
                   ) : null}
                 </Pressable>
               </View>
@@ -5443,7 +6023,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.32)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    paddingVertical: 5
   },
   cachedImageAssetHidden: {
     opacity: 0,
@@ -5509,6 +6088,66 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     backgroundColor: "#000000",
     padding: 0,
+  },
+  imageViewerVideoFrame: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#000000",
+  },
+  imageViewerVideo: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#000000",
+  },
+  imageViewerVideoCover: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#000000",
+  },
+  imageViewerVideoLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  imageViewerVideoLoadingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.58)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  imageViewerVideoLoadingText: {
+    color: "rgba(248,250,252,0.92)",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  imageViewerVideoErrorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    backgroundColor: "rgba(0,0,0,0.72)",
+  },
+  imageViewerVideoErrorText: {
+    color: "rgba(248,250,252,0.96)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  imageViewerVideoPoster: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: "#000000",
   },
   msgText: {
     color: "rgba(226,232,240,0.92)",
@@ -5779,6 +6418,30 @@ const styles = StyleSheet.create({
     color: "rgba(241,245,249,0.96)",
     fontSize: 10,
     fontWeight: "800",
+  },
+  videoPreviewFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(2,6,23,0.92)",
+  },
+  videoPreviewFallbackText: {
+    color: "rgba(226,232,240,0.92)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  videoPreviewOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoPreviewPlayBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(2,6,23,0.72)",
   },
   mediaSheetState: {
     flex: 1,
