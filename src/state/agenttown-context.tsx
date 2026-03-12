@@ -205,6 +205,7 @@ const MESSAGE_PAGE_SIZE = 10;
 const MESSAGE_RENDER_WINDOW = 160;
 const MESSAGE_CACHE_LIMIT = 2000;
 const THREAD_LANGUAGE_STORAGE_PREFIX = "agenttown.thread.display.language";
+const APP_LANGUAGE_STORAGE_KEY = "agenttown.app.language";
 
 function isThreadDisplayLanguage(value: unknown): value is ThreadDisplayLanguage {
   return value === "zh" || value === "en" || value === "de";
@@ -233,6 +234,10 @@ function safeUserKey(userId: string) {
 
 function threadLanguageStorageKey(userId: string) {
   return `${THREAD_LANGUAGE_STORAGE_PREFIX}:${safeUserKey(userId)}`;
+}
+
+function isAppLanguage(value: unknown): value is AppLanguage {
+  return value === "zh" || value === "en" || value === "de";
 }
 
 function cacheDir() {
@@ -808,6 +813,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const notificationSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const threadLanguageSyncSignatureRef = useRef("");
+  const explicitLanguagePreferenceRef = useRef(false);
   const threadReadSyncStateRef = useRef<
     Record<string, { lastAckedSeqNo?: number; inflightSeqNo?: number }>
   >({});
@@ -839,6 +845,34 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     },
     [isSignedIn, userID]
   );
+
+  const persistAppLanguage = useCallback(async (next: AppLanguage) => {
+    try {
+      await AsyncStorage.setItem(APP_LANGUAGE_STORAGE_KEY, next);
+    } catch {
+      // Ignore persistence failure.
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(APP_LANGUAGE_STORAGE_KEY);
+        if (cancelled) return;
+        if (!isAppLanguage(raw)) return;
+        explicitLanguagePreferenceRef.current = true;
+        setLanguage(raw);
+      } catch {
+        // Ignore persistence failure.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const markThreadRead = useCallback(async (threadId: string, lastReadSeqNo?: number) => {
     const normalizedThreadID = threadId.trim();
@@ -983,8 +1017,9 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     if (payload?.uiTheme === "classic" || payload?.uiTheme === "neo") {
       setUiTheme(payload.uiTheme);
     }
-    if (payload?.language === "zh" || payload?.language === "en" || payload?.language === "de") {
+    if (isAppLanguage(payload?.language) && !explicitLanguagePreferenceRef.current) {
       setLanguage(payload.language);
+      void persistAppLanguage(payload.language);
     }
     if (typeof payload?.voiceModeEnabled === "boolean") {
       setVoiceModeEnabled(payload.voiceModeEnabled);
@@ -996,7 +1031,7 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
     ) {
       throw bootstrapResult.reason;
     }
-  }, [userID]);
+  }, [persistAppLanguage, userID]);
 
   const updateThreadLanguage = useCallback(
     async (threadId: string, next: ThreadDisplayLanguage) => {
@@ -1853,7 +1888,12 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
       },
       updateHouseType: setMyHouseType,
       updateUiTheme: setUiTheme,
-      updateLanguage: setLanguage,
+      updateLanguage: (next) => {
+        if (!isAppLanguage(next)) return;
+        explicitLanguagePreferenceRef.current = true;
+        setLanguage(next);
+        void persistAppLanguage(next);
+      },
       updateThreadLanguage,
       updateVoiceModeEnabled: setVoiceModeEnabled,
       refreshAll,

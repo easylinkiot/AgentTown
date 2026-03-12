@@ -95,6 +95,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 describe("agenttown-context user thread cache policy", () => {
   const originalPlatform = Platform.OS;
+  const APP_LANGUAGE_STORAGE_KEY = "agenttown.app.language";
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -223,5 +224,27 @@ describe("agenttown-context user thread cache policy", () => {
     });
 
     await waitFor(() => expect(result.current.messagesByThread["grp_1"]?.[0]?.content).toBe("group hello"));
+  });
+
+  it("prefers the locally selected app language over bootstrap language after sign-in", async () => {
+    await mockAsyncStorage.setItem(APP_LANGUAGE_STORAGE_KEY, "zh");
+    mockedFetchBootstrap.mockResolvedValue({
+      chatThreads: [],
+      tasks: [],
+      messages: {},
+      friends: [],
+      threadMembers: {},
+      agents: [],
+      skillCatalog: [],
+      customSkills: [],
+      miniApps: [],
+      miniAppTemplates: [],
+      language: "en",
+    });
+
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+    await waitFor(() => expect(result.current.language).toBe("zh"));
   });
 });
