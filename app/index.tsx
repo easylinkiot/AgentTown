@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Defs, Ellipse, LinearGradient, RadialGradient, Rect, Stop } from "react-native-svg";
 
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
@@ -89,6 +90,41 @@ function presenceRoleIcon(role: PresenceRole): React.ComponentProps<typeof Ionic
   if (role === "bot") return "hardware-chip";
   if (role === "npc") return "sparkles";
   return "person";
+}
+
+function HomeGlowField({ kind }: { kind: "town" | "sheet" }) {
+  const prefix = kind;
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Svg style={StyleSheet.absoluteFill}>
+        <Defs>
+          <LinearGradient id={`${prefix}-veil`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <Stop offset="0%" stopColor="rgba(0,0,0,0.02)" />
+            <Stop offset="48%" stopColor="rgba(1,2,10,0.05)" />
+            <Stop offset="100%" stopColor="rgba(1,2,10,0.14)" />
+          </LinearGradient>
+          <RadialGradient id={`${prefix}-violet`} cx="50%" cy="50%" r="50%">
+            <Stop offset="0%" stopColor="rgba(88,42,148,0.78)" />
+            <Stop offset="34%" stopColor="rgba(72,32,122,0.28)" />
+            <Stop offset="100%" stopColor="rgba(76,29,149,0.00)" />
+          </RadialGradient>
+        </Defs>
+
+        {kind === "town" ? (
+          <>
+            <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${prefix}-veil)`} />
+            <Ellipse cx="52%" cy="78%" rx="52%" ry="20%" fill={`url(#${prefix}-violet)`} opacity={0.34} />
+          </>
+        ) : (
+          <>
+            <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${prefix}-veil)`} />
+            <Ellipse cx="53%" cy="50%" rx="44%" ry="14%" fill={`url(#${prefix}-violet)`} opacity={0.22} />
+          </>
+        )}
+      </Svg>
+    </View>
+  );
 }
 
 export default function HomeScreen() {
@@ -808,10 +844,11 @@ export default function HomeScreen() {
   }, [refreshAll, refreshNPCList, refreshingChats]);
 
   return (
-    <KeyframeBackground>
+    <KeyframeBackground variant="home">
       <SafeAreaView edges={APP_SAFE_AREA_EDGES} style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.townSection}>
+            <HomeGlowField kind="town" />
             <View style={styles.townDimLayer} />
             <View style={styles.townGridLayer} />
 
@@ -909,6 +946,7 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.chatSheet}>
+            <HomeGlowField kind="sheet" />
             <View style={styles.chatSheetHandleWrap}>
               <View style={styles.chatSheetHandle} />
             </View>
@@ -1432,17 +1470,22 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(0,0,0,0.42)",
+    backgroundColor: "rgba(7,9,22,0.10)",
     position: "relative",
+    shadowColor: "#8b5cf6",
+    shadowOpacity: 0.22,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   townDimLayer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.36)",
+    backgroundColor: "rgba(4,6,18,0.02)",
   },
   townGridLayer: {
     ...StyleSheet.absoluteFillObject,
-    opacity: 0.22,
-    backgroundColor: "transparent",
+    opacity: 0.46,
+    backgroundColor: "rgba(76,29,149,0.04)",
     borderWidth: 0,
   },
   townAskWrap: {
@@ -1466,7 +1509,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -1491,7 +1534,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.18)",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   townMiniHomeA: {
     left: "14%",
@@ -1514,7 +1557,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.20)",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -1540,8 +1583,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 38,
     borderTopRightRadius: 38,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(28,28,30,0.62)",
+    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(12,14,26,0.12)",
     marginHorizontal: 0,
     paddingHorizontal: 10,
     paddingTop: 4,
@@ -1573,7 +1616,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(28,28,30,0.90)",
+    backgroundColor: "rgba(16,18,34,0.58)",
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: 10,
@@ -1638,7 +1681,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   profileAvatar: {
     width: 30,
@@ -1666,7 +1709,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   worldMapText: {
     color: "rgba(226,232,240,0.92)",
@@ -1686,7 +1729,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   askBar: {
     flex: 1,
@@ -1696,7 +1739,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(28,28,30,0.82)",
+    backgroundColor: "rgba(12,14,26,0.58)",
     paddingHorizontal: 14,
     minHeight: 42,
   },
@@ -1706,13 +1749,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
   askPlaceholder: {
     flex: 1,
-    color: "rgba(148,163,184,0.95)",
+    color: "rgba(203,213,225,0.92)",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1735,7 +1778,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(28,28,30,0.68)",
+    backgroundColor: "rgba(15,17,31,0.52)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",

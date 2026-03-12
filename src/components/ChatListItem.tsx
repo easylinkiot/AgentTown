@@ -191,8 +191,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(44,44,46,0.74)",
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(24,26,40,0.56)",
   },
   avatarWrap: {
     position: "relative",
