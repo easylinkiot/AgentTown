@@ -204,7 +204,6 @@ const MEDIA_GRID_GAP = 8;
 const AUTO_TRANSLATE_BATCH_SIZE = 24;
 const CHAT_COMPOSER_MIN_HEIGHT = 72;
 const CHAT_COMPOSER_MAX_HEIGHT = 144;
-const LIVE_MESSAGE_REFRESH_INTERVAL_MS = 2000;
 const QUICK_ACTION_MENU_ESTIMATED_HEIGHT = 118;
 const QUICK_ACTION_MENU_MIN_WIDTH = 248;
 const QUICK_ACTION_MENU_MAX_WIDTH = 320;
@@ -984,7 +983,6 @@ export default function ChatDetailScreen() {
   const isWideDesktopWeb = Platform.OS === "web" && windowWidth >= 1280;
   const { user } = useAuth();
   const isDraggingRef = useRef(false);
-  const liveRefreshBusyRef = useRef(false);
   const params = useLocalSearchParams<{
     id: string;
     name?: string;
@@ -2597,6 +2595,7 @@ export default function ChatDetailScreen() {
     return groupReplyModeStorageKey(ownerKey, threadKey);
   }, [chatId, thread.isGroup, user?.id]);
 
+  // AgentTownProvider already applies realtime chat updates, so this screen only needs an initial fetch.
   useEffect(() => {
     let mounted = true;
     const run = async () => {
@@ -2626,32 +2625,6 @@ export default function ChatDetailScreen() {
       mounted = false;
     };
   }, [chatId, listMembers, refreshThreadMessages, shouldRouteToAiChat, thread.isGroup]);
-
-  useEffect(() => {
-    if (!chatId || shouldRouteToAiChat || isE2E) return;
-
-    let disposed = false;
-    const tick = async () => {
-      if (disposed || liveRefreshBusyRef.current) return;
-      liveRefreshBusyRef.current = true;
-      try {
-        await refreshThreadMessages(chatId);
-      } catch {
-        // Keep the chat responsive even if one poll fails.
-      } finally {
-        liveRefreshBusyRef.current = false;
-      }
-    };
-
-    const timer = setInterval(() => {
-      void tick();
-    }, LIVE_MESSAGE_REFRESH_INTERVAL_MS);
-
-    return () => {
-      disposed = true;
-      clearInterval(timer);
-    };
-  }, [chatId, isE2E, refreshThreadMessages, shouldRouteToAiChat]);
 
   const latestMessageSeqNo = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
