@@ -1118,11 +1118,24 @@ export default function HomeScreen() {
                 <Ionicons name="people-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("新建群聊", "New Group")}</Text>
               </Pressable>
-              <Pressable style={styles.sheetItem} onPress={() => router.push("/agents" as never)}>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => {
+                  setPeopleModal(false);
+                  router.push("/agents" as never);
+                }}
+              >
                 <Ionicons name="hardware-chip-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("Agent / Bot", "Agents / Bots")}</Text>
               </Pressable>
-              <Pressable style={styles.sheetItem} testID="home-quick-miniapps" onPress={() => router.push("/miniapps" as never)}>
+              <Pressable
+                style={styles.sheetItem}
+                testID="home-quick-miniapps"
+                onPress={() => {
+                  setPeopleModal(false);
+                  router.push("/miniapps" as never);
+                }}
+              >
                 <Ionicons name="apps-outline" size={16} color="#bfdbfe" />
                 <Text style={styles.sheetText}>{tr("Mini Apps", "Mini Apps")}</Text>
               </Pressable>
