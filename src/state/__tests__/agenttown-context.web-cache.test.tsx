@@ -254,4 +254,100 @@ describe("agenttown-context cache safety", () => {
     await waitFor(() => expect(mockedSendThreadMessage).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedGetThreadDisplayLanguage).toHaveBeenCalledTimes(1));
   });
+
+  it("ignores sendMessage response.messages and only merges userMessage by unique id", async () => {
+    mockedListThreadMessages.mockReset();
+    mockedListThreadMessages.mockResolvedValue([
+      {
+        id: "msg_1",
+        threadId: "qatr03011208",
+        senderId: "u_2",
+        senderName: "Lina",
+        senderAvatar: "",
+        senderType: "human",
+        content: "需要在周五前提交版本更新。",
+        type: "text",
+        isMe: false,
+        time: "Now",
+        createdAt: "2026-03-12T10:00:00.000Z",
+        receivedAt: "2026-03-12T10:00:00.000Z",
+      },
+    ]);
+    mockedSendThreadMessage.mockResolvedValueOnce({
+      userMessage: {
+        id: "msg_local_send",
+        threadId: "qatr03011208",
+        senderId: "u_owner",
+        senderName: "Owner",
+        senderAvatar: "",
+        senderType: "human",
+        content: "哈哈哈",
+        type: "text",
+        isMe: true,
+        time: "Now",
+        createdAt: "2026-03-12T10:01:00.000Z",
+        receivedAt: "2026-03-12T10:01:00.000Z",
+      },
+      messages: [
+        {
+          id: "msg_local_send",
+          threadId: "qatr03011208",
+          senderId: "u_owner",
+          senderName: "Owner",
+          senderAvatar: "",
+          senderType: "human",
+          content: "哈哈哈",
+          type: "text",
+          isMe: true,
+          time: "Now",
+          createdAt: "2026-03-12T10:01:00.000Z",
+          receivedAt: "2026-03-12T10:01:00.000Z",
+        },
+        {
+          id: "msg_should_be_ignored",
+          threadId: "qatr03011208",
+          senderId: "u_other",
+          senderName: "Injected",
+          senderAvatar: "",
+          senderType: "human",
+          content: "这条消息不应进入当前列表",
+          type: "text",
+          isMe: false,
+          time: "Now",
+          createdAt: "2026-03-12T10:02:00.000Z",
+          receivedAt: "2026-03-12T10:02:00.000Z",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useAgentTown(), { wrapper });
+    await waitFor(() => expect(result.current.bootstrapReady).toBe(true));
+
+    await act(async () => {
+      await result.current.refreshThreadMessages("qatr03011208");
+    });
+
+    await waitFor(() =>
+      expect(result.current.messagesByThread["qatr03011208"]?.map((item) => item.id)).toEqual(["msg_1"])
+    );
+
+    await act(async () => {
+      await result.current.sendMessage("qatr03011208", {
+        content: "哈哈哈",
+      });
+    });
+
+    await waitFor(() =>
+      expect(result.current.messagesByThread["qatr03011208"]?.map((item) => item.id)).toEqual([
+        "msg_1",
+        "msg_local_send",
+      ])
+    );
+    expect(new Set(result.current.messagesByThread["qatr03011208"]?.map((item) => item.id))).toEqual(
+      new Set(["msg_1", "msg_local_send"])
+    );
+    expect(result.current.messagesByThread["qatr03011208"]?.some((item) => item.id === "msg_should_be_ignored")).toBe(
+      false
+    );
+  });
 });

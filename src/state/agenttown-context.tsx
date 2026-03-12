@@ -1899,35 +1899,35 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         }
         try {
           const result = await sendThreadMessageApi(threadId, payload);
-          const existingIds = new Set((messagesByThreadRef.current[threadId] || []).map((message) => message.id));
-          if (Array.isArray(result.messages)) {
-            const nextMessages = sortConversationMessagesChronologically(
-              stampMissingReceivedAt(normalizeMessagesForUser(result.messages, userID), existingIds)
-            );
+          const currentMessages = messagesByThreadRef.current[threadId] || [];
+          const existingIds = new Set(currentMessages.map((message) => message.id));
+          const normalizedUserMessage = result.userMessage
+            ? stampMissingReceivedAt([normalizeMessageForUser(result.userMessage, userID)], existingIds)[0]
+            : undefined;
+          const nextMessages = normalizedUserMessage
+            ? sortConversationMessagesChronologically(
+                mergeMessagesPreferIncoming(currentMessages, [normalizedUserMessage])
+              )
+            : currentMessages;
+
+          if (normalizedUserMessage) {
             setMessagesByThread((prev) => ({
               ...prev,
               [threadId]: nextMessages,
             }));
             if (useThreadCache) {
-              void upsertThreadCache(userID, threadId, nextMessages);
+              void writeThreadCache(userID, threadId, nextMessages);
             }
           }
-          const normalizedUserMessage = result.userMessage
-            ? stampMissingReceivedAt([normalizeMessageForUser(result.userMessage, userID)], existingIds)[0]
-            : undefined;
-          const normalizedAIMessage = result.aiMessage
-            ? stampMissingReceivedAt([normalizeMessageForUser(result.aiMessage, userID)], existingIds, Date.now() + 1)[0]
-            : undefined;
-          const preview = normalizedAIMessage
-            ? previewMessage(normalizedAIMessage)
-            : normalizedUserMessage
-              ? previewMessage(normalizedUserMessage)
-              : "";
+
+          const previewSource = normalizedUserMessage || nextMessages[nextMessages.length - 1];
+          const preview = previewSource ? previewMessage(previewSource) : "";
           setChatThreads((prev) => updateThreadPreview(prev, threadId, preview));
           return {
             ...result,
+            messages: nextMessages,
             userMessage: normalizedUserMessage || result.userMessage,
-            aiMessage: normalizedAIMessage || result.aiMessage,
+            aiMessage: result.aiMessage,
           };
         } catch {
           return null;

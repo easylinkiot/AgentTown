@@ -775,13 +775,14 @@ function toGiftedMessage(
   fallbackTime: number
 ): GiftedMessage {
   const normalizedMessage = normalizeConversationMessageTimestamps(message);
+  const messageId = (normalizedMessage.id || "").trim() || `${fallbackTime}`;
   const senderID = (normalizedMessage.senderId || "").trim();
   const isMe = senderID !== "" && currentUserId ? senderID === currentUserId : Boolean(message.isMe);
   const parsedTime = resolveConversationSortTimestamp(normalizedMessage);
   const createdAt = typeof parsedTime === "number" ? new Date(parsedTime) : new Date(fallbackTime);
 
   return {
-    _id: normalizedMessage.id || `${fallbackTime}`,
+    _id: messageId,
     text: normalizedMessage.content || "",
     createdAt,
     user: {
