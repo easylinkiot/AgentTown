@@ -4366,7 +4366,7 @@ export default function ChatDetailScreen() {
                 </Pressable>
               </View>
             ) : null}
-            {displayText && !hideImagePlaceholder ? (
+            {displayText && !hideText ? (
               <Text style={[styles.msgText, meFinal && styles.msgTextMe]} selectable={actionSelected}>
                 {displayText}
               </Text>
