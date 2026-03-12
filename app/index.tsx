@@ -29,6 +29,7 @@ import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
 import { subscribePendingFriendQrPayload } from "@/src/features/friends/friend-qr-scanner-bridge";
 import { getCachedAgentSessions, preloadAgentSessions } from "@/src/features/chat/agent-sessions-cache";
 import { parseConversationTimestamp } from "@/src/features/chat/chat-helpers";
+import { buildSocialChatRoute } from "@/src/features/chat/chat-routes";
 import { tx } from "@/src/i18n/translate";
 import {
   acceptFriendRequest,
@@ -409,15 +410,14 @@ export default function HomeScreen() {
 
   const handleOpenThread = useCallback(
     (thread: ChatThread) => {
-      router.push({
-        pathname: "/chat/[id]",
-        params: {
+      router.push(
+        buildSocialChatRoute({
           id: thread.id,
           name: thread.name,
           avatar: thread.avatar,
-          isGroup: thread.isGroup ? "true" : "false",
-        },
-      });
+          isGroup: thread.isGroup,
+        }) as never
+      );
     },
     [router]
   );

@@ -68,6 +68,7 @@ function RootStack() {
       />
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="group-chat/[id]" />
       <Stack.Screen name="ai-chat" />
       <Stack.Screen name="npc-chat/[npcId]" />
       <Stack.Screen name="npc-create" />

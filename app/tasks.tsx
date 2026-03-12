@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { EmptyState, LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
+import { buildSocialChatRoute } from "@/src/features/chat/chat-routes";
 import { tx } from "@/src/i18n/translate";
 import { formatApiError } from "@/src/lib/api";
 import { useAgentTown } from "@/src/state/agenttown-context";
@@ -43,7 +44,7 @@ function nextStatus(status: TaskStatus): TaskStatus {
 
 export default function TasksScreen() {
   const router = useRouter();
-  const { tasks, addTask, updateTask, language, bootstrapReady, refreshAll } = useAgentTown();
+  const { tasks, chatThreads, addTask, updateTask, language, bootstrapReady, refreshAll } = useAgentTown();
   const tr = (zh: string, en: string) => tx(language, zh, en);
 
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -182,15 +183,18 @@ export default function TasksScreen() {
                   {task.sourceThreadId ? (
                     <Pressable
                       style={styles.sourceBtn}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/chat/[id]",
-                          params: {
+                      onPress={() => {
+                        const sourceThread = chatThreads.find((thread) => thread.id === task.sourceThreadId);
+                        router.push(
+                          buildSocialChatRoute({
                             id: task.sourceThreadId || "",
+                            name: sourceThread?.name,
+                            avatar: sourceThread?.avatar,
+                            isGroup: sourceThread?.isGroup,
                             highlightMessageId: task.sourceMessageId || "",
-                          },
-                        })
-                      }
+                          }) as never
+                        );
+                      }}
                     >
                       <Ionicons name="return-up-forward-outline" size={12} color="#bfdbfe" />
                       <Text style={styles.sourceText}>{tr("查看来源消息", "Open source message")}</Text>
