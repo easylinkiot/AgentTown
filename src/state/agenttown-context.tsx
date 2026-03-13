@@ -17,6 +17,11 @@ import {
   resolveFriendDisplayName as resolveFriendDisplayNameFromAliases,
 } from "@/src/features/friends/alias";
 import {
+  extractMiniAppRuntimeContent,
+  getMiniAppRuntimeType,
+  mergeMiniAppRuntimeContent,
+} from "@/src/features/miniapps/runtime";
+import {
   addThreadMember as addThreadMemberApi,
   createAgent as createAgentApi,
   createChatThread,
@@ -2469,39 +2474,35 @@ export function AgentTownProvider({ children }: { children: React.ReactNode }) {
         setMiniApps((prev) =>
           prev.map((item) =>
             item.id === appId
-              ? {
-                  ...item,
-                  preview: {
-                    ...(item.preview || {}),
-                    ...(typeof result.outputData?.uiType === "string"
-                      ? { uiType: result.outputData.uiType }
-                      : {}),
-                    content: {
-                      ...(((item.preview || {}) as Record<string, unknown>).content as Record<string, unknown> || {}),
-                      ...(Array.isArray(result.outputData?.items)
-                        ? { items: result.outputData.items }
-                        : {}),
-                      ...(result.outputData?.card &&
-                      typeof result.outputData.card === "object" &&
-                      !Array.isArray(result.outputData.card)
-                        ? { card: result.outputData.card }
-                        : {}),
-                      ...(Array.isArray(result.outputData?.panels)
-                        ? { panels: result.outputData.panels }
-                        : {}),
-                      ...(Array.isArray(result.outputData?.blocks)
-                        ? { blocks: result.outputData.blocks }
-                        : {}),
+              ? (() => {
+                  const preview = ((item.preview || {}) as Record<string, unknown>) || {};
+                  const previewContentRaw = preview.content;
+                  const previewContent =
+                    previewContentRaw && typeof previewContentRaw === "object" && !Array.isArray(previewContentRaw)
+                      ? (previewContentRaw as Record<string, unknown>)
+                      : {};
+                  const runtimePatchContent = extractMiniAppRuntimeContent(result.outputData);
+                  return {
+                    ...item,
+                    type: getMiniAppRuntimeType(item, result.outputData),
+                    content: mergeMiniAppRuntimeContent(item, result.outputData),
+                    preview: {
+                      ...preview,
+                      ...(typeof result.outputData?.uiType === "string" ? { uiType: result.outputData.uiType } : {}),
+                      content: {
+                        ...previewContent,
+                        ...runtimePatchContent,
+                      },
+                      lastRun: {
+                        input,
+                        params,
+                        output: result.output,
+                        outputData: result.outputData,
+                        ranAt: result.ranAt,
+                      },
                     },
-                    lastRun: {
-                      input,
-                      params,
-                      output: result.output,
-                      outputData: result.outputData,
-                      ranAt: result.ranAt,
-                    },
-                  },
-                }
+                  };
+                })()
               : item
           )
         );

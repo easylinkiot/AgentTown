@@ -23,7 +23,10 @@ import Svg, { Defs, Ellipse, LinearGradient, RadialGradient, Rect, Stop } from "
 
 import { ChatListItem } from "@/src/components/ChatListItem";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
-import { MiniAppDock } from "@/src/components/MiniAppDock";
+import { MiniAppCreatorModal } from "@/src/components/MiniAppCreatorModal";
+import { MiniAppOverlayRenderer } from "@/src/components/MiniAppOverlayRenderer";
+import { MiniAppStoreModal } from "@/src/components/MiniAppStoreModal";
+import { MiniAppWidget } from "@/src/components/MiniAppWidget";
 import { NpcListItem } from "@/src/components/NpcListItem";
 import { LoadingSkeleton, StateBanner } from "@/src/components/StateBlocks";
 import { APP_SAFE_AREA_EDGES } from "@/src/constants/safe-area";
@@ -31,6 +34,17 @@ import { subscribePendingFriendQrPayload } from "@/src/features/friends/friend-q
 import { getCachedAgentSessions, preloadAgentSessions } from "@/src/features/chat/agent-sessions-cache";
 import { parseConversationTimestamp } from "@/src/features/chat/chat-helpers";
 import { buildSocialChatRoute } from "@/src/features/chat/chat-routes";
+import {
+  findInstalledAppForDescriptor,
+  getMiniToolQuickActions,
+  getMiniToolStoreEntries,
+  MiniToolStoreEntry,
+} from "@/src/features/miniapps/parity-registry";
+import { buildMiniAppViewModel } from "@/src/features/miniapps/model";
+import {
+  loadHiddenMiniToolQuickActions,
+  saveHiddenMiniToolQuickActions,
+} from "@/src/features/miniapps/preferences";
 import { tx } from "@/src/i18n/translate";
 import {
   acceptFriendRequest,
@@ -46,7 +60,7 @@ import {
 } from "@/src/lib/api";
 import { isMyBotThreadId, useAgentTown } from "@/src/state/agenttown-context";
 import { useAuth } from "@/src/state/auth-context";
-import { ChatThread, FriendRequest, NPC } from "@/src/types";
+import { ChatThread, FriendRequest, MiniApp, NPC } from "@/src/types";
 
 type GroupCategoryOption = {
   key: string;
@@ -68,6 +82,28 @@ type PresenceItem = {
   removeKind?: PresenceRemoveKind;
   removeId?: string;
 };
+
+function normalizeMiniToolValue(value?: string) {
+  return (value || "").trim().toLowerCase();
+}
+
+function isPinnedByDefaultMiniToolEntry(app: MiniApp) {
+  const pinnedQuickActions = getMiniToolQuickActions().filter((item) => item.param === "news" || item.param === "ai_terms");
+  const appPresetKey = normalizeMiniToolValue(app.presetKey);
+  const appQuery = normalizeMiniToolValue(app.query);
+
+  return pinnedQuickActions.some((item) => {
+    const install = item.install;
+    if (!install) return false;
+    if (install.presetKey && appPresetKey === normalizeMiniToolValue(install.presetKey)) {
+      return true;
+    }
+    if (install.query && appQuery === normalizeMiniToolValue(install.query)) {
+      return true;
+    }
+    return false;
+  });
+}
 
 const GROUP_CATEGORY_OPTIONS: GroupCategoryOption[] = [
   { key: "toc_learning", groupType: "toc", zh: "学习群", en: "Learning" },
@@ -136,11 +172,17 @@ export default function HomeScreen() {
     friends,
     agents,
     botConfig,
+    tasks,
+    miniApps,
     resolveFriendDisplayName,
     language,
     bootstrapReady,
     createFriend,
     createGroup,
+    generateMiniApp,
+    installMiniApp,
+    installPresetMiniApp,
+    removeMiniApp,
     removeAgent,
     removeFriend,
     refreshAll,
@@ -153,6 +195,15 @@ export default function HomeScreen() {
   const [groupModal, setGroupModal] = useState(false);
   const [teamMenuVisible, setTeamMenuVisible] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
+  const [miniToolStoreVisible, setMiniToolStoreVisible] = useState(false);
+  const [miniToolCreatorVisible, setMiniToolCreatorVisible] = useState(false);
+  const [miniToolExpanded, setMiniToolExpanded] = useState(false);
+  const [showTasksModal, setShowTasksModal] = useState(false);
+  const [selectedMiniToolAppId, setSelectedMiniToolAppId] = useState<string | null>(null);
+  const [miniToolBusyId, setMiniToolBusyId] = useState<string | null>(null);
+  const [miniToolCreatorDraftId, setMiniToolCreatorDraftId] = useState<string | null>(null);
+  const [hiddenMiniToolQuickActionIds, setHiddenMiniToolQuickActionIds] = useState<string[]>([]);
+  const [miniToolPrefsReady, setMiniToolPrefsReady] = useState(false);
 
   const [friendQuery, setFriendQuery] = useState("");
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -175,6 +226,49 @@ export default function HomeScreen() {
   const [refreshingChats, setRefreshingChats] = useState(false);
   const [openingAskAnything, setOpeningAskAnything] = useState(false);
   const [npcList, setNpcList] = useState<NPC[]>([]);
+
+  const selectedMiniToolApp = useMemo(
+    () => miniApps.find((item) => item.id === selectedMiniToolAppId) || null,
+    [miniApps, selectedMiniToolAppId]
+  );
+  const miniToolCreatorDraft = useMemo(
+    () => miniApps.find((item) => item.id === miniToolCreatorDraftId) || null,
+    [miniApps, miniToolCreatorDraftId]
+  );
+  const installedMiniToolApps = useMemo(() => miniApps.filter((item) => item.installed), [miniApps]);
+  const installedMiniToolAppsForDock = useMemo(
+    () => installedMiniToolApps.filter((item) => !isPinnedByDefaultMiniToolEntry(item)),
+    [installedMiniToolApps]
+  );
+  const installedStoreIds = useMemo(
+    () =>
+      getMiniToolStoreEntries()
+        .filter((entry) => findInstalledAppForDescriptor(miniApps, entry.install)?.installed)
+        .map((entry) => entry.id),
+    [miniApps]
+  );
+
+  useEffect(() => {
+    let active = true;
+    setMiniToolPrefsReady(false);
+    void loadHiddenMiniToolQuickActions(user?.id)
+      .then((ids) => {
+        if (!active) return;
+        setHiddenMiniToolQuickActionIds(ids);
+      })
+      .finally(() => {
+        if (!active) return;
+        setMiniToolPrefsReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!miniToolPrefsReady) return;
+    void saveHiddenMiniToolQuickActions(user?.id, hiddenMiniToolQuickActionIds).catch(() => undefined);
+  }, [hiddenMiniToolQuickActionIds, miniToolPrefsReady, user?.id]);
 
   const list = useMemo(() => {
     const sorted = chatThreads.filter((thread) => !isMyBotThreadId(thread.id));
@@ -457,6 +551,147 @@ export default function HomeScreen() {
     },
     [router]
   );
+
+  const ensureMiniToolInstalled = useCallback(
+    async (descriptor?: { presetKey?: "news" | "price" | "words"; query?: string; sources?: string[] }) => {
+      const existing = findInstalledAppForDescriptor(miniApps, descriptor);
+      if (existing?.installed) return existing;
+      if (descriptor?.presetKey) {
+        return installPresetMiniApp(descriptor.presetKey);
+      }
+      const query = descriptor?.query?.trim() || "";
+      if (!query) return null;
+      const created = await generateMiniApp(query, descriptor?.sources || []);
+      if (!created) {
+        throw new Error(tr("生成 Mini App 失败", "Failed to generate mini app"));
+      }
+      await installMiniApp(created.id, true);
+      return {
+        ...created,
+        installed: true,
+        status: "installed" as const,
+      };
+    },
+    [generateMiniApp, installMiniApp, installPresetMiniApp, miniApps, tr]
+  );
+
+  const handleAddStoreMiniTool = useCallback(
+    async (entry: MiniToolStoreEntry) => {
+      if (miniToolBusyId) return;
+      setMiniToolBusyId(entry.id);
+      setUiError(null);
+      try {
+        const installed = await ensureMiniToolInstalled(entry.install);
+        if (installed?.id) {
+          setMiniToolStoreVisible(false);
+          setSelectedMiniToolAppId(installed.id);
+        }
+      } catch (err) {
+        setUiError(formatApiError(err));
+      } finally {
+        setMiniToolBusyId(null);
+      }
+    },
+    [ensureMiniToolInstalled, miniToolBusyId]
+  );
+
+  const handleQuickCreateMiniTool = useCallback(
+    async (param: string) => {
+      if (miniToolBusyId) return;
+      const quickAction = getMiniToolQuickActions().find((item) => item.param === param);
+      if (!quickAction?.install) return;
+      setMiniToolBusyId(quickAction.id);
+      setUiError(null);
+      try {
+        const installed = await ensureMiniToolInstalled(quickAction.install);
+        if (installed?.id) {
+          setSelectedMiniToolAppId(installed.id);
+        }
+      } catch (err) {
+        setUiError(formatApiError(err));
+      } finally {
+        setMiniToolBusyId(null);
+      }
+    },
+    [ensureMiniToolInstalled, miniToolBusyId]
+  );
+
+  const handleCreateMiniToolFromPrompt = useCallback(
+    async (query: string) => {
+      if (miniToolBusyId) return;
+      setMiniToolBusyId("creator");
+      setUiError(null);
+      try {
+        if (miniToolCreatorDraftId) {
+          const existingDraft = miniApps.find((item) => item.id === miniToolCreatorDraftId);
+          setMiniToolCreatorDraftId(null);
+          if (existingDraft && !existingDraft.installed) {
+            await removeMiniApp(existingDraft.id);
+          }
+        }
+        const created = await generateMiniApp(query, []);
+        if (!created) {
+          throw new Error(tr("生成 Mini App 失败", "Failed to generate mini app"));
+        }
+        setMiniToolCreatorDraftId(created.id);
+      } catch (err) {
+        setUiError(formatApiError(err));
+      } finally {
+        setMiniToolBusyId(null);
+      }
+    },
+    [generateMiniApp, miniApps, miniToolBusyId, miniToolCreatorDraftId, removeMiniApp, tr]
+  );
+
+  const handleInstallCreatedMiniTool = useCallback(
+    async (app: MiniApp) => {
+      if (miniToolBusyId) return;
+      setMiniToolBusyId("creator_install");
+      setUiError(null);
+      try {
+        await installMiniApp(app.id, true);
+        setMiniToolCreatorDraftId(null);
+        setMiniToolCreatorVisible(false);
+        setSelectedMiniToolAppId(app.id);
+      } catch (err) {
+        setUiError(formatApiError(err));
+      } finally {
+        setMiniToolBusyId(null);
+      }
+    },
+    [installMiniApp, miniToolBusyId]
+  );
+
+  const handleDiscardCreatedMiniTool = useCallback(
+    async (app: MiniApp) => {
+      if (miniToolBusyId) return;
+      setMiniToolBusyId("creator_discard");
+      setUiError(null);
+      try {
+        if (!app.installed) {
+          await removeMiniApp(app.id);
+        }
+        setMiniToolCreatorDraftId((current) => (current === app.id ? null : current));
+      } catch (err) {
+        setUiError(formatApiError(err));
+      } finally {
+        setMiniToolBusyId(null);
+      }
+    },
+    [miniToolBusyId, removeMiniApp]
+  );
+
+  const handleCloseMiniToolCreator = useCallback(() => {
+    setMiniToolCreatorVisible(false);
+    setUiError(null);
+    if (!miniToolCreatorDraftId) return;
+    const draftId = miniToolCreatorDraftId;
+    const draft = miniApps.find((item) => item.id === draftId);
+    setMiniToolCreatorDraftId(null);
+    if (draft && !draft.installed) {
+      void removeMiniApp(draftId).catch(() => undefined);
+    }
+  }, [miniApps, miniToolCreatorDraftId, removeMiniApp]);
 
   const handleOpenAskAnything = useCallback(async () => {
     if (openingAskAnything) return;
@@ -903,36 +1138,127 @@ export default function HomeScreen() {
                 <Ionicons name="planet-outline" size={14} color="rgba(226,232,240,0.95)" />
                 <Text style={styles.townActionText}>{tr("Bot Park", "Bot Park")}</Text>
               </Pressable>
-              <Pressable style={styles.townActionPill} onPress={() => router.push("/miniapps" as never)}>
+              <Pressable style={styles.townActionPill} onPress={() => setMiniToolStoreVisible(true)}>
                 <Ionicons name="construct-outline" size={14} color="rgba(226,232,240,0.95)" />
                 <Text style={styles.townActionText}>{tr("Maker Park", "Maker Park")}</Text>
               </Pressable>
             </View>
 
-            <View style={styles.townHomesLayer} pointerEvents="box-none">
-              {[0, 1, 2].map((idx) => {
-                const target = presence[idx];
-                if (!target) return null;
-                return (
-                  <Pressable
-                    key={`town-home-${target.id}`}
-                    style={[
-                      styles.townMiniHome,
-                      idx === 0 ? styles.townMiniHomeA : idx === 1 ? styles.townMiniHomeB : styles.townMiniHomeC,
-                    ]}
-                    onPress={() =>
-                      openEntityConfig({
-                        entityType: target.entityType,
-                        entityId: target.entityId,
-                        name: target.name,
-                        avatar: target.avatar,
-                      })
-                    }
-                  >
-                    <Ionicons name="home" size={12} color="rgba(226,232,240,0.92)" />
+            <View style={styles.homeTeamBarWrap}>
+              <View style={styles.homeTeamBar}>
+                <View style={styles.teamDockLeft}>
+                  <Pressable style={styles.teamDockAdd} onPress={() => setTeamMenuVisible((prev) => !prev)}>
+                    <Ionicons name={teamMenuVisible ? "close" : "add"} size={18} color="rgba(226,232,240,0.92)" />
                   </Pressable>
-                );
-              })}
+                  {teamMenuVisible ? (
+                    <View style={styles.teamMenu}>
+                      <Pressable
+                        style={styles.teamMenuItem}
+                        onPress={() => {
+                          setTeamMenuVisible(false);
+                          setGroupModal(true);
+                        }}
+                      >
+                        <Ionicons name="chatbubbles-outline" size={15} color="rgba(226,232,240,0.92)" />
+                        <Text style={styles.teamMenuText}>{tr("发起群聊", "New Group")}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.teamMenuItem}
+                        onPress={() => {
+                          setTeamMenuVisible(false);
+                          setFriendModal(true);
+                        }}
+                      >
+                        <Ionicons name="person-add-outline" size={15} color="rgba(226,232,240,0.92)" />
+                        <Text style={styles.teamMenuText}>{tr("添加朋友", "Add Friend")}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.teamMenuItem}
+                        onPress={() => {
+                          setTeamMenuVisible(false);
+                          router.push("/agents" as never);
+                        }}
+                      >
+                        <Ionicons name="hardware-chip-outline" size={15} color="rgba(226,232,240,0.92)" />
+                        <Text style={styles.teamMenuText}>{tr("添加Bot", "Add Bot")}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.teamMenuItem}
+                        onPress={() => {
+                          setTeamMenuVisible(false);
+                          void handleOpenScanner();
+                        }}
+                      >
+                        <Ionicons name="scan-outline" size={15} color="rgba(226,232,240,0.92)" />
+                        <Text style={styles.teamMenuText}>{tr("扫一扫", "Scan")}</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.homeTeamScroll}
+                  contentContainerStyle={styles.homeTeamRow}
+                >
+                  {presence.length
+                    ? presence.map((item, index) => {
+                        const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
+                        const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
+                        const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
+                        return (
+                          <Pressable
+                            key={item.id}
+                            testID={`home-presence-item-${index}`}
+                            style={styles.homeTeamItem}
+                            onLongPress={() => handleRemovePresence(item)}
+                            delayLongPress={280}
+                            onPress={() =>
+                              openEntityConfig({
+                                entityType: item.entityType,
+                                entityId: item.entityId,
+                                name: item.name,
+                                avatar: item.avatar,
+                              })
+                            }
+                          >
+                            <View style={styles.homeTeamAvatarWrap}>
+                              {item.avatar ? (
+                                <Image source={{ uri: item.avatar }} style={styles.homeTeamAvatar} />
+                              ) : (
+                                <View style={[styles.homeTeamAvatar, styles.presenceAvatarFallback]}>
+                                  <Ionicons name="person-outline" size={18} color="rgba(226,232,240,0.82)" />
+                                </View>
+                              )}
+                              <View
+                                testID={`home-presence-role-badge-${index}-${item.role}`}
+                                style={[
+                                  styles.presenceRoleBadge,
+                                  item.role === "npc"
+                                    ? styles.presenceRoleBadgeNpc
+                                    : item.role === "bot"
+                                      ? styles.presenceRoleBadgeBot
+                                      : styles.presenceRoleBadgeHuman,
+                                ]}
+                              >
+                                <Ionicons
+                                  name={presenceRoleIcon(item.role)}
+                                  size={9}
+                                  color={item.role === "human" ? "rgba(12,18,32,0.95)" : "rgba(248,250,252,0.95)"}
+                                />
+                              </View>
+                              <View style={styles.presenceDot} />
+                            </View>
+                            <Text testID={`home-presence-name-${index}`} style={styles.homeTeamName} numberOfLines={1}>
+                              {displayName}
+                            </Text>
+                          </Pressable>
+                        );
+                      })
+                    : null}
+                </ScrollView>
+              </View>
             </View>
 
             <Pressable style={styles.myHomeChip} onPress={() => router.push("/living-room" as never)}>
@@ -940,9 +1266,6 @@ export default function HomeScreen() {
               <Text style={styles.myHomeText}>{tr("My Home", "My Home")}</Text>
             </Pressable>
 
-            <View style={styles.miniAppLayer}>
-              <MiniAppDock />
-            </View>
           </View>
 
           <View style={styles.chatSheet}>
@@ -996,134 +1319,111 @@ export default function HomeScreen() {
                   />
                 )}
                 contentContainerStyle={styles.listContent}
-                ListHeaderComponent={
-                  npcList.length > 0 ? (
-                    <View style={styles.npcListWrap}>
-                      {npcList.map((npc) => (
-                        <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
-                      ))}
-                    </View>
-                  ) : null
-                }
+                ListHeaderComponent={npcList.length > 0 ? (
+                  <View style={styles.npcListWrap}>
+                    {npcList.map((npc) => (
+                      <NpcListItem key={npc.id} npc={npc} onPress={() => handleOpenNpc(npc)} />
+                    ))}
+                  </View>
+                ) : null}
               />
             )}
           </View>
 
-          <View style={[styles.teamDockWrap, { paddingBottom: Math.max(insets.bottom, 8) }]} pointerEvents="box-none">
-            <View style={styles.teamDock}>
-              <View style={styles.teamDockLeft}>
-                <Pressable style={styles.teamDockAdd} onPress={() => setTeamMenuVisible((prev) => !prev)}>
-                  <Ionicons name={teamMenuVisible ? "close" : "add"} size={18} color="rgba(226,232,240,0.92)" />
-                </Pressable>
-                {teamMenuVisible ? (
-                  <View style={styles.teamMenu}>
-                    <Pressable
-                      style={styles.teamMenuItem}
-                      onPress={() => {
-                        setTeamMenuVisible(false);
-                        setGroupModal(true);
-                      }}
-                    >
-                      <Ionicons name="chatbubbles-outline" size={15} color="rgba(226,232,240,0.92)" />
-                      <Text style={styles.teamMenuText}>{tr("发起群聊", "New Group")}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.teamMenuItem}
-                      onPress={() => {
-                        setTeamMenuVisible(false);
-                        setFriendModal(true);
-                      }}
-                    >
-                      <Ionicons name="person-add-outline" size={15} color="rgba(226,232,240,0.92)" />
-                      <Text style={styles.teamMenuText}>{tr("添加朋友", "Add Friend")}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.teamMenuItem}
-                      onPress={() => {
-                        setTeamMenuVisible(false);
-                        router.push("/agents" as never);
-                      }}
-                    >
-                      <Ionicons name="hardware-chip-outline" size={15} color="rgba(226,232,240,0.92)" />
-                      <Text style={styles.teamMenuText}>{tr("添加Bot", "Add Bot")}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.teamMenuItem}
-                      onPress={() => {
-                        setTeamMenuVisible(false);
-                        void handleOpenScanner();
-                      }}
-                    >
-                      <Ionicons name="scan-outline" size={15} color="rgba(226,232,240,0.92)" />
-                      <Text style={styles.teamMenuText}>{tr("扫一扫", "Scan")}</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+          {miniToolExpanded ? (
+            <View style={[styles.miniToolWidgetWrap, { bottom: Math.max(insets.bottom, 8) + 92 }]} pointerEvents="box-none">
+              <View style={styles.miniToolWidgetInner}>
+                <MiniAppWidget
+                  apps={installedMiniToolApps}
+                  tasks={tasks}
+                  language={language}
+                  hiddenQuickActionIds={hiddenMiniToolQuickActionIds}
+                  onOpenApp={(app) => setSelectedMiniToolAppId(app.id)}
+                  onOpenCreator={() => setMiniToolCreatorVisible(true)}
+                  onQuickCreate={handleQuickCreateMiniTool}
+                  onDeleteApp={async (id) => {
+                    try {
+                      await installMiniApp(id, false);
+                    } catch (err) {
+                      setUiError(formatApiError(err));
+                    }
+                  }}
+                  onHideQuickAction={async (id) => {
+                    setHiddenMiniToolQuickActionIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+                  }}
+                  onMinimize={() => setMiniToolExpanded(false)}
+                />
               </View>
-
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.presenceScroll}
-                contentContainerStyle={styles.presenceRow}
-              >
-                {presence.length
-                  ? presence.map((item, index) => {
-                    const fallbackBase = item.role === "human" ? tr("好友", "Friend") : item.role.toUpperCase();
-                    const suffix = (item.entityId || item.id).replace(/[^a-zA-Z0-9]/g, "").slice(-4);
-                    const displayName = (item.name || "").trim() || (suffix ? `${fallbackBase}-${suffix}` : fallbackBase);
-                    return (
-                      <Pressable
-                        key={item.id}
-                        testID={`home-presence-item-${index}`}
-                        style={styles.presenceItem}
-                        onLongPress={() => handleRemovePresence(item)}
-                        delayLongPress={280}
-                        onPress={() =>
-                          openEntityConfig({
-                            entityType: item.entityType,
-                            entityId: item.entityId,
-                            name: item.name,
-                            avatar: item.avatar,
-                          })
-                        }
-                      >
-                        <View style={styles.presenceAvatarWrap}>
-                          {item.avatar ? (
-                            <Image source={{ uri: item.avatar }} style={styles.presenceAvatar} />
-                          ) : (
-                            <View style={[styles.presenceAvatar, styles.presenceAvatarFallback]}>
-                              <Ionicons name="person-outline" size={18} color="rgba(226,232,240,0.82)" />
-                            </View>
-                          )}
-                          <View
-                            testID={`home-presence-role-badge-${index}-${item.role}`}
-                            style={[
-                              styles.presenceRoleBadge,
-                              item.role === "npc"
-                                ? styles.presenceRoleBadgeNpc
-                                : item.role === "bot"
-                                  ? styles.presenceRoleBadgeBot
-                                  : styles.presenceRoleBadgeHuman,
-                            ]}
-                          >
-                            <Ionicons
-                              name={presenceRoleIcon(item.role)}
-                              size={9}
-                              color={item.role === "human" ? "rgba(12,18,32,0.95)" : "rgba(248,250,252,0.95)"}
-                            />
-                          </View>
-                          <View style={styles.presenceDot} />
-                        </View>
-                        <Text testID={`home-presence-name-${index}`} style={styles.presenceName} numberOfLines={1}>
-                          {displayName}
-                        </Text>
-                      </Pressable>
-                    );
-                  })
-                  : null}
-              </ScrollView>
             </View>
+          ) : null}
+
+          <View style={[styles.quickDockWrap, { paddingBottom: Math.max(insets.bottom, 8) + 6 }]} pointerEvents="box-none">
+            <View style={styles.quickDockGradient} />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.quickDockScroll}
+              contentContainerStyle={styles.quickDockRow}
+            >
+              <Pressable style={styles.quickDockButton} onPress={() => setShowTasksModal(true)}>
+                <View style={[styles.quickDockIcon, styles.quickDockIconNeutral]}>
+                  <Ionicons name="checkmark-done-outline" size={10} color="rgba(255,255,255,0.88)" />
+                </View>
+                <Text style={styles.quickDockLabel}>{tr("待办", "Tasks")}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.quickDockButton}
+                onPress={() => {
+                  void handleQuickCreateMiniTool("news");
+                }}
+              >
+                <View style={[styles.quickDockIcon, { backgroundColor: "#3b82f6" }]}>
+                  <Ionicons name="newspaper-outline" size={10} color="#ffffff" />
+                </View>
+                <Text style={styles.quickDockLabel}>{tr("关注", "News")}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.quickDockButton}
+                onPress={() => {
+                  void handleQuickCreateMiniTool("ai_terms");
+                }}
+              >
+                <View style={[styles.quickDockIcon, { backgroundColor: "#2563eb" }]}>
+                  <Ionicons name="hardware-chip-outline" size={10} color="#ffffff" />
+                </View>
+                <Text style={styles.quickDockLabel}>{tr("AI术语", "AI Terms")}</Text>
+              </Pressable>
+
+              {installedMiniToolAppsForDock.map((app) => {
+                const vm = buildMiniAppViewModel(app);
+                return (
+                  <Pressable
+                    key={app.id}
+                    style={styles.quickDockButton}
+                    onPress={() => setSelectedMiniToolAppId(app.id)}
+                    onLongPress={async () => {
+                      try {
+                        await installMiniApp(app.id, false);
+                      } catch (err) {
+                        setUiError(formatApiError(err));
+                      }
+                    }}
+                    delayLongPress={280}
+                  >
+                    <View style={[styles.quickDockIcon, { backgroundColor: vm.color || "#475569" }]}>
+                      <Ionicons name={vm.icon as keyof typeof Ionicons.glyphMap} size={10} color="#ffffff" />
+                    </View>
+                    <Text style={styles.quickDockLabel} numberOfLines={1}>
+                      {app.name.slice(0, 6)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <Pressable style={styles.quickDockAddBtn} onPress={() => setMiniToolStoreVisible(true)}>
+                <Ionicons name="add" size={18} color="rgba(255,255,255,0.42)" />
+              </Pressable>
+            </ScrollView>
           </View>
         </View>
 
@@ -1171,7 +1471,7 @@ export default function HomeScreen() {
                 testID="home-quick-miniapps"
                 onPress={() => {
                   setPeopleModal(false);
-                  router.push("/miniapps" as never);
+                  setMiniToolStoreVisible(true);
                 }}
               >
                 <Ionicons name="apps-outline" size={16} color="#bfdbfe" />
@@ -1447,6 +1747,104 @@ export default function HomeScreen() {
           </Pressable>
         </Modal>
 
+        <MiniAppStoreModal
+          visible={miniToolStoreVisible}
+          installedItemIds={installedStoreIds}
+          busyItemId={miniToolBusyId}
+          onClose={() => setMiniToolStoreVisible(false)}
+          onAddApp={(entry) => {
+            void handleAddStoreMiniTool(entry);
+          }}
+        />
+
+        <Modal visible={showTasksModal} transparent animationType="fade" onRequestClose={() => setShowTasksModal(false)}>
+          <Pressable style={styles.modalOverlay} onPress={() => setShowTasksModal(false)}>
+            <Pressable style={styles.sheetModal} onPress={() => null}>
+              <View style={styles.sheetDragWrap}>
+                <View style={styles.sheetDragHandle} />
+              </View>
+              <View style={styles.sheetHeader}>
+                <View style={styles.sheetHeaderTitleWrap}>
+                  <Ionicons name="checkmark-done-outline" size={18} color="#22c55e" />
+                  <Text style={styles.sheetHeaderTitle}>{tr("待办事项", "Tasks")}</Text>
+                </View>
+                <Pressable style={styles.sheetHeaderClose} onPress={() => setShowTasksModal(false)}>
+                  <Ionicons name="close" size={18} color="rgba(255,255,255,0.72)" />
+                </Pressable>
+              </View>
+
+              <ScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
+                {tasks.length === 0 ? (
+                  <Text style={styles.sheetEmptyText}>{tr("暂无待办事项", "No tasks yet")}</Text>
+                ) : (
+                  tasks.map((task, index) => (
+                    <View key={task.id || `${task.title}_${index}`} style={styles.sheetTaskCard}>
+                      <Text style={styles.sheetTaskIndex}>{`${index + 1}.`}</Text>
+                      <View style={styles.sheetTaskBody}>
+                        <Text style={styles.sheetTaskTitle}>{task.title}</Text>
+                        <View style={styles.sheetTaskMetaRow}>
+                          <View
+                            style={[
+                              styles.sheetTaskPriority,
+                              task.priority === "High"
+                                ? styles.sheetTaskPriorityHigh
+                                : task.priority === "Medium"
+                                  ? styles.sheetTaskPriorityMedium
+                                  : styles.sheetTaskPriorityLow,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.sheetTaskPriorityText,
+                                task.priority === "High"
+                                  ? styles.sheetTaskPriorityTextHigh
+                                  : task.priority === "Medium"
+                                    ? styles.sheetTaskPriorityTextMedium
+                                    : styles.sheetTaskPriorityTextLow,
+                              ]}
+                            >
+                              {task.priority}
+                            </Text>
+                          </View>
+                          {task.assignee ? (
+                            <View style={styles.sheetTaskAssignee}>
+                              <Text style={styles.sheetTaskAssigneeText}>{`@${task.assignee}`}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <MiniAppCreatorModal
+          visible={miniToolCreatorVisible}
+          generating={miniToolBusyId === "creator"}
+          installing={miniToolBusyId === "creator_install"}
+          error={uiError}
+          previewApp={miniToolCreatorDraft}
+          onClose={handleCloseMiniToolCreator}
+          onGenerate={(query) => {
+            void handleCreateMiniToolFromPrompt(query);
+          }}
+          onAddPreview={(app) => {
+            void handleInstallCreatedMiniTool(app);
+          }}
+          onDiscardPreview={(app) => {
+            void handleDiscardCreatedMiniTool(app);
+          }}
+        />
+
+        <MiniAppOverlayRenderer
+          app={selectedMiniToolApp}
+          visible={Boolean(selectedMiniToolApp)}
+          onClose={() => setSelectedMiniToolAppId(null)}
+        />
+
       </SafeAreaView>
     </KeyframeBackground>
   );
@@ -1521,37 +1919,63 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.5,
   },
-  townHomesLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
+  homeTeamBarWrap: {
+    marginTop: 12,
+    marginHorizontal: 14,
+    zIndex: 3,
   },
-  townMiniHome: {
-    position: "absolute",
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+  homeTeamBar: {
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(220,220,230,0.88)",
+    paddingLeft: 12,
+    paddingRight: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 88,
+  },
+  homeTeamScroll: {
+    flex: 1,
+  },
+  homeTeamRow: {
+    gap: 14,
+    alignItems: "center",
+    paddingRight: 10,
+  },
+  homeTeamItem: {
+    width: 62,
+    alignItems: "center",
+    gap: 6,
+  },
+  homeTeamAvatarWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(17,24,39,0.12)",
+    backgroundColor: "rgba(255,255,255,0.86)",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  townMiniHomeA: {
-    left: "14%",
-    top: "30%",
+  homeTeamAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 17,
   },
-  townMiniHomeB: {
-    right: "15%",
-    top: "24%",
-  },
-  townMiniHomeC: {
-    left: "20%",
-    top: "56%",
+  homeTeamName: {
+    width: "100%",
+    color: "rgba(17,24,39,0.88)",
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "700",
+    textAlign: "center",
   },
   myHomeChip: {
     position: "absolute",
     left: "50%",
-    top: "52%",
+    top: "78%",
     transform: [{ translateX: -44 }],
     minHeight: 28,
     borderRadius: 999,
@@ -1570,16 +1994,9 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.6,
   },
-  miniAppLayer: {
-    position: "absolute",
-    left: 10,
-    right: 10,
-    bottom: 8,
-    zIndex: 5,
-  },
   chatSheet: {
     flex: 1,
-    marginTop: -24,
+    marginTop: -6,
     borderTopLeftRadius: 38,
     borderTopRightRadius: 38,
     borderWidth: 1,
@@ -1602,7 +2019,17 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "rgba(148,163,184,0.45)",
   },
-  teamDockWrap: {
+  miniToolWidgetWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 55,
+  },
+  miniToolWidgetInner: {
+    width: "92%",
+  },
+  quickDockWrap: {
     position: "absolute",
     left: 0,
     right: 0,
@@ -1611,17 +2038,58 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     zIndex: 40,
   },
-  teamDock: {
-    width: "92%",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(16,18,34,0.58)",
+  quickDockGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+  },
+  quickDockRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: 10,
-    paddingRight: 10,
-    paddingVertical: 8,
+    gap: 10,
+    paddingHorizontal: 14,
+  },
+  quickDockScroll: {
+    width: "100%",
+  },
+  quickDockButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(44,44,46,0.96)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  quickDockIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickDockIconNeutral: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.20)",
+    backgroundColor: "transparent",
+  },
+  quickDockLabel: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 9,
+    fontWeight: "700",
+    lineHeight: 10,
+  },
+  quickDockAddBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center",
   },
   teamDockLeft: {
     marginRight: 8,
@@ -1767,7 +2235,7 @@ const styles = StyleSheet.create({
   listContent: {
     flexGrow: 1,
     paddingTop: 6,
-    paddingBottom: 126,
+    paddingBottom: 104,
     paddingHorizontal: 4,
   },
   npcListWrap: {
@@ -1794,35 +2262,6 @@ const styles = StyleSheet.create({
   },
   chatList: {
     flex: 1,
-  },
-  presenceRow: {
-    gap: 10,
-    paddingVertical: 2,
-    paddingHorizontal: 0,
-    alignItems: "center",
-  },
-  presenceScroll: {
-    flex: 1,
-  },
-  presenceItem: {
-    width: 58,
-    alignItems: "center",
-    gap: 5,
-  },
-  presenceAvatarWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  presenceAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
   },
   presenceAvatarFallback: {
     alignItems: "center",
@@ -1853,14 +2292,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,118,110,0.95)",
     borderColor: "rgba(167,243,208,0.78)",
   },
-  presenceName: {
-    width: "100%",
-    color: "rgba(226,232,240,0.9)",
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: "700",
-    textAlign: "center",
-  },
   presenceDot: {
     position: "absolute",
     width: 8,
@@ -1886,6 +2317,141 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(28,28,30,0.95)",
     padding: 14,
     gap: 10,
+  },
+  sheetModal: {
+    width: "100%",
+    maxHeight: "80%",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    backgroundColor: "#1c1c1e",
+    overflow: "hidden",
+    alignSelf: "center",
+    marginTop: "auto",
+  },
+  sheetDragWrap: {
+    width: "100%",
+    alignItems: "center",
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  sheetDragHandle: {
+    width: 48,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.20)",
+  },
+  sheetHeader: {
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.10)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  sheetHeaderTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  sheetHeaderTitle: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  sheetHeaderClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetBody: {
+    flexGrow: 0,
+  },
+  sheetBodyContent: {
+    padding: 16,
+    gap: 12,
+  },
+  sheetEmptyText: {
+    color: "rgba(255,255,255,0.40)",
+    textAlign: "center",
+    paddingVertical: 40,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  sheetTaskCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  sheetTaskIndex: {
+    color: "rgba(255,255,255,0.48)",
+    fontSize: 12,
+    fontWeight: "700",
+    width: 18,
+    paddingTop: 2,
+  },
+  sheetTaskBody: {
+    flex: 1,
+    gap: 10,
+  },
+  sheetTaskTitle: {
+    color: "#ffffff",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
+  sheetTaskMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  sheetTaskPriority: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  sheetTaskPriorityHigh: {
+    backgroundColor: "rgba(239,68,68,0.20)",
+  },
+  sheetTaskPriorityMedium: {
+    backgroundColor: "rgba(249,115,22,0.20)",
+  },
+  sheetTaskPriorityLow: {
+    backgroundColor: "rgba(59,130,246,0.20)",
+  },
+  sheetTaskPriorityText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  sheetTaskPriorityTextHigh: {
+    color: "#f87171",
+  },
+  sheetTaskPriorityTextMedium: {
+    color: "#fb923c",
+  },
+  sheetTaskPriorityTextLow: {
+    color: "#60a5fa",
+  },
+  sheetTaskAssignee: {
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  sheetTaskAssigneeText: {
+    color: "rgba(255,255,255,0.56)",
+    fontSize: 11,
+    fontWeight: "700",
   },
   sheetTitle: {
     color: "#e2e8f0",

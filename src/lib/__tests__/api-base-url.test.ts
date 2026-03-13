@@ -63,4 +63,26 @@ describe("api base url config", () => {
       })
     ).toBe("http://127.0.0.1:8080");
   });
+
+  it("prefers local fallback when local env is paired with a stale managed url", () => {
+    expect(
+      resolveApiBaseUrl({
+        apiEnv: "local",
+        explicitBaseUrl: "https://api.agtown.ai",
+        platformOS: "ios",
+        isReleaseBuild: false,
+      })
+    ).toBe("http://127.0.0.1:8080");
+  });
+
+  it("keeps custom local env overrides that are not managed defaults", () => {
+    expect(
+      resolveApiBaseUrl({
+        apiEnv: "local",
+        explicitBaseUrl: "http://192.168.31.5:8080",
+        platformOS: "ios",
+        isReleaseBuild: false,
+      })
+    ).toBe("http://192.168.31.5:8080");
+  });
 });

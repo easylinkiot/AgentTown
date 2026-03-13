@@ -10,6 +10,11 @@ export type ApiEnvironment = keyof typeof API_ENV_BASE_URLS;
 
 export const DEFAULT_API_ENV: ApiEnvironment = "stage";
 const LOCALHOST_PATTERN = /^http:\/\/(?:localhost|127\.0\.0\.1|10\.0\.2\.2)(?=[:/]|$)/i;
+const KNOWN_REMOTE_API_BASE_URLS = new Set<string>(
+  Object.entries(API_ENV_BASE_URLS)
+    .filter(([env]) => env !== "local")
+    .map(([, url]) => url)
+);
 let hasLoggedRuntimeApiEnv = false;
 
 function normalizeApiEnvironment(value: string | undefined | null): ApiEnvironment {
@@ -29,6 +34,16 @@ function normalizeLocalhostForAndroid(value: string, platformOS: string): string
   return value
     .replace(/^http:\/\/localhost(?=[:/]|$)/i, "http://10.0.2.2")
     .replace(/^http:\/\/127\.0\.0\.1(?=[:/]|$)/i, "http://10.0.2.2");
+}
+
+function resolveConfiguredBaseUrl(
+  env: ApiEnvironment,
+  explicitBaseUrl: string,
+  fallbackBaseUrl: string
+): string {
+  if (env !== "local") return explicitBaseUrl;
+  if (!KNOWN_REMOTE_API_BASE_URLS.has(explicitBaseUrl)) return explicitBaseUrl;
+  return fallbackBaseUrl;
 }
 
 export function getApiEnvironment(value?: string | null): ApiEnvironment {
@@ -58,7 +73,9 @@ export function resolveApiBaseUrl({
 }: ResolveApiBaseUrlOptions = {}): string {
   const env = getApiEnvironment(apiEnv);
   const fallbackBaseUrl = getDefaultApiBaseUrl(env);
-  const raw = e2eBaseUrl?.trim() || explicitBaseUrl?.trim() || fallbackBaseUrl;
+  const rawExplicitBaseUrl = explicitBaseUrl?.trim() || "";
+  const configuredBaseUrl = resolveConfiguredBaseUrl(env, rawExplicitBaseUrl, fallbackBaseUrl);
+  const raw = e2eBaseUrl?.trim() || configuredBaseUrl || fallbackBaseUrl;
   const normalized = normalizeLocalhostForAndroid(trimTrailingSlash(raw), platformOS);
 
   if (isReleaseBuild && !allowLocalhostInRelease && LOCALHOST_PATTERN.test(normalized)) {

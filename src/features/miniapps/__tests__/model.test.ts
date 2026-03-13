@@ -59,6 +59,39 @@ describe("buildMiniAppViewModel", () => {
     expect(vm.priceItems[0]?.product).toBe("Item");
   });
 
+  it("prefers direct type and content fields over preview", () => {
+    const app = baseApp({
+      type: "task_list",
+      icon: "checkmark-done-outline",
+      color: "#22c55e",
+      description: "Direct task content",
+      content: {
+        items: [
+          {
+            id: "task_1",
+            title: "Review parity shell",
+            assignee: "Jason",
+            priority: "High",
+            status: "In Progress",
+          },
+        ],
+      },
+      preview: {
+        uiType: "news_feed",
+        content: {
+          items: [{ id: "news_1", title: "Ignore me" }],
+        },
+      },
+    });
+
+    const vm = buildMiniAppViewModel(app);
+
+    expect(vm.uiType).toBe("task_list");
+    expect(vm.description).toBe("Direct task content");
+    expect(vm.taskItems[0]?.title).toBe("Review parity shell");
+    expect(vm.taskItems).toHaveLength(1);
+  });
+
   it("supports custom block rendering payload", () => {
     const app = baseApp({
       category: "custom",
@@ -117,5 +150,100 @@ describe("buildMiniAppViewModel", () => {
     expect(vm.priceItems[0]?.note).toBe("Weekend deal");
     expect(vm.flashcard.memoryTip).toBe("Think 're-silient' = bounce back.");
     expect(vm.flashcard.collocations[0]).toBe("resilient system");
+  });
+
+  it("supports task list and generative widget payloads", () => {
+    const app = baseApp({
+      category: "task_list",
+      preview: {
+        uiType: "task_list",
+        content: {
+          items: [
+            {
+              id: "task_1",
+              title: "Draft launch note",
+              assignee: "Owner",
+              priority: "High",
+              status: "Pending",
+            },
+          ],
+        },
+        lastRun: {
+          outputData: {
+            uiType: "generative_app",
+            widgets: [{ type: "stat", label: "Ideas", value: 12, subValue: "+2" }],
+          },
+        },
+      },
+    });
+
+    const vm = buildMiniAppViewModel(app);
+    expect(vm.uiType).toBe("task_list");
+    expect(vm.taskItems[0]?.title).toBe("Draft launch note");
+    expect(vm.widgets[0]?.label).toBe("Ideas");
+  });
+
+  it("supports fashion designer and car caring payloads", () => {
+    const fashionApp = baseApp({
+      category: "fashion_designer",
+      preview: {
+        uiType: "fashion_designer",
+        content: {
+          design: {
+            title: "Concept Capsule",
+            inspiration: "Editorial tailoring with soft drape.",
+            palette: ["Rose Smoke"],
+            materials: ["Wool blend"],
+            steps: ["Sketch silhouettes"],
+            looks: [{ label: "Hero Look", description: "Relaxed jacket with drape skirt." }],
+            renders: [{ label: "Board", image: "https://example.com/board.png" }],
+          },
+        },
+      },
+    });
+    const carApp = baseApp({
+      category: "car_caring",
+      preview: {
+        uiType: "car_caring",
+        content: {
+          game: {
+            carName: "City Coupe",
+            message: "Ready to care.",
+            actions: ["Wash"],
+            stats: { cleanliness: 44, fuel: 55, health: 88 },
+          },
+        },
+      },
+    });
+
+    const fashionVM = buildMiniAppViewModel(fashionApp);
+    const carVM = buildMiniAppViewModel(carApp);
+    expect(fashionVM.fashionDesigner.looks[0]?.label).toBe("Hero Look");
+    expect(fashionVM.fashionDesigner.renders[0]?.image).toBe("https://example.com/board.png");
+    expect(carVM.carCaring.carName).toBe("City Coupe");
+    expect(carVM.carCaring.stats.health).toBe(88);
+  });
+
+  it("prefers lastRun outputData.content when runtime patch is provided", () => {
+    const app = baseApp({
+      type: "generative_app",
+      content: {
+        widgets: [{ type: "stat", label: "Ideas", value: 3 }],
+      },
+      preview: {
+        lastRun: {
+          outputData: {
+            uiType: "generative_app",
+            content: {
+              widgets: [{ type: "toggle", label: "Auto Mode", value: true }],
+            },
+          },
+        },
+      },
+    });
+
+    const vm = buildMiniAppViewModel(app);
+    expect(vm.widgets[0]?.type).toBe("toggle");
+    expect(vm.widgets[0]?.label).toBe("Auto Mode");
   });
 });

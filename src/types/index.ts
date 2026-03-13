@@ -211,6 +211,16 @@ export interface CustomSkill {
 }
 
 export type MiniAppStatus = "draft" | "generated" | "installed";
+export type MiniAppType =
+  | "news_feed"
+  | "flashcard"
+  | "price_tracker"
+  | "dashboard"
+  | "task_list"
+  | "generative_app"
+  | "fashion_designer"
+  | "car_caring"
+  | "custom";
 
 export interface MiniApp {
   id: string;
@@ -220,9 +230,14 @@ export interface MiniApp {
   query: string;
   sources: string[];
   category: string;
+  type?: MiniAppType | string;
   status: MiniAppStatus;
   installed: boolean;
   progress: number;
+  icon?: string;
+  color?: string;
+  description?: string;
+  content?: Record<string, unknown>;
   preview?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -232,7 +247,13 @@ export interface MiniAppTemplate {
   id: string;
   name: string;
   category: string;
+  type?: MiniAppType | string;
   description: string;
+  icon?: string;
+  accentColor?: string;
+  query?: string;
+  sources?: string[];
+  previewUiType?: string;
 }
 
 export type ThreadMemberType = "human" | "agent" | "role";
