@@ -14,13 +14,13 @@ type NavIcon =
   | "people-outline"
   | "apps-outline";
 
-const ITEMS: Array<{
+const ITEMS: {
   key: NavKey;
   zh: string;
   en: string;
   icon: NavIcon;
   href: string;
-}> = [
+}[] = [
   { key: "home", zh: "聊天", en: "Chats", icon: "chatbubbles-outline", href: "/" },
   { key: "tasks", zh: "任务", en: "Tasks", icon: "checkbox-outline", href: "/tasks" },
   { key: "agents", zh: "Bot", en: "Bots", icon: "hardware-chip-outline", href: "/agents" },
@@ -51,7 +51,11 @@ export function AppTopNav({
                 if (!active) router.push(item.href as never);
               }}
             >
-              <Ionicons name={item.icon} size={14} color={active ? "#e2e8f0" : "#94a3b8"} />
+              <Ionicons
+                name={item.icon}
+                size={14}
+                color={active ? "rgba(15,23,42,0.94)" : "rgba(203,213,225,0.82)"}
+              />
               <Text style={[styles.itemText, active && styles.itemTextActive]}>
                 {tx(language, item.zh, item.en)}
               </Text>
@@ -65,36 +69,40 @@ export function AppTopNav({
 
 const styles = StyleSheet.create({
   wrap: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(148,163,184,0.2)",
-    paddingBottom: 10,
     marginBottom: 12,
+    paddingVertical: 2,
   },
   row: {
+    alignItems: "center",
     gap: 8,
-    paddingVertical: 4,
+    paddingRight: 4,
   },
   item: {
-    minHeight: 34,
-    borderRadius: 12,
+    minHeight: 38,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.22)",
-    backgroundColor: "rgba(15,23,42,0.5)",
-    paddingHorizontal: 10,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
   itemActive: {
-    borderColor: "rgba(59,130,246,0.55)",
-    backgroundColor: "rgba(30,64,175,0.35)",
+    borderColor: "rgba(255,255,255,0.52)",
+    backgroundColor: "rgba(242,244,248,0.92)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   itemText: {
     fontSize: 12,
-    color: "#94a3b8",
-    fontWeight: "700",
+    color: "rgba(203,213,225,0.82)",
+    fontWeight: "800",
   },
   itemTextActive: {
-    color: "#e2e8f0",
+    color: "rgba(15,23,42,0.94)",
   },
 });
