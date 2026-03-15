@@ -7,7 +7,7 @@ import { useAgentTown } from "@/src/state/agenttown-context";
 
 export function MeetingCoordinator() {
   const router = useRouter();
-  const segments = useSegments();
+  const segments = Array.from(useSegments());
   const {
     chatThreads,
     incomingMeetingSession,
