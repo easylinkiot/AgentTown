@@ -22,6 +22,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Defs, Ellipse, LinearGradient, RadialGradient, Rect, Stop } from "react-native-svg";
 
 import { ChatListItem } from "@/src/components/ChatListItem";
+import { AppTopNav } from "@/src/components/AppTopNav";
 import { KeyframeBackground } from "@/src/components/KeyframeBackground";
 import { MiniAppCreatorModal } from "@/src/components/MiniAppCreatorModal";
 import { MiniAppOverlayRenderer } from "@/src/components/MiniAppOverlayRenderer";
@@ -1273,6 +1274,16 @@ export default function HomeScreen() {
             <View style={styles.chatSheetHandleWrap}>
               <View style={styles.chatSheetHandle} />
             </View>
+            <View style={styles.chatShellHeader}>
+              <View style={styles.chatShellCopy}>
+                <Text style={styles.chatShellEyebrow}>{tr("消息中心", "Message hub")}</Text>
+                <Text style={styles.chatShellTitle}>{tr("最近对话", "Recent threads")}</Text>
+              </View>
+              <Pressable style={styles.chatShellAction} onPress={() => setPeopleModal(true)}>
+                <Ionicons name="add" size={16} color="rgba(248,250,252,0.96)" />
+              </Pressable>
+            </View>
+            <AppTopNav current="home" language={language} />
 
             {uiError ? (
               <StateBanner
@@ -1927,14 +1938,19 @@ const styles = StyleSheet.create({
   homeTeamBar: {
     borderRadius: 30,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(220,220,230,0.88)",
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(236,236,242,0.92)",
     paddingLeft: 12,
     paddingRight: 12,
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     minHeight: 88,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
   homeTeamScroll: {
     flex: 1,
@@ -1996,14 +2012,14 @@ const styles = StyleSheet.create({
   },
   chatSheet: {
     flex: 1,
-    marginTop: -6,
-    borderTopLeftRadius: 38,
-    borderTopRightRadius: 38,
+    marginTop: -10,
+    borderTopLeftRadius: 42,
+    borderTopRightRadius: 42,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    backgroundColor: "rgba(12,14,26,0.12)",
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(8,11,22,0.18)",
     marginHorizontal: 0,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingTop: 4,
     overflow: "hidden",
   },
@@ -2018,6 +2034,40 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 999,
     backgroundColor: "rgba(148,163,184,0.45)",
+  },
+  chatShellHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 4,
+    marginBottom: 10,
+  },
+  chatShellCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  chatShellEyebrow: {
+    color: "rgba(148,163,184,0.82)",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  chatShellTitle: {
+    color: "rgba(248,250,252,0.96)",
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  chatShellAction: {
+    width: 40,
+    height: 40,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   miniToolWidgetWrap: {
     position: "absolute",
@@ -2234,7 +2284,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     flexGrow: 1,
-    paddingTop: 6,
+    paddingTop: 2,
     paddingBottom: 104,
     paddingHorizontal: 4,
   },

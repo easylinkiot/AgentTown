@@ -150,7 +150,10 @@ export function ChatListItem({
               </Text>
             ) : null}
           </View>
-          <Text style={[styles.time, isNeo && styles.timeNeo]}>{displayTime}</Text>
+          <View style={styles.metaWrap}>
+            <Text style={[styles.time, isNeo && styles.timeNeo]}>{displayTime}</Text>
+            {isNeo ? <Ionicons name="chevron-forward" size={12} color="rgba(148,163,184,0.52)" /> : null}
+          </View>
         </View>
         <Text
           testID={`chat-list-item-preview-${chat.id}`}
@@ -179,31 +182,37 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(0,0,0,0.05)",
   },
   containerNeo: {
     borderBottomWidth: 0,
-    borderRadius: 18,
+    borderRadius: 22,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    marginBottom: 12,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(24,26,40,0.56)",
+    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(11,15,28,0.72)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   avatarWrap: {
     position: "relative",
   },
   avatarRoleBadge: {
     position: "absolute",
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    right: -2,
-    bottom: -2,
+    width: 15,
+    height: 15,
+    borderRadius: 7.5,
+    right: -1,
+    bottom: -1,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -222,9 +231,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(167,243,208,0.78)",
   },
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     backgroundColor: "#d1d5db",
   },
   avatarFallback: {
@@ -233,19 +242,19 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(148,163,184,0.45)",
   },
   avatarNeo: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.12)",
   },
   unreadBadge: {
     position: "absolute",
-    top: -6,
-    right: -6,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
     backgroundColor: "#ef4444",
     borderWidth: 1,
     borderColor: "#fff",
@@ -277,8 +286,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
+  metaWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   name: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
     color: "#111827",
     maxWidth: "84%",
@@ -297,16 +311,17 @@ const styles = StyleSheet.create({
   time: {
     fontSize: 10,
     color: "#6b7280",
+    fontWeight: "600",
   },
   timeNeo: {
-    color: "rgba(148,163,184,0.78)",
+    color: "rgba(148,163,184,0.72)",
   },
   message: {
-    fontSize: 11,
+    fontSize: 12,
     color: "#4b5563",
   },
   messageNeo: {
-    color: "rgba(203,213,225,0.74)",
+    color: "rgba(203,213,225,0.8)",
   },
   highlight: {
     color: "#111827",

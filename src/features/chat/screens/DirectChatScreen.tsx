@@ -4776,26 +4776,39 @@ export default function DirectChatScreen() {
           enabled={false}
         >
         <ContainerView style={containerStyle}>
-          <View style={styles.headerRow}>
-            <Pressable testID="chat-back-button" style={styles.backBtn} onPress={() => router.back()}>
-              <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
-            </Pressable>
-            <Pressable
-              style={styles.headerMain}
-              onPress={() => {
-                if (!thread.isGroup) return;
-                setMemberNameListModal(true);
-              }}
-            >
-              <Text style={styles.title} numberOfLines={1}>
-                {thread.name}
-              </Text>
-              <Text style={styles.subtitle}>
-                {thread.isGroup
-                  ? tr(`${Math.max(thread.memberCount || 0, members.length)} people active`, `${Math.max(thread.memberCount || 0, members.length)} people active`)
-                  : tr("Direct", "Direct")}
-              </Text>
-            </Pressable>
+          <View style={styles.headerSurface}>
+            <View style={styles.headerRow}>
+              <Pressable testID="chat-back-button" style={styles.backBtn} onPress={() => router.back()}>
+                <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
+              </Pressable>
+              <Pressable
+                style={styles.headerMain}
+                onPress={() => {
+                  if (!thread.isGroup) return;
+                  setMemberNameListModal(true);
+                }}
+              >
+                {thread.avatar ? (
+                  <Image source={{ uri: thread.avatar }} style={styles.threadAvatar} />
+                ) : (
+                  <View style={[styles.threadAvatar, styles.threadAvatarFallback]}>
+                    <Ionicons name={thread.isGroup ? "people" : "person"} size={16} color="rgba(226,232,240,0.86)" />
+                  </View>
+                )}
+                <View style={styles.headerCopy}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {thread.name}
+                  </Text>
+                  <Text style={styles.subtitle}>
+                    {thread.isGroup
+                      ? tr(
+                          `${Math.max(thread.memberCount || 0, members.length)} people active`,
+                          `${Math.max(thread.memberCount || 0, members.length)} people active`
+                        )
+                      : tr("Direct", "Direct")}
+                  </Text>
+                </View>
+              </Pressable>
               <View style={styles.headerActions}>
               {!aiAgentMode ? (
                 <Pressable
@@ -4853,6 +4866,7 @@ export default function DirectChatScreen() {
                   <Ionicons name="ellipsis-horizontal" size={16} color="rgba(226,232,240,0.92)" />
                 </Pressable>
               ) : null}
+              </View>
             </View>
           </View>
 
@@ -6074,7 +6088,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 14,
-    paddingTop: 10,
+    paddingTop: 8,
     gap: 10,
   },
   containerWide: {
@@ -6082,15 +6096,23 @@ const styles = StyleSheet.create({
     maxWidth: 1360,
     alignSelf: "center",
   },
+  headerSurface: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(9,14,25,0.66)",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.16)",
@@ -6099,7 +6121,25 @@ const styles = StyleSheet.create({
   },
   headerMain: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerCopy: {
+    flex: 1,
     gap: 2,
+  },
+  threadAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  threadAvatarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: {
     color: "#f8fafc",
@@ -6113,12 +6153,12 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: "row",
-    gap: 10,
+    gap: 6,
   },
   headerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.16)",
@@ -6149,7 +6189,7 @@ const styles = StyleSheet.create({
   },
   chatBody: {
     flex: 1,
-    marginTop: 4,
+    marginTop: 2,
   },
   chatBodyWide: {
     width: "100%",
